@@ -41,9 +41,12 @@ FROM caddy:2 AS caddybin
 FROM node:22-bookworm-slim AS nodebin
 
 # ---- final: everything under the liquidsoap (Debian) base -------------------
-# v2.4.5 minimum — same reason as Dockerfile.broadcast (2.4.4's O(n) clock scan
-# stalled the stream at every DJ-effect crossfade).
-FROM savonet/liquidsoap:v2.4.5
+# 2.4.5 made clock propagation push-based/O(1), fixing DJ-effect crossfade
+# stalls. This exact full Debian v2.4.x pre-release adds unifier path compression
+# (#5257, fix b6dfae820fbeef6d8b795d125f57e4e7d71e3c4f) and retention hardening
+# (#5342); image source ec1a62352943d5ff21fccf7e7f68f127a1980642.
+# This is not a stable 2.4.6; keep the digest in sync with Dockerfile.broadcast.
+FROM savonet/liquidsoap@sha256:17099b2c9dbe11c0937403c38c88c7da997b2510ca876258c45085a8bb99038b
 
 USER root
 ENV DEBIAN_FRONTEND=noninteractive

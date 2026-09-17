@@ -4,11 +4,12 @@
 # shared passwords, renders icecast.xml, launches both, and exits if either
 # dies so the restart policy bounces them together.
 #
-# v2.4.5 minimum: 2.4.4's per-pull clock scan let the per-transition DJ effect
-# chains (~30 operators) peg a core and stall the stream clock at every
-# crossfade ("Latency is too high" → dead-air source resets). 2.4.5 makes
-# clock propagation push-based/O(1).
-FROM savonet/liquidsoap:v2.4.5
+# 2.4.5 made clock propagation push-based/O(1), fixing stalls from the DJ-effect
+# chains. This exact full Debian v2.4.x pre-release adds unifier path compression
+# (#5257, fix b6dfae820fbeef6d8b795d125f57e4e7d71e3c4f) and retention hardening
+# (#5342); image source ec1a62352943d5ff21fccf7e7f68f127a1980642.
+# Keep the digest pinned: this pre-release is not a stable 2.4.6.
+FROM savonet/liquidsoap@sha256:17099b2c9dbe11c0937403c38c88c7da997b2510ca876258c45085a8bb99038b
 
 USER root
 
