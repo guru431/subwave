@@ -433,6 +433,11 @@ class Queue {
   _writeHandoff = writeHandoff;
   _speak = speak;
   _airVoice = airVoice;
+  _considerIdRotationRecovery = async (track: Track) => {
+    // Dynamic import keeps queue <-> tagger ownership acyclic at module init.
+    const { considerIdRotationRecovery } = await import('./tagger.js');
+    await considerIdRotationRecovery(track);
+  };
 
   startIntroRender(item: QueueItem) {
     const expected = introSpeechIdentity(item);
@@ -3540,6 +3545,14 @@ class Queue {
     const who = item.requestedBy ? ` (requested by ${item.requestedBy})` : '';
     this.log('error',
       `Liquidsoap never resolved "${item.track?.title || 'unknown'} — ${item.track?.artist || 'unknown'}"${who}: it left dj_queue without airing. The music source returned an error instead of audio, or the file is missing/unreadable — check the broadcast log for a "protocol.subhttp" line and the music server's own log. Dropped from the queue.`);
+
+    // Navidrome 0.64 rotated most track IDs. A generic resolution failure is
+    // not enough evidence to mutate the library, so the recovery probes the
+    // stored ID and its deterministic canonical image before it starts the
+    // existing authoritative reconcile walk.
+    void this._considerIdRotationRecovery(item.track)
+      .catch((err: unknown) => this.log('error',
+        `Navidrome ID-rotation check failed: ${err instanceof Error ? err.message : String(err)}`));
 
     // A whole origin being down fails every re-pick the same way, and each one
     // costs an LLM call to queue a track that cannot air. Past the budget the

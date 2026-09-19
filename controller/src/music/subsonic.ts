@@ -153,7 +153,14 @@ async function call(endpoint, params = {}, options: CallOptions = {}) {
     }
     const data = await res.json() as any;
     const sub = data['subsonic-response'];
-    if (sub.status !== 'ok') throw new Error(`Subsonic error: ${sub.error?.message || 'unknown'}`);
+    if (sub.status !== 'ok') {
+      const err = new Error(`Subsonic error: ${sub.error?.message || 'unknown'}`) as Error & {
+        subsonicCode?: number;
+      };
+      const code = Number(sub.error?.code);
+      if (Number.isFinite(code)) err.subsonicCode = code;
+      throw err;
+    }
     const songs = extractSongs(sub);
     subLog.record({
       t: new Date().toISOString(), endpoint, params, ms: Date.now() - started,

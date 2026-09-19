@@ -2,12 +2,15 @@
 import { spawn, ChildProcess } from 'node:child_process';
 import { queue } from './queue.js';
 import * as coverage from '../music/library-coverage.js';
+import * as subsonic from '../music/subsonic.js';
 import { syncAllAfterTag } from '../music/playlist-sync.js';
 import { applyPendingRotation } from '../music/id-rotation.js';
+import { createIdRotationRecovery, type RotationRecoveryResult } from '../music/id-rotation-recovery.js';
+import { runTaggerFollowups, type MaintenanceMode } from './tagger-followups.js';
 import { PROGRESS_PREFIX, EVENT_PREFIX, ROTATION_PREFIX, type TaggerProgress, type TaggerEvent, type TaggerRotation } from '../music/tagger-progress.js';
 import { writePidfile, clearPidfile, readPidfile, isPidAlive, MANAGED_ENV } from '../music/tagger-lock.js';
 
-type TaggerMode = 'tag' | 'analyze' | 'reconcile';
+type TaggerMode = MaintenanceMode;
 
 // Raw console line, or a structured event relayed on the child's EVENT_PREFIX channel.
 type LogEntry = string | TaggerEvent;
@@ -38,6 +41,30 @@ type TaggerState = {
 export const tagger: TaggerState = {
   running: false, startedAt: null, pid: null, lastLog: [], mode: null, progress: null, lastRun: null,
 };
+
+const idRotationRecovery = createIdRotationRecovery({
+  maintenanceRunning: () => tagger.running,
+  getSong: subsonic.getSong,
+  startReconcile: () => {
+    // Re-check at the mutation boundary: detection performed network I/O and a
+    // manual maintenance run may have started while it was awaiting Navidrome.
+    if (tagger.running) return false;
+    startReconcile({ automaticIdRotation: true });
+    return true;
+  },
+  log: (message) => queue.log('scheduler', message),
+});
+
+// Called fire-and-forget from the push-resolution failure path. The recovery
+// owns its single-flight guard and only starts a walk after both halves of the
+// old-id -> canonical-id proof have landed.
+export function considerIdRotationRecovery(track: {
+  id?: string | null;
+  title?: string | null;
+  artist?: string | null;
+}): Promise<RotationRecoveryResult> {
+  return idRotationRecovery.inspect(track);
+}
 
 // Buffer is capped at 100 in-process; admin surfaces only get this tail.
 const TAGGER_LOG_TAIL = 30;
@@ -175,11 +202,21 @@ export function startAnalyzer(opts: { limit?: number; audio?: boolean; vocal?: b
 // Walk Navidrome and prune library rows it no longer contains. No embeddings, no
 // LLM. The walk stamps era verdicts (#1418) and chains the incremental MusicBrainz
 // original-year backfill. Same single-flight slot; caller rejects when running.
-export function startReconcile() {
-  spawnChild('reconcile', ['src/music/tag-library.ts', '--reconcile-only'], '');
+export function startReconcile(opts: { automaticIdRotation?: boolean } = {}) {
+  spawnChild(
+    'reconcile',
+    ['src/music/tag-library.ts', '--reconcile-only'],
+    opts.automaticIdRotation ? 'automatic Navidrome ID-rotation recovery' : '',
+    { automaticIdRotation: opts.automaticIdRotation === true },
+  );
 }
 
-function spawnChild(mode: TaggerMode, args: string[], detail: string) {
+function spawnChild(
+  mode: TaggerMode,
+  args: string[],
+  detail: string,
+  opts: { automaticIdRotation?: boolean } = {},
+) {
   const label = mode === 'tag' ? 'tagger' : mode === 'analyze' ? 'analyzer' : 'reconcile';
   // detached:true makes the child a process-GROUP leader so stopTagger can signal the
   // whole tree (npx → npm → sh → node tsx); child.pid alone is just the npx wrapper and
@@ -255,6 +292,7 @@ function spawnChild(mode: TaggerMode, args: string[], detail: string) {
   // after a successful spawn, where 'exit' owns the bookkeeping — hence the guard.
   child.on('error', (err) => {
     if (activeChild !== child) return;
+    if (opts.automaticIdRotation) idRotationRecovery.automaticReconcileFailed();
     tagger.running = false;
     activeChild = null;
     clearPidfile();
@@ -277,6 +315,7 @@ function spawnChild(mode: TaggerMode, args: string[], detail: string) {
     tagger.lastLog.push(`[exit ${signal || code}]`);
     // Signal (incl. Stop / restart-kill) → 'stopped'; exit 0 → 'ok'; else 'failed'.
     const outcome: TaggerLastRun['outcome'] = signal ? 'stopped' : code === 0 ? 'ok' : 'failed';
+    if (opts.automaticIdRotation && outcome !== 'ok') idRotationRecovery.automaticReconcileFailed();
     tagger.lastRun = {
       mode,
       outcome,
@@ -292,12 +331,22 @@ function spawnChild(mode: TaggerMode, args: string[], detail: string) {
     // Apply even after Stop/failure: adoption may already have committed.
     // Recipes must be migrated before sync can classify a playlist as missing.
     applyRotationNow()
-      .then((settled) => {
+      .then(async (settled) => {
         if (!settled) {
           queue.log('error', 'playlist sync skipped — id-rotation state migration is still pending');
           return;
         }
-        if (outcome === 'ok') return syncAllAfterTag();
+        await runTaggerFollowups({
+          mode,
+          outcome,
+          rotationSettled: settled,
+          syncPlaylists: syncAllAfterTag,
+          refreshAutoPlaylist: async () => {
+            const { refreshAutoPlaylist } = await import('./scheduler.js');
+            await refreshAutoPlaylist();
+          },
+          logError: (message) => queue.log('error', message),
+        });
       })
       .catch(() => { /* sync errors never touch the tagger's own path */ });
     queue.log('scheduler', `${label} finished (${signal ? `signal ${signal}` : `exit ${code}`})`);
