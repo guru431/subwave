@@ -174,6 +174,8 @@ export interface QueueItem {
   // is pre-rendered) and it cues in past the head the clip already played.
   stemBlend?: { clipPath: string; blendStartSec: number; inCueSec: number } | null;
   stemSeam?: boolean;
+  // Outgoing music already committed an early ending into this clip/track.
+  lengthPolicyCommitted?: boolean;
   stemCueInSec?: number;
 }
 

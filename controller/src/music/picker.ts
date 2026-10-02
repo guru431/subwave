@@ -12,6 +12,7 @@ import { shuffle } from '../util/shuffle.js';
 import { mapPool } from '../util/async-pool.js';
 import { artistRootKey, filterPickerCandidates, recencyWindowsForLibrary, trackKey } from './recency.js';
 import { albumKeyFor } from './album-facts.js';
+import { applyKnownTrackCeiling } from './track-duration.js';
 import { applyTrackFloor } from './track-floor.js';
 import { AIRING_RANK_WEIGHT, freshness, freshnessBiasedOrder, lastAiredMsOf, unairedFlag, type AiredIndex } from './airing.js';
 import { normGenre, genreMatches, genreResolutionWarningOnce, preferGenre, preferEra, inYearRange, preferEnergy, preferEnergyStrict, preferMood, preferVocals, applyStrictLocks, hasEraBound, eraSpan, type YearRange, type VocalMode } from './show-filter.js';
@@ -220,8 +221,9 @@ async function tracksFromAlbums(albums: { id: string }[], perAlbum: number, max:
   return out;
 }
 
-async function buildCandidates(mood: string | null | undefined, recentIds: Set<string>, recentKeys: Set<string>, recentArtists: Set<string>, recentAlbums: Set<string>, currentTrack: Candidate | null, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, showFilter: ShowFilter = null, hardRecentIds: Set<string> = new Set(), hardRecentKeys: Set<string> = new Set(), playlistPool: PlaylistPool | null = null, playlistStrict = false, blockedArtists: Set<string> = new Set(), strictGenreResolution: StrictGenreResolution = { genres: [], warnings: [] }, minTrackSec: number | null = null, exhaustiveRotation = false) {
+async function buildCandidates(mood: string | null | undefined, recentIds: Set<string>, recentKeys: Set<string>, recentArtists: Set<string>, recentAlbums: Set<string>, currentTrack: Candidate | null, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, showFilter: ShowFilter = null, hardRecentIds: Set<string> = new Set(), hardRecentKeys: Set<string> = new Set(), playlistPool: PlaylistPool | null = null, playlistStrict = false, blockedArtists: Set<string> = new Set(), strictGenreResolution: StrictGenreResolution = { genres: [], warnings: [] }, lengthLimits: { minTrackSec: number | null; maxTrackSec: number | null } = { minTrackSec: null, maxTrackSec: null }, exhaustiveRotation = false) {
   await library.load();
+  const { minTrackSec, maxTrackSec } = lengthLimits;
   // knnExclude pushes the recency union INTO the KNN queries so an aired
   // cluster answers with the next neighbours out, not with fewer rows.
   const aired = library.lastAiredInfo();
@@ -231,6 +233,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
   const sources: Record<string, number> = {};
   const add = (label: string, items: Candidate[]) => {
     if (!items?.length) return;
+    items = applyKnownTrackCeiling(items, maxTrackSec);
     pool.push(...items.map((t) => ({ ...t, _source: label })));
     sources[label] = (sources[label] || 0) + items.length;
   };
@@ -359,13 +362,13 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
       // Tighten the envelope to the exact union, never-starve.
       const exact = hasEraBound(showFilter!.eras) ? inYearRange(collected, showFilter!.eras) : collected;
       const leaned = lean(preferEnergy(exact.length ? exact : collected, showFilter!.energies));
-      add('show-genre', sampleShowSource(shuffle(leaned), recentIds, strict ? CAP_SHOW_GENRE_STRICT : CAP_SHOW_GENRE));
+      add('show-genre', sampleShowSource(shuffle(applyKnownTrackCeiling(leaned, maxTrackSec)), recentIds, strict ? CAP_SHOW_GENRE_STRICT : CAP_SHOW_GENRE));
     } catch {}
   }
 
   // 1f. Show-anchored Navidrome playlist(s); in strict mode the whole universe.
   if (hasPlaylist) {
-    add('show-playlist', sampleShowSource(shuffle(playlistPool!.tracks), recentIds, strictPlaylist ? CAP_SHOW_PLAYLIST_STRICT : CAP_SHOW_PLAYLIST, exhaustiveRotation ? { ids: hardRecentIds, keys: hardRecentKeys } : null));
+    add('show-playlist', sampleShowSource(shuffle(applyKnownTrackCeiling(playlistPool!.tracks, maxTrackSec)), recentIds, strictPlaylist ? CAP_SHOW_PLAYLIST_STRICT : CAP_SHOW_PLAYLIST, exhaustiveRotation ? { ids: hardRecentIds, keys: hardRecentKeys } : null));
   }
 
   // 2. Mood-tagged library. A multi-mood show pools ALL its moods equally (#929).
@@ -528,7 +531,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
     || (currentTrack?.id ? analysisFor(currentTrack) : { bpm: null, key: null });
   // Minimum track length (#1573) — a SELECTION filter, unlike the max cap's
   // cue_out cut. never-starve here: the wider scope behind the agent's hard floor.
-  const longEnough = applyTrackFloor(selectionPool, minTrackSec, { starve: false });
+  const longEnough = applyTrackFloor(applyKnownTrackCeiling(selectionPool, maxTrackSec), minTrackSec, { starve: false });
   const final = filterPickerCandidates(softRankByCompat(longEnough, curAnalysis, library.lastAiredInfo()), {
     recentIds,
     recentKeys,
@@ -633,6 +636,7 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
   // Minimum track length (#1573). Must resolve BEFORE the no-repeat guard
   // below, which counts the rotation this floor has already thinned.
   const minTrackSec = settings.effectiveMinTrackSec(activeShow);
+  const maxTrackSec = settings.effectiveTrackLengthLimits(activeShow).selectionMaxSec;
   // Count-based hard no-repeat guard (last N distinct plays), non-relaxable. A
   // resolved strict playlist clamps to its own post-exclusion identity count;
   // soft/unresolved anchors stay library-scoped. Mirrors the agent.
@@ -645,6 +649,7 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
       excludedIds,
       resolvedGenres: strictGenreResolution.genres,
       minTrackSec,
+      maxTrackSec,
     },
   );
   const effN = noRepeat.window;
@@ -659,7 +664,7 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
     const key = artistRootKey({ artist: opts.avoidArtist });
     if (key) blockedArtists.add(key);
   }
-  const { candidates: rawCandidates, sources, strictInfo, playlistInfo } = await buildCandidates(ctx.dominantMood, recentIds, recentKeys, recentArtists, recentAlbums, currentTrack, rankTarget, audioWaypoint, showFilter, hardRecentIds, hardRecentKeys, playlistPool, playlistStrict, blockedArtists, strictGenreResolution, minTrackSec, noRepeat.exhaustive);
+  const { candidates: rawCandidates, sources, strictInfo, playlistInfo } = await buildCandidates(ctx.dominantMood, recentIds, recentKeys, recentArtists, recentAlbums, currentTrack, rankTarget, audioWaypoint, showFilter, hardRecentIds, hardRecentKeys, playlistPool, playlistStrict, blockedArtists, strictGenreResolution, { minTrackSec, maxTrackSec }, noRepeat.exhaustive);
 
   // Excluded playlists: hard drop, no never-starve fallback.
   const candidates = excludedIds

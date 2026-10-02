@@ -242,6 +242,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, pickAn
   // the pickerScope call below because the guard counts the rotation this floor
   // has already thinned; the scope reads the same value further down.
   const minTrackSec = settings.effectiveMinTrackSec(activeShow);
+  const maxTrackSec = settings.effectiveTrackLengthLimits(activeShow).selectionMaxSec;
 
   // Count-based HARD no-repeat guard: the last N distinct plays can't re-air,
   // and (unlike recentIds/recentKeys above) this survives the tool-level
@@ -257,6 +258,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, pickAn
       excludedIds,
       resolvedGenres: genreLock ?? [],
       minTrackSec,
+      maxTrackSec,
     },
   ).window;
   const { ids: hardRecentIds, keys: hardRecentKeys } = queue.recentlyPlayedByCount(effN);
@@ -293,6 +295,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, pickAn
     // resolves the identical figure from the identical show object, so the two
     // paths cannot disagree about how short is too short.
     minTrackSec,
+    maxTrackSec,
     playlistLock,
     playlistTracks,
     excludedIds,
