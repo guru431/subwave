@@ -3,11 +3,16 @@ import { spawn, ChildProcess } from 'node:child_process';
 import { queue } from './queue.js';
 import * as coverage from '../music/library-coverage.js';
 import * as subsonic from '../music/subsonic.js';
+import * as library from '../music/library.js';
+import * as libraryDb from '../music/library-db.js';
+import * as blocklist from '../music/blocklist.js';
+import { clearPoolCache } from '../music/picker.js';
+import { clearPlaylistCache } from '../music/show-playlist.js';
 import { syncAllAfterTag } from '../music/playlist-sync.js';
 import { applyPendingRotation } from '../music/id-rotation.js';
-import { createIdRotationRecovery, type RotationRecoveryResult } from '../music/id-rotation-recovery.js';
-import { runTaggerFollowups, type MaintenanceMode } from './tagger-followups.js';
-import { PROGRESS_PREFIX, EVENT_PREFIX, ROTATION_PREFIX, type TaggerProgress, type TaggerEvent, type TaggerRotation } from '../music/tagger-progress.js';
+import { createIdRotationRecovery, type RotationRecoveryResult, type RotatedIdEvidence } from '../music/id-rotation-recovery.js';
+import { refreshTaggerFallback, runTaggerFollowups, type MaintenanceMode } from './tagger-followups.js';
+import { PROGRESS_PREFIX, EVENT_PREFIX, ROTATION_PREFIX, CATALOGUE_PREFIX, type TaggerProgress, type TaggerEvent, type TaggerRotation } from '../music/tagger-progress.js';
 import { writePidfile, clearPidfile, readPidfile, isPidAlive, MANAGED_ENV } from '../music/tagger-lock.js';
 
 type TaggerMode = MaintenanceMode;
@@ -45,11 +50,11 @@ export const tagger: TaggerState = {
 const idRotationRecovery = createIdRotationRecovery({
   maintenanceRunning: () => tagger.running,
   getSong: subsonic.getSong,
-  startReconcile: () => {
+  startReconcile: (evidence) => {
     // Re-check at the mutation boundary: detection performed network I/O and a
     // manual maintenance run may have started while it was awaiting Navidrome.
     if (tagger.running) return false;
-    startReconcile({ automaticIdRotation: true });
+    startReconcile({ automaticIdRotation: evidence });
     return true;
   },
   log: (message) => queue.log('scheduler', message),
@@ -202,12 +207,12 @@ export function startAnalyzer(opts: { limit?: number; audio?: boolean; vocal?: b
 // Walk Navidrome and prune library rows it no longer contains. No embeddings, no
 // LLM. The walk stamps era verdicts (#1418) and chains the incremental MusicBrainz
 // original-year backfill. Same single-flight slot; caller rejects when running.
-export function startReconcile(opts: { automaticIdRotation?: boolean } = {}) {
+export function startReconcile(opts: { automaticIdRotation?: RotatedIdEvidence } = {}) {
   spawnChild(
     'reconcile',
     ['src/music/tag-library.ts', '--reconcile-only'],
     opts.automaticIdRotation ? 'automatic Navidrome ID-rotation recovery' : '',
-    { automaticIdRotation: opts.automaticIdRotation === true },
+    opts,
   );
 }
 
@@ -215,7 +220,7 @@ function spawnChild(
   mode: TaggerMode,
   args: string[],
   detail: string,
-  opts: { automaticIdRotation?: boolean } = {},
+  opts: { automaticIdRotation?: RotatedIdEvidence } = {},
 ) {
   const label = mode === 'tag' ? 'tagger' : mode === 'analyze' ? 'analyzer' : 'reconcile';
   // detached:true makes the child a process-GROUP leader so stopTagger can signal the
@@ -235,6 +240,24 @@ function spawnChild(
   tagger.lastLog = [];
   tagger.mode = mode;
   tagger.progress = null;
+
+  let catalogueReady = false;
+  let earlyRefresh: Promise<boolean> | null = null;
+  const invalidatePools = async () => {
+    clearPoolCache();
+    clearPlaylistCache();
+    // Playlist rules have their own pre-resolved member sets, also containing
+    // song IDs. Refresh them before the fallback's absolute blocklist checks.
+    await blocklist.refreshPlaylistMembers();
+  };
+  const refreshAutoPlaylist = async () => {
+    const scheduler = await import('./scheduler.js');
+    await scheduler.refreshAutoPlaylist();
+  };
+  const logError = (message: string) => queue.log('error', message);
+  const refreshAfterCatalogue = async (): Promise<boolean> => refreshTaggerFallback({
+    rotationSettled: await applyRotationNow(), invalidatePools, refreshAutoPlaylist, logError,
+  });
 
   // A never-counted library nulls every panel percentage for the whole run. Guarded
   // on hasCount() so it fires at most once per install, not on every run.
@@ -267,6 +290,21 @@ function spawnChild(
             queue.log('scheduler', `id-rotation: adopted ${rot.adopted} rotated Navidrome id(s) — migrating state files`);
             void applyRotationNow();
           } catch { /* malformed sentinel — drop; the exit handler retries */ }
+          continue;
+        }
+        if (line.startsWith(CATALOGUE_PREFIX)) {
+          try {
+            const { walked } = JSON.parse(line.slice(CATALOGUE_PREFIX.length));
+            if (Number.isSafeInteger(walked) && walked > 0 && !catalogueReady) {
+              catalogueReady = true;
+              // The child may now spend hours enriching. Repair the air path
+              // as soon as its complete walk and durable migration allow it.
+              earlyRefresh = refreshAfterCatalogue().catch((err: unknown) => {
+                logError(`catalogue fallback recovery failed: ${err instanceof Error ? err.message : String(err)}`);
+                return false;
+              });
+            }
+          } catch { /* malformed sentinel — exit retries */ }
           continue;
         }
         if (line.startsWith(EVENT_PREFIX)) {
@@ -330,25 +368,41 @@ function spawnChild(
     coverage.refresh().catch(() => {});
     // Apply even after Stop/failure: adoption may already have committed.
     // Recipes must be migrated before sync can classify a playlist as missing.
-    applyRotationNow()
-      .then(async (settled) => {
+    // Await an early build before the exit fallback; otherwise an older build
+    // could finish after the newer one and overwrite it with a stale snapshot.
+    Promise.resolve(earlyRefresh)
+      .then(async (fallbackRefreshed) => {
+        const settled = await applyRotationNow();
         if (!settled) {
           queue.log('error', 'playlist sync skipped — id-rotation state migration is still pending');
+          if (opts.automaticIdRotation && outcome === 'ok') idRotationRecovery.automaticReconcileFailed();
           return;
         }
-        await runTaggerFollowups({
+        const fallbackRestored = await runTaggerFollowups({
           mode,
           outcome,
           rotationSettled: settled,
+          // A full tag run changes moods after its early rebuild, so it still
+          // needs the normal final rebuild. Reconcile adds no later pool data.
+          fallbackRefreshed: mode === 'reconcile' && fallbackRefreshed === true,
           syncPlaylists: syncAllAfterTag,
-          refreshAutoPlaylist: async () => {
-            const { refreshAutoPlaylist } = await import('./scheduler.js');
-            await refreshAutoPlaylist();
-          },
-          logError: (message) => queue.log('error', message),
+          invalidatePools,
+          refreshAutoPlaylist,
+          logError,
         });
+        if (opts.automaticIdRotation && outcome === 'ok') {
+          await library.load();
+          const { storedId, canonicalId } = opts.automaticIdRotation;
+          // Exit zero can mean a transient empty/no-op walk. Suppress future
+          // probes only when this run actually repaired the confirmed track.
+          if (!catalogueReady || !fallbackRestored || libraryDb.getTrack(storedId) || !libraryDb.getTrack(canonicalId)) {
+            idRotationRecovery.automaticReconcileFailed();
+          }
+        }
       })
-      .catch(() => { /* sync errors never touch the tagger's own path */ });
+      .catch(() => {
+        if (opts.automaticIdRotation && outcome === 'ok') idRotationRecovery.automaticReconcileFailed();
+      });
     queue.log('scheduler', `${label} finished (${signal ? `signal ${signal}` : `exit ${code}`})`);
   });
   queue.log('scheduler', `${label} started${detail ? ` (${detail})` : ''}`);

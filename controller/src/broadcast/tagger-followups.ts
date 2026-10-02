@@ -10,26 +10,42 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+export async function refreshTaggerFallback(opts: {
+  rotationSettled: boolean;
+  invalidatePools: () => Promise<void> | void;
+  refreshAutoPlaylist: () => Promise<unknown>;
+  logError: (message: string) => void;
+}): Promise<boolean> {
+  if (!opts.rotationSettled) return false;
+  try {
+    await opts.invalidatePools();
+    await opts.refreshAutoPlaylist();
+    return true;
+  } catch (err: unknown) {
+    opts.logError(`post-maintenance auto-playlist refresh failed: ${errorMessage(err)}`);
+    return false;
+  }
+}
+
 export async function runTaggerFollowups(opts: {
   mode: MaintenanceMode;
   outcome: MaintenanceOutcome;
   rotationSettled: boolean;
+  fallbackRefreshed?: boolean;
+  invalidatePools: () => Promise<void> | void;
   syncPlaylists: () => Promise<void>;
   refreshAutoPlaylist: () => Promise<unknown>;
   logError: (message: string) => void;
-}): Promise<void> {
-  if (!opts.rotationSettled || opts.outcome !== 'ok') return;
+}): Promise<boolean> {
+  if (!opts.rotationSettled || opts.outcome !== 'ok') return false;
 
   // The normal admin analyzer does not walk an already-populated catalogue, so
   // it cannot discover or adopt rotated IDs. Tag and reconcile both do. Rebuild
   // the on-air fallback before recipe maintenance: a large recipe set must not
   // prolong starvation after the catalogue itself is already repaired.
-  if (opts.mode !== 'analyze') {
-    try {
-      await opts.refreshAutoPlaylist();
-    } catch (err: unknown) {
-      opts.logError(`post-${opts.mode} auto-playlist refresh failed: ${errorMessage(err)}`);
-    }
+  let fallbackRefreshed = opts.fallbackRefreshed === true;
+  if (opts.mode !== 'analyze' && !fallbackRefreshed) {
+    fallbackRefreshed = await refreshTaggerFallback(opts);
   }
 
   try {
@@ -37,4 +53,5 @@ export async function runTaggerFollowups(opts: {
   } catch (err: unknown) {
     opts.logError(`post-maintenance playlist sync failed: ${errorMessage(err)}`);
   }
+  return fallbackRefreshed;
 }

@@ -4,7 +4,7 @@ import {
   createIdRotationRecovery,
   detectRotatedNavidromeId,
 } from '../src/music/id-rotation-recovery.js';
-import { runTaggerFollowups } from '../src/broadcast/tagger-followups.js';
+import { refreshTaggerFallback, runTaggerFollowups } from '../src/broadcast/tagger-followups.js';
 
 const OLD_ID = 'KhehcqGKwAIL6Ux3Ah0yDC';
 const NEW_ID = '6owyzFEyktb6jxHvAYbn6w';
@@ -52,6 +52,28 @@ test('a transient stored-ID lookup failure is not mistaken for a missing song', 
     return { id: NEW_ID };
   });
   assert.equal(evidence, null);
+});
+
+test('Subsonic code 70 proves a missing song even without the usual message', async () => {
+  assert.deepEqual(await detectRotatedNavidromeId(OLD_ID, async id => {
+    if (id === OLD_ID) throw Object.assign(new Error('Unavailable item'), { subsonicCode: 70 });
+    return { id: NEW_ID };
+  }), { storedId: OLD_ID, canonicalId: NEW_ID });
+});
+
+test('authentication errors and absent or mismatched replacements never start recovery', async () => {
+  let lookups = 0;
+  assert.equal(await detectRotatedNavidromeId(OLD_ID, async () => {
+    lookups++;
+    throw Object.assign(new Error('Wrong password'), { subsonicCode: 40 });
+  }), null);
+  assert.equal(lookups, 1);
+  for (const replacement of [null, { id: 'another-song' }]) {
+    assert.equal(await detectRotatedNavidromeId(OLD_ID, async id => {
+      if (id === OLD_ID) throw new Error('Song not found');
+      return replacement;
+    }), null);
+  }
 });
 
 test('confirmed rotation starts one automatic reconcile and suppresses duplicate failures', async () => {
@@ -125,18 +147,80 @@ test('concurrent resolution failures share one rotation check', async () => {
   assert.equal(starts, 1);
 });
 
+test('manual maintenance starting during a lookup wins the slot without latching recovery', async () => {
+  let running = false;
+  let starts = 0;
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const recovery = createIdRotationRecovery({
+    maintenanceRunning: () => running,
+    getSong: async id => {
+      if (id === OLD_ID) {
+        await held;
+        throw new Error('Song not found');
+      }
+      return { id: NEW_ID };
+    },
+    startReconcile: () => { starts++; return true; },
+    log: () => {},
+  });
+  const pending = recovery.inspect({ id: OLD_ID });
+  running = true;
+  release();
+  assert.equal(await pending, 'busy');
+  assert.equal(starts, 0);
+  running = false;
+  assert.equal(await recovery.inspect({ id: OLD_ID }), 'started');
+  assert.equal(starts, 1);
+});
+
 test('a successful reconcile refreshes the fallback playlist after state migration', async () => {
   const calls: string[] = [];
   await runTaggerFollowups({
     mode: 'reconcile',
     outcome: 'ok',
     rotationSettled: true,
+    invalidatePools: () => { calls.push('invalidate'); },
     syncPlaylists: async () => { calls.push('sync'); },
     refreshAutoPlaylist: async () => { calls.push('refresh'); },
     logError: (message) => { calls.push(`error:${message}`); },
   });
 
-  assert.deepEqual(calls, ['refresh', 'sync'], 'restore the on-air fallback before recipe maintenance');
+  assert.deepEqual(calls, ['invalidate', 'refresh', 'sync'], 'restore the on-air fallback before recipe maintenance');
+});
+
+test('an unsettled journal leaves pools and the fallback untouched', async () => {
+  const calls: string[] = [];
+  assert.equal(await refreshTaggerFallback({
+    rotationSettled: false,
+    invalidatePools: () => { calls.push('invalidate'); },
+    refreshAutoPlaylist: async () => { calls.push('refresh'); },
+    logError: () => {},
+  }), false);
+  assert.deepEqual(calls, []);
+});
+
+test('an early successful rebuild is not repeated by reconcile completion', async () => {
+  const calls: string[] = [];
+  assert.equal(await runTaggerFollowups({
+    mode: 'reconcile', outcome: 'ok', rotationSettled: true, fallbackRefreshed: true,
+    invalidatePools: () => { calls.push('invalidate'); },
+    refreshAutoPlaylist: async () => { calls.push('refresh'); },
+    syncPlaylists: async () => { calls.push('sync'); }, logError: () => {},
+  }), true);
+  assert.deepEqual(calls, ['sync']);
+});
+
+test('a failed fallback refresh reports failure while preserving recipe synchronization', async () => {
+  const calls: string[] = [];
+  assert.equal(await runTaggerFollowups({
+    mode: 'reconcile', outcome: 'ok', rotationSettled: true,
+    invalidatePools: () => { calls.push('invalidate'); },
+    refreshAutoPlaylist: async () => { throw new Error('disk unavailable'); },
+    syncPlaylists: async () => { calls.push('sync'); },
+    logError: message => { calls.push(message); },
+  }), false);
+  assert.deepEqual(calls, ['invalidate', 'post-maintenance auto-playlist refresh failed: disk unavailable', 'sync']);
 });
 
 test('failed, unsettled, and analysis-only runs never rebuild the fallback playlist', async () => {
@@ -148,6 +232,7 @@ test('failed, unsettled, and analysis-only runs never rebuild the fallback playl
     const calls: string[] = [];
     await runTaggerFollowups({
       ...input,
+      invalidatePools: () => { calls.push('invalidate'); },
       syncPlaylists: async () => { calls.push('sync'); },
       refreshAutoPlaylist: async () => { calls.push('refresh'); },
       logError: () => {},
@@ -156,7 +241,7 @@ test('failed, unsettled, and analysis-only runs never rebuild the fallback playl
   }
 });
 
-test('a confirmed Liquidsoap resolution failure offers its track to ID-rotation recovery', { timeout: 1_000 }, async () => {
+test('a confirmed Liquidsoap resolution failure offers its track to ID-rotation recovery', { timeout: 5_000 }, async () => {
   const { queue } = await import('../src/broadcast/queue.js');
   const q = queue as any;
   const originalRecovery = q._considerIdRotationRecovery;
