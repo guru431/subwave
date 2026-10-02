@@ -1,15 +1,22 @@
 """Focused checks for the shared admin TanStack Query client.
 
 Runs only against the isolated controller and web servers documented in
-.claude/skills/verify/SKILL.md.  It intentionally refuses any other ports.
+.claude/skills/verify/SKILL.md.  It intentionally refuses any other upstream ports.
+Set SUBWAVE_VERIFY_BROWSER=firefox or webkit to exercise another installed engine;
+Chromium is the default. The same-origin check uses a disposable loopback proxy.
 """
 import base64
 import copy
+import http.client
+import http.server
 import json
 import os
+import select
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import traceback
 import urllib.error
 import urllib.parse
@@ -125,13 +132,14 @@ def stub_browse_when_needed(page):
     )
 
 
-def new_page(playwright):
-    browser = playwright.chromium.launch()
+def new_page(playwright, signed_out=False):
+    browser = getattr(playwright, os.environ.get("SUBWAVE_VERIFY_BROWSER", "chromium")).launch()
     context = browser.new_context(
         viewport={"width": 1440, "height": 900},
         reduced_motion="reduce",
     )
     context.add_init_script(
+        "localStorage.removeItem('subwave_admin_auth')" if signed_out else
         f"localStorage.setItem('subwave_admin_auth', '{AUTH}')",
     )
     page = context.new_page()
@@ -661,6 +669,283 @@ def discovery_stale_response_isolated(page):
     assert not page.get_by_text("Old voice", exact=True).is_visible()
 
 
+def record_admin_credentials(page):
+    # Record options at the network boundary while delegating to native Fetch.
+    page.add_init_script("""
+      (() => {
+        const nativeFetch = window.fetch.bind(window);
+        window.__adminCredentialRequests = [];
+        window.fetch = (input, init = {}) => {
+          const authorization = new Headers(init.headers).get('authorization');
+          if (authorization) window.__adminCredentialRequests.push({
+            url: String(input), credentials: init.credentials || 'same-origin', authorization,
+          });
+          return nativeFetch(input, init);
+        };
+      })();
+    """)
+
+
+def submit_admin_sign_in(page, password="test"):
+    page.get_by_label("Username").fill("test")
+    page.get_by_label("Password").fill(password)
+    page.get_by_role("button", name="sign in", exact=True).click()
+
+
+def assert_explicit_credentials_only(page):
+    requests = page.evaluate("window.__adminCredentialRequests")
+    assert requests, "no explicit admin requests recorded"
+    assert all(request["credentials"] == "omit" for request in requests), requests
+
+
+@check
+def admin_fetch_enforces_omit_and_forwards_init(page):
+    """Exercise the public hook with real React and a recording Fetch boundary."""
+    script = r"""
+      const assert = require('node:assert/strict');
+      const fs = require('node:fs');
+      const Module = require('node:module');
+      const path = require('node:path');
+      const filename = path.resolve('web/lib/adminAuth.ts');
+      const localRequire = Module.createRequire(filename);
+      const ts = localRequire('typescript');
+      const React = localRequire('react');
+      const { renderToString } = localRequire('react-dom/server');
+      const compiled = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+      }).outputText;
+      const authModule = new Module(filename);
+      authModule.filename = filename;
+      authModule.paths = Module._nodeModulePaths(path.dirname(filename));
+      authModule._compile(compiled, filename);
+      global.localStorage = { getItem: () => 'dGVzdDp0ZXN0' };
+      global.window = {};
+      let auth;
+      function Probe() { auth = authModule.exports.useAdminAuth(); return null; }
+      renderToString(React.createElement(Probe));
+      (async () => {
+        for (const credentials of ['include', 'same-origin']) {
+          const controller = new AbortController();
+          let request;
+          const response = new Response('{}', { status: 200 });
+          global.fetch = async (url, init) => { request = { url, init }; return response; };
+          const result = await auth.adminFetch('/verify', {
+            credentials, method: 'POST', body: 'verify-body',
+            headers: { 'X-Verify': 'forwarded' }, signal: controller.signal,
+          });
+          assert.equal(result, response);
+          assert.equal(request.init.credentials, 'omit');
+          assert.equal(request.init.headers.Authorization, 'Basic dGVzdDp0ZXN0');
+          assert.equal(request.init.headers['X-Verify'], 'forwarded');
+          assert.equal(request.init.method, 'POST');
+          assert.equal(request.init.body, 'verify-body');
+          assert.equal(request.init.signal, controller.signal);
+          controller.abort();
+          const failure = new DOMException('aborted', 'AbortError');
+          global.fetch = async (url, init) => {
+            assert.equal(init.credentials, 'omit');
+            assert.equal(init.signal.aborted, true);
+            throw failure;
+          };
+          await assert.rejects(auth.adminFetch('/verify', { signal: controller.signal }),
+                               error => error === failure);
+        }
+      })().catch(error => { console.error(error); process.exitCode = 1; });
+    """
+    result = subprocess.run(["node", "-e", script], cwd=os.path.join(os.path.dirname(__file__), "../.."),
+                            text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@check
+def challenged_sign_in_retries_with_explicit_credentials(page):
+    """A Basic challenge stays inline, does not cache rejection, and permits retry."""
+    record_admin_credentials(page)
+    stub_dashboard(page)
+    attempts = []
+
+    def settings_route(route):
+        authorization = route.request.headers.get("authorization")
+        attempts.append(authorization)
+        if authorization != f"Basic {AUTH}":
+            route.fulfill(status=401, content_type="application/json", body='{}',
+                          headers={"WWW-Authenticate": 'Basic realm="SUB/WAVE admin"'})
+        else:
+            fulfill_json(route, SETTINGS_FIXTURE)
+
+    page.route("**/settings", settings_route)
+    page.goto(f"{WEB}/admin/dash", wait_until="domcontentloaded")
+    page.get_by_text("Admin sign-in", exact=True).wait_for()
+    submit_admin_sign_in(page, "wrong")
+    page.get_by_text("wrong username or password", exact=True).wait_for()
+    assert page.evaluate("localStorage.getItem('subwave_admin_auth')") is None
+    assert page.get_by_role("button", name="sign in", exact=True).is_enabled()
+    assert_explicit_credentials_only(page)
+    submit_admin_sign_in(page)
+    page.get_by_text("Admin sign-in", exact=True).wait_for(state="hidden")
+    assert page.evaluate("localStorage.getItem('subwave_admin_auth')") == AUTH
+    assert attempts[:2] == ["Basic dGVzdDp3cm9uZw==", f"Basic {AUTH}"], attempts
+    assert_explicit_credentials_only(page)
+
+
+@check
+def sign_in_network_and_controller_errors_stay_inline(page):
+    """Network rejection and non-401 errors never publish a signed-in session."""
+    record_admin_credentials(page)
+    outcomes = iter(["network", 429, 503])
+
+    def settings_route(route):
+        status = next(outcomes)
+        if status == "network":
+            route.abort("failed")
+        else:
+            fulfill_json(route, {"error": "unavailable"}, status=status)
+
+    page.route("**/settings", settings_route)
+    page.goto(f"{WEB}/admin/dash", wait_until="domcontentloaded")
+    for error in ["could not reach the controller", "controller error (429)", "controller error (503)"]:
+        submit_admin_sign_in(page)
+        page.get_by_text(error, exact=True).wait_for()
+        assert page.evaluate("localStorage.getItem('subwave_admin_auth')") is None
+        assert page.get_by_role("button", name="sign in", exact=True).is_enabled()
+    assert_explicit_credentials_only(page)
+
+
+@check
+def same_origin_basic_challenges_stay_in_app(page):
+    """Real socket proxy: forwarded, stripped, proxy-rejected and expired Basic."""
+    mode = {"value": "forward"}
+    requests = []
+
+    class Proxy(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            # Next dev waits for HMR before hydration; tunnel its WebSocket too.
+            if self.headers.get("Upgrade", "").lower() == "websocket":
+                with socket.create_connection(("localhost", 7793), timeout=30) as upstream:
+                    header_lines = [f"GET {self.path} HTTP/1.1"]
+                    header_lines.extend(f"{key}: {value}" for key, value in self.headers.items())
+                    upstream.sendall(("\r\n".join(header_lines) + "\r\n\r\n").encode())
+                    while True:
+                        readable, _, _ = select.select([self.connection, upstream], [], [], 30)
+                        if not readable:
+                            return
+                        for source in readable:
+                            data = source.recv(65536)
+                            if not data:
+                                return
+                            (upstream if source is self.connection else self.connection).sendall(data)
+                return
+            is_api = self.path.startswith("/api/")
+            headers = dict(self.headers)
+            headers.pop("Host", None)
+            headers["Accept-Encoding"] = "identity"
+            if is_api:
+                requests.append({"path": self.path, "authorization": self.headers.get("Authorization"),
+                                 "cookie": self.headers.get("Cookie")})
+                if mode["value"] == "challenge" or (mode["value"] == "expired" and self.path == "/api/debug"):
+                    body = b'{"error":"proxy rejected"}'
+                    self.send_response(401)
+                    self.send_header("WWW-Authenticate", 'Basic realm="verify proxy"')
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                if mode["value"] == "strip":
+                    headers.pop("Authorization", None)
+            upstream = http.client.HTTPConnection("localhost", 7791 if is_api else 7793, timeout=30)
+            try:
+                upstream.request("GET", self.path[4:] if is_api else self.path, headers=headers)
+                response = upstream.getresponse()
+                body = response.read()
+                self.send_response(response.status)
+                for key, value in response.getheaders():
+                    if key.lower() not in {"transfer-encoding", "connection", "content-length"}:
+                        self.send_header(key, value)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                try:
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass  # Navigation can abort an in-flight query.
+            finally:
+                upstream.close()
+
+    proxy = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Proxy)
+    thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+    thread.start()
+    origin = f"http://localhost:{proxy.server_port}"
+    responses = []
+    page_errors = []
+    page.on("pageerror", lambda error: page_errors.append(str(error)))
+    page.on("response", lambda response: responses.append({
+        "url": response.url, "status": response.status,
+        "challenge": response.headers.get("www-authenticate"),
+    }) if response.url.startswith(origin + "/api/") else None)
+    # Route the verify stack's configured API through the same-origin /api proxy.
+    # This delegates to native Fetch, never route.fulfill, for real 401 behavior.
+    page.add_init_script("""
+      (() => {
+        localStorage.removeItem('subwave_admin_auth');
+        const nativeFetch = window.fetch.bind(window);
+        window.__adminCredentialRequests = [];
+        window.fetch = (input, init = {}) => {
+          if (typeof input === 'string' && input.startsWith('http://localhost:7791/')) {
+            input = location.origin + '/api/' + input.slice('http://localhost:7791/'.length);
+          }
+          const authorization = new Headers(init.headers).get('authorization');
+          if (authorization) window.__adminCredentialRequests.push({
+            url: String(input), credentials: init.credentials || 'same-origin', authorization,
+          });
+          return nativeFetch(input, init);
+        };
+      })();
+    """)
+    page.context.add_cookies([{"name": "verify-proxy-cookie", "value": "must-not-send", "url": origin}])
+    try:
+        page.goto(f"{origin}/admin/dash", wait_until="domcontentloaded")
+        page.get_by_text("Admin sign-in", exact=True).wait_for()
+        for current_mode, password in [("forward", "wrong"), ("strip", "test"), ("challenge", "test")]:
+            mode["value"] = current_mode
+            submit_admin_sign_in(page, password)
+            page.get_by_text("wrong username or password", exact=True).wait_for(timeout=10000)
+            assert page.evaluate("localStorage.getItem('subwave_admin_auth')") is None
+            assert_explicit_credentials_only(page)
+        mode["value"] = "forward"
+        submit_admin_sign_in(page)
+        page.get_by_text("Admin sign-in", exact=True).wait_for(state="hidden", timeout=10000)
+        assert page.evaluate("localStorage.getItem('subwave_admin_auth')") == AUTH
+        page.wait_for_function("typeof window.__subwaveAdminQueryCacheSnapshot === 'function'")
+        mode["value"] = "expired"
+        page.get_by_role("link", name="Debug", exact=True).click()
+        page.get_by_text("Admin sign-in", exact=True).wait_for(timeout=10000)
+        assert page.evaluate("localStorage.getItem('subwave_admin_auth')") is None
+        assert page.evaluate("typeof window.__subwaveAdminQueryCacheSnapshot") == "undefined"
+        assert_explicit_credentials_only(page)
+        assert all(request["cookie"] is None for request in requests if request["authorization"]), requests
+        settings = [request for request in requests if request["path"] == "/api/settings"]
+        assert [request["authorization"] for request in settings[:4]] == [
+            "Basic dGVzdDp3cm9uZw==", f"Basic {AUTH}", f"Basic {AUTH}", f"Basic {AUTH}",
+        ], settings
+        settings_responses = [response for response in responses if response["url"] == origin + "/api/settings"]
+        assert [response["status"] for response in settings_responses[:4]] == [401, 401, 401, 200], settings_responses
+        assert [response["challenge"] for response in settings_responses[:3]] == [
+            'Basic realm="SUB/WAVE admin"', 'Basic realm="SUB/WAVE admin"', 'Basic realm="verify proxy"',
+        ], settings_responses
+        assert any(response["status"] == 401 and response["url"] == origin + "/api/debug"
+                   for response in responses), responses
+        assert not page_errors, page_errors
+        assert all(request["url"].startswith(origin + "/api/")
+                   for request in page.evaluate("window.__adminCredentialRequests"))
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        thread.join()
+
+
 @check
 def cache_survives_admin_navigation(page):
     stub_browse_when_needed(page)
@@ -709,6 +994,7 @@ def unauthorised_shell_signs_out(page):
 def page_query_401_tears_down_shell_cache(page):
     """A page-owned query signs out the shell and destroys its shared cache."""
     page.set_default_timeout(5000)
+    record_admin_credentials(page)
     stub_dashboard(page)
     station = {
         "multiStation": False,
@@ -741,7 +1027,8 @@ def page_query_401_tears_down_shell_cache(page):
         if path == "":
             root_hits += 1
             if root_hits == 2:
-                fulfill_json(route, {"error": "expired"}, status=401)
+                route.fulfill(status=401, content_type="application/json", body='{"error":"expired"}',
+                              headers={"WWW-Authenticate": 'Basic realm="SUB/WAVE admin"'})
                 return
         fulfill_json(route, {
             "root": "/verify/state",
@@ -768,6 +1055,7 @@ def page_query_401_tears_down_shell_cache(page):
     page.get_by_text("Admin sign-in", exact=True).wait_for(state="visible")
     page.wait_for_timeout(500)
     assert root_hits == 2, root_hits
+    assert_explicit_credentials_only(page)
     assert page.evaluate("localStorage.getItem('subwave_admin_auth')") is None
     assert page.evaluate("typeof window.__subwaveAdminQueryCacheSnapshot") == "undefined"
 
@@ -4659,7 +4947,11 @@ def main():
     failed = []
     with sync_playwright() as playwright:
         for name in names:
-            browser, page = new_page(playwright)
+            browser, page = new_page(playwright, signed_out=name in {
+                "challenged_sign_in_retries_with_explicit_credentials",
+                "sign_in_network_and_controller_errors_stay_inline",
+                "same_origin_basic_challenges_stay_in_app",
+            })
             try:
                 CHECKS[name](page)
                 print(f"PASS {name}")

@@ -82,7 +82,10 @@ function subscribeAuth(listener: () => void): () => void {
 }
 
 // The controller protects /settings, /debug and the admin POSTs with HTTP
-// Basic. Every hook instance observes this one store so a 401 from any page
+// Basic. Use only explicit Authorization: credentials omission keeps cookies and
+// browser-managed Basic auth (including native 401 prompts) out of this flow.
+// It does not remove our manually supplied Authorization header.
+// Every hook instance observes this one store so a 401 from any page
 // query reaches AdminShell and unmounts its QueryClient. Same-tab writes
 // publish directly; browsers emit `storage` only in other tabs.
 export function useAdminAuth(): AdminAuth {
@@ -104,7 +107,10 @@ export function useAdminAuth(): AdminAuth {
     const token = encode(`${user}:${pass}`);
     let r: Response;
     try {
-      r = await fetch(`${API_URL}/settings`, { headers: { Authorization: `Basic ${token}` } });
+      r = await fetch(`${API_URL}/settings`, {
+        credentials: 'omit',
+        headers: { Authorization: `Basic ${token}` },
+      });
     } catch {
       return { ok: false, error: 'could not reach the controller' };
     }
@@ -132,7 +138,8 @@ export function useAdminAuth(): AdminAuth {
     // retain the persisted fallback until the external-store effect has run.
     const token = authSnapshot.auth || readStoredAuth();
     if (token) headers.Authorization = `Basic ${token}`;
-    const r = await fetch(`${API_URL}${path}`, { ...init, headers });
+    // Enforce after init so callers cannot re-enable ambient credentials.
+    const r = await fetch(`${API_URL}${path}`, { ...init, headers, credentials: 'omit' });
     if (r.status === 401) {
       // localStorage is the cross-tab source of truth even before the
       // StorageEvent lands, so read it first and re-read immediately before
