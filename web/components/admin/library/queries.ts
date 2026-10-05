@@ -2,6 +2,7 @@
 
 import type { InfiniteData, QueryClient } from '@tanstack/react-query';
 import type { BlockRef, Energy, LikedSort, SearchMode, Sort, TagEvent, Track, Vocal } from './types';
+import type { FolderStat } from '@/lib/folderTree';
 
 // Query-key factory plus the cache-wide row operations. Imports nothing from
 // LibraryContext: that would be a context → queries → context cycle.
@@ -46,6 +47,17 @@ export const libraryKeys = {
   // Fork: the folder tree behind Folder rules and folder genres.
   folders: () => ['library', 'folders'] as const,
 };
+
+// Fork: one parse per key that several cards observe (the Blocked tab's rules
+// and folder-genres cards both read folders and genre names). Every observer
+// of a key must cache the SAME shape, so the parse lives with the key.
+export interface FolderData { list: FolderStat[]; withoutPath: number }
+export const parseFolders = (raw: unknown): FolderData => {
+  const j = raw as { folders?: FolderStat[]; withoutPath?: number };
+  return { list: j.folders || [], withoutPath: j.withoutPath || 0 };
+};
+export const parseGenreNames = (raw: unknown): string[] =>
+  ((raw as { genres?: Array<{ value: string }> }).genres || []).map(g => g.value).filter(Boolean);
 
 // Row lists cache in three shapes and all three must be handled here: a bare
 // Track[] (recent), { rows, total } (browse, liked) and useInfiniteQuery's

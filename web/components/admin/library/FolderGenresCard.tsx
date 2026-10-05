@@ -5,16 +5,20 @@
 // Any-tag rules and genre shows read it. The tree shows only branches holding
 // untagged tracks by default; the table is saved whole (PUT /library/folder-genres).
 
-import { useCallback, useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useAdminAuth } from '../../../lib/adminAuth';
+import { AdminResponseError, adminJson } from '../../../lib/admin-query';
 import { notify, errorMessage } from '../../../lib/notify';
 import { Card, Btn } from '../ui';
 import { Input } from '../../ui/input';
 import { SkeletonRows } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
-import { buildFolderTree, type FolderNode, type FolderStat } from '@/lib/folderTree';
+import { ErrorState } from '@/components/ui/error-state';
+import { buildFolderTree, type FolderNode } from '@/lib/folderTree';
 import { FolderTree } from './FolderTree';
 import { ValuesInput } from './BlockRulesCard';
+import { libraryKeys, parseFolders, parseGenreNames, type FolderData } from './queries';
+import { useAdminMutation, useAdminQuery } from './useAdminQuery';
 
 type Table = Record<string, string[]>;
 
@@ -24,65 +28,70 @@ const fingerprint = (t: Table) =>
   JSON.stringify(Object.entries(t).filter(([, g]) => g.length).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 
 export function FolderGenresCard({ onChanged }: { onChanged?: () => void }) {
-  const { adminFetch, needsAuth, hydrated } = useAdminAuth();
-  const [root, setRoot] = useState<FolderNode | null | undefined>(undefined); // undefined = loading
-  const [withoutPath, setWithoutPath] = useState(0);
-  const [draft, setDraft] = useState<Table>({});
-  const [saved, setSaved] = useState<Table>({});
-  const [genres, setGenres] = useState<string[]>([]);
+  const { needsAuth, hydrated } = useAdminAuth();
+  // Null = untouched: the editor follows the saved table, so a refetch (another
+  // card's Retry, the post-save invalidation) never overwrites unsaved edits.
+  const [draft, setDraft] = useState<Table | null>(null);
   const [query, setQuery] = useState('');
   const [untaggedOnly, setUntaggedOnly] = useState(true);
   const [editing, setEditing] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      const r = await adminFetch('/library/folders');
-      if (!r.ok) throw new Error(`folders load failed (${r.status})`);
-      const j = await r.json() as { folders?: FolderStat[]; withoutPath?: number };
-      const list = j.folders || [];
-      const table: Table = {};
-      for (const f of list) if (f.genres?.length) table[f.path] = [...f.genres];
-      setRoot(buildFolderTree(list));
-      setWithoutPath(j.withoutPath || 0);
-      setDraft(table);
-      setSaved(table);
-    } catch (e) {
-      notify.err(errorMessage(e));
-      setRoot(prev => prev ?? null);
-    }
-  }, [adminFetch]);
+  // Same keys and parses as BlockRulesCard's picker vocab: one cache entry each.
+  const foldersQuery = useAdminQuery<FolderData>({
+    key: libraryKeys.folders(),
+    path: '/library/folders',
+    parse: parseFolders,
+    toastOnError: true,
+  });
+  const genresQuery = useAdminQuery<string[]>({
+    key: libraryKeys.genres(),
+    path: '/library/genres',
+    parse: parseGenreNames,
+  });
+  const folderData = foldersQuery.data;
+  const root = useMemo(() => buildFolderTree(folderData?.list ?? []), [folderData]);
+  const saved = useMemo(() => {
+    const table: Table = {};
+    for (const f of folderData?.list ?? []) if (f.genres?.length) table[f.path] = [...f.genres];
+    return table;
+  }, [folderData]);
+  const withoutPath = folderData?.withoutPath ?? 0;
+  const table = draft ?? saved;
 
-  useEffect(() => {
-    if (!hydrated || needsAuth) return;
-    void load();
-    void (async () => {
+  type SaveReceipt = { purged?: number };
+  const saveMutation = useAdminMutation<SaveReceipt, Table>({
+    request: async (t, fetcher) => {
+      const entries = Object.entries(t)
+        .filter(([, g]) => g.length)
+        .map(([folder, g]) => ({ folder, genres: g }));
       try {
-        const r = await adminFetch('/library/genres');
-        if (r.ok) {
-          const j = await r.json() as { genres?: Array<{ value: string }> };
-          setGenres((j.genres || []).map(g => g.value).filter(Boolean));
-        }
-      } catch {}
-    })();
-  }, [hydrated, needsAuth, load, adminFetch]);
+        return await adminJson<SaveReceipt>(fetcher, '/library/folder-genres', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entries }),
+        });
+      } catch (e) {
+        if (!(e instanceof AdminResponseError)) throw e;
+        const { error } = e.body as { error?: unknown };
+        throw new Error(typeof error === 'string' && error ? error : `failed (${e.status})`);
+      }
+    },
+    // The saved table is the cache: wait for the fresh read before the editor
+    // drops its draft, or it would flash the old table in between.
+    onDone: async (_receipt, _table, client) => {
+      await client.invalidateQueries({ queryKey: libraryKeys.folders(), exact: true });
+    },
+    toastOnError: false,
+  });
 
   const save = async () => {
     setBusy(true);
     try {
-      const entries = Object.entries(draft)
-        .filter(([, g]) => g.length)
-        .map(([folder, g]) => ({ folder, genres: g }));
-      const r = await adminFetch('/library/folder-genres', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entries }),
-      });
-      const j = await r.json().catch(() => ({})) as { purged?: number; error?: string };
-      if (!r.ok) throw new Error(j.error || `failed (${r.status})`);
+      const j = await saveMutation.mutateAsync(table);
       notify.ok(`Folder genres saved${j.purged ? ` — ${j.purged} queued track${j.purged === 1 ? '' : 's'} dropped` : ''}`);
       setEditing(null);
-      await load();
+      setDraft(null);
       onChanged?.();
     } catch (e) {
       notify.err(`Save failed: ${errorMessage(e)}`);
@@ -93,11 +102,11 @@ export function FolderGenresCard({ onChanged }: { onChanged?: () => void }) {
 
   if (!hydrated || needsAuth) return null;
 
-  const dirty = fingerprint(draft) !== fingerprint(saved);
+  const dirty = fingerprint(table) !== fingerprint(saved);
   const keep = untaggedOnly
-    ? (n: FolderNode) => n.untagged > 0 || (draft[n.path]?.length ?? 0) > 0
+    ? (n: FolderNode) => n.untagged > 0 || (table[n.path]?.length ?? 0) > 0
     : undefined;
-  const suggestions = [...new Set([...genres, ...Object.values(draft).flat()])];
+  const suggestions = [...new Set([...(genresQuery.data ?? []), ...Object.values(table).flat()])];
 
   return (
     <Card
@@ -109,7 +118,14 @@ export function FolderGenresCard({ onChanged }: { onChanged?: () => void }) {
         </Btn>
       }
     >
-      {root === undefined ? (
+      {!folderData && foldersQuery.isError ? (
+        <ErrorState
+          title="Can't load folders"
+          error={errorMessage(foldersQuery.error)}
+          onRetry={() => { void foldersQuery.refetch(); }}
+          retrying={foldersQuery.isFetching}
+        />
+      ) : !folderData ? (
         <SkeletonRows rows={3} />
       ) : root === null ? (
         <EmptyState
@@ -142,7 +158,7 @@ export function FolderGenresCard({ onChanged }: { onChanged?: () => void }) {
             query={query}
             keep={keep}
             renderMeta={n => {
-              const assigned = draft[n.path] ?? [];
+              const assigned = table[n.path] ?? [];
               return (
                 <span className="flex items-center gap-2">
                   {n.untagged > 0 && (
@@ -155,7 +171,7 @@ export function FolderGenresCard({ onChanged }: { onChanged?: () => void }) {
                       <ValuesInput
                         id={`fg-${encodeURIComponent(n.path)}`}
                         values={assigned}
-                        onChange={v => setDraft(d => ({ ...d, [n.path]: v }))}
+                        onChange={v => setDraft(d => ({ ...(d ?? saved), [n.path]: v }))}
                         placeholder="genre, Enter to add"
                         suggestions={suggestions}
                       />

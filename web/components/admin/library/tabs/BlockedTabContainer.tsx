@@ -67,11 +67,11 @@ export default function BlockedTabContainer() {
       <BlockRulesCard onChanged={() => { void restampBlockMarks(); }} />
       {/* Folder genres change what Genre rules match, so a save re-stamps the
           row marks exactly as a rule change does, and refetches the rules card's
-          rules (their match counts move) and folder vocab in place. */}
+          rules (their match counts move). The folder vocab both cards share is
+          refetched by the save itself (FolderGenresCard), before this runs. */}
       <FolderGenresCard
         onChanged={() => {
           void queryClient.invalidateQueries({ queryKey: libraryKeys.blockRules(), exact: true });
-          void queryClient.invalidateQueries({ queryKey: libraryKeys.folders(), exact: true });
           void restampBlockMarks();
         }}
       />

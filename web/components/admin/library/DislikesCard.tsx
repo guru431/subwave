@@ -8,9 +8,12 @@
 // token), blocking and the "already blocked" filter from the controller.
 
 import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { Ban, Check, RefreshCw } from 'lucide-react';
 import { useAdminAuth } from '../../../lib/adminAuth';
+import {
+  AdminResponseError, adminJson, adminResponse, useAdminQuery,
+} from '../../../lib/admin-query';
 import { notify, errorMessage } from '../../../lib/notify';
 import { cn } from '../../../lib/cn';
 import { Card, Btn } from '../ui';
@@ -23,6 +26,7 @@ import {
 } from '@/lib/dislikeSuggestions';
 import { useLibrary } from './LibraryContext';
 import { libraryKeys } from './queries';
+import { useAdminMutation } from './useAdminQuery';
 
 // The room's refusals in the operator's words. Its 401 comes without
 // WWW-Authenticate on purpose, so the browser never pops its own dialog.
@@ -32,22 +36,36 @@ const ROOM_ERRORS: Record<number, string> = {
   502: "the room couldn't reach the controller",
 };
 
-async function roomAdmin(path: string, auth: string | null, body?: unknown): Promise<unknown> {
+const ROOM_UNREACHABLE = 'the room is unreachable';
+
+// The room is not the controller, so these are plain fetches with the same
+// Basic token, not adminFetch. The READ is inline in the query's `request`
+// (scripts/audit-admin-query.mjs accepts a GET only there); this pair only
+// builds headers and judges the answer.
+function roomHeaders(auth: string | null, json = false): Record<string, string> {
   const headers: Record<string, string> = {};
   if (auth) headers.Authorization = `Basic ${auth}`;
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
-  let r: Response;
-  try {
-    r = await fetch(`/room/admin${path}`, {
-      method: body === undefined ? 'GET' : 'POST',
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-  } catch {
-    throw new Error('the room is unreachable');
-  }
+  if (json) headers['Content-Type'] = 'application/json';
+  return headers;
+}
+
+async function roomBody(r: Response): Promise<unknown> {
   if (!r.ok) throw new Error(ROOM_ERRORS[r.status] ?? `the room answered ${r.status}`);
   return r.json();
+}
+
+async function roomDecide(auth: string | null, body: unknown): Promise<unknown> {
+  let r: Response;
+  try {
+    r = await fetch('/room/admin/dislikes/decide', {
+      method: 'POST',
+      headers: roomHeaders(auth, true),
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new Error(ROOM_UNREACHABLE);
+  }
+  return roomBody(r);
 }
 
 function Group({ label, items, busy, onBlock, onKeep }: {
@@ -93,42 +111,65 @@ export function DislikesCard() {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
 
-  const q = useQuery({
-    queryKey: libraryKeys.dislikes(),
+  const q = useAdminQuery<Suggestions>({
+    key: libraryKeys.dislikes(),
+    adminFetch,
     enabled: ready && hydrated && !!auth,
-    // Normalised inside the queryFn (web/CLAUDE.md, rule 3): the cache holds
+    // Normalised inside the request (web/CLAUDE.md, rule 3): the cache holds
     // exactly what renders — suggestions minus whatever the blocklist catches.
-    queryFn: async (): Promise<Suggestions> => {
-      const all = parseSuggestions(await roomAdmin('/dislikes', auth));
+    request: async (fetcher, signal) => {
+      let r: Response;
+      try {
+        r = await fetch('/room/admin/dislikes', { headers: roomHeaders(auth), signal });
+      } catch (err) {
+        if (signal.aborted) throw err;
+        throw new Error(ROOM_UNREACHABLE);
+      }
+      const all = parseSuggestions(await roomBody(r));
       const tracks = checkRows(all);
       if (!tracks.length) return all;
-      const r = await adminFetch('/library/blocklist/check', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tracks }),
-      });
-      if (!r.ok) throw new Error(`blocklist check failed (${r.status})`);
-      const j = await r.json() as { blocked?: Record<string, unknown> };
+      let j: { blocked?: Record<string, unknown> };
+      try {
+        j = await adminJson<{ blocked?: Record<string, unknown> }>(fetcher, '/library/blocklist/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tracks }),
+        }, signal);
+      } catch (err) {
+        if (err instanceof AdminResponseError) throw new Error(`blocklist check failed (${err.status})`);
+        throw err;
+      }
       return withoutBlocked(all, j.blocked ?? {});
     },
   });
 
+  // The controller half of Block. Toasts and the room's half stay in `block`.
+  const blockMutation = useAdminMutation<void, Suggestion>({
+    request: async (s, fetcher) => {
+      try {
+        await adminResponse(fetcher, '/library/blocklist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: s.kind, trackId: s.songId }),
+        });
+      } catch (err) {
+        if (!(err instanceof AdminResponseError)) throw err;
+        // 409 = already on the list: for the operator that is the same success.
+        if (err.status === 409) return;
+        const { error } = err.body as { error?: unknown };
+        throw new Error(typeof error === 'string' && error ? error : `block failed (${err.status})`);
+      }
+    },
+    toastOnError: false,
+  });
+
   const decide = (s: Suggestion, action: 'keep' | 'blocked') =>
-    roomAdmin('/dislikes/decide', auth, { kind: s.kind, key: s.key, action });
+    roomDecide(auth, { kind: s.kind, key: s.key, action });
 
   const block = async (s: Suggestion) => {
     setBusy(true);
     try {
-      const r = await adminFetch('/library/blocklist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: s.kind, trackId: s.songId }),
-      });
-      // 409 = already on the list: for the operator that is the same success.
-      if (!r.ok && r.status !== 409) {
-        const j = await r.json().catch(() => ({})) as { error?: string };
-        throw new Error(j.error || `block failed (${r.status})`);
-      }
+      await blockMutation.mutateAsync(s);
       notify.ok(`“${s.kind === 'artist' ? s.artist : s.title}” will never air`);
       // The block stands even if the room can't record the decision: the
       // blocklist filter still hides the row; it would only come back after an

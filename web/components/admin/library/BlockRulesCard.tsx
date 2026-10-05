@@ -28,13 +28,13 @@ import { blockRuleSchema, RULE_TEXT_MAX } from '@/lib/schemas.generated';
 import { useZodForm, applyServerFieldErrors, fieldAria } from '@/lib/form';
 import { TextField } from '@/lib/form-fields';
 import type { BlockRuleStat, RuleField, SeasonWindow } from './types';
-import { libraryKeys } from './queries';
+import { libraryKeys, parseFolders, parseGenreNames, type FolderData } from './queries';
 import { useAdminMutation, useAdminQuery } from './useAdminQuery';
 import { settingsKeys } from '../settings/queries';
 import { showKeys } from '../shows/queries';
 import type { SettingsResponse as ShowSettingsResponse } from '../shows/types';
 import { FolderTree } from './FolderTree';
-import { buildFolderTree, displayPath, untickablePaths, type FolderStat } from '@/lib/folderTree';
+import { buildFolderTree, displayPath, untickablePaths } from '@/lib/folderTree';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -169,8 +169,7 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
   const genresQuery = useAdminQuery<string[]>({
     key: libraryKeys.genres(),
     path: '/library/genres',
-    parse: raw => ((raw as { genres?: Array<{ value: string }> }).genres || [])
-      .map(genre => genre.value).filter(Boolean),
+    parse: parseGenreNames,
   });
   const showsQuery = useAdminQuery<ShowSettingsResponse>({
     key: settingsKeys.detail(),
@@ -185,13 +184,10 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
   // Folder picker vocab — the library's folder tree and how many tracks
   // Navidrome gave no real path, so the picker can say why a folder is missing.
   // A folder-genre save invalidates this key (BlockedTabContainer).
-  const foldersQuery = useAdminQuery<{ list: FolderStat[]; withoutPath: number }>({
+  const foldersQuery = useAdminQuery<FolderData>({
     key: libraryKeys.folders(),
     path: '/library/folders',
-    parse: raw => {
-      const j = raw as { folders?: FolderStat[]; withoutPath?: number };
-      return { list: j.folders || [], withoutPath: j.withoutPath || 0 };
-    },
+    parse: parseFolders,
   });
   const rules = rulesQuery.data ?? (rulesQuery.error ? [] : null);
   const folderData = foldersQuery.data;
