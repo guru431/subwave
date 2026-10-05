@@ -217,10 +217,11 @@ export const config = {
     // anti-repeat windows. queue.history is in-memory and capped at 50 (~3h),
     // hence a separate longer-lived store.
     recentPlaysFile: `${STATE_DIR}/recent-plays.json`,
-    // Play-log cap. ~550 plays/day at the 3-min cap, so 2500 keeps four days —
+    // Play-log cap. ~550 plays/day at the 3-min cap, so 6000 keeps eleven days —
     // enough to honestly supply the 36h recency boost and a maxed no-repeat
-    // window. ~300KB of JSON, rewritten once per play.
-    recentPlaysMax: 2500,
+    // window (clampNoRepeatWindow, up to 2000 distinct). ~700KB of JSON,
+    // rewritten once per play. Fork: raised from 2500 with that ceiling.
+    recentPlaysMax: 6000,
     // Count-based hard no-repeat guard: neither pick path re-airs any of the last
     // N DISTINCT plays. Non-relaxable — it survives the filterPickerCandidates
     // starvation cascade. Clamped to library size at use (37.5% ceiling), so a

@@ -315,12 +315,15 @@ export function clampDiscoverySteps(raw: unknown, def: number): number {
   return Math.min(DISCOVERY_STEPS_MAX, Math.max(DISCOVERY_STEPS_MIN, n));
 }
 
-// Distinct-play no-repeat window, floored into [0, 1000]; 0 disables. The
-// ceiling must stay under config.queue.recentPlaysMax (2500) or the window is
+// Distinct-play no-repeat window, floored into [0, 2000]; 0 disables. The
+// ceiling must stay under config.queue.recentPlaysMax (6000) or the window is
 // silently truncated. Library-size clamping happens at use time.
+// Fork: raised from upstream's 1000 (the play log from 2500): on a 4.6k library
+// the 37.5% use-time clamp allows 1736, so the 1000 ceiling — not the guard
+// that sizes the window to the catalogue — was the binding limit.
 export function clampNoRepeatWindow(raw: unknown, def: number): number {
   if (typeof raw !== 'number' || !Number.isFinite(raw)) return def;
-  return Math.min(1000, Math.max(0, Math.floor(raw)));
+  return Math.min(2000, Math.max(0, Math.floor(raw)));
 }
 
 // Artist spacing in SLOTS (#1406), floored into [0, 25]; 0 leaves only the
