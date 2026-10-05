@@ -482,11 +482,28 @@ class Queue {
       sent: false,
       confirmedInLiquidsoap: false,
     };
-    this.upcoming.push(item);
-    this.log('queued', `${track.title} — ${track.artist}`, { requestedBy, queueDepth: this.upcoming.length });
+    // A listener request plays next, not last: it goes in FRONT of the first
+    // undrained auto-pick. Anything already handed to Liquidsoap (`sent`) is
+    // never touched, and requests already waiting stay ahead of this one, so
+    // the request queue itself stays first-come.
+    //
+    // This does not break back-announces: airIntro already compares `linkPrev`
+    // and drops the "that was X" line when a request slipped in ahead of the
+    // pick it was written for (see the push() header and #189). Studio pushes
+    // share the behaviour — queueing a track by hand means wanting it soon.
+    const jumpsAhead = !aiPicked && !!requestedBy;
+    const insertAt = jumpsAhead
+      ? this.upcoming.findIndex(i => !i.sent && i.aiPicked)
+      : -1;
+    if (insertAt >= 0) this.upcoming.splice(insertAt, 0, item);
+    else this.upcoming.push(item);
+    // Position of THIS item, not the tail: callers report it to the listener
+    // ("you're number N"), and after an insert the tail is somebody else.
+    const position = insertAt >= 0 ? insertAt + 1 : this.upcoming.length;
+    this.log('queued', `${track.title} — ${track.artist}`, { requestedBy, queueDepth: this.upcoming.length, position });
     this.persist();
     this.drainToLiquidsoap();  // fire-and-forget
-    return this.upcoming.length;
+    return position;
   }
 
   // Drop now-blocked tracks from the upcoming queue — called when a blocklist
