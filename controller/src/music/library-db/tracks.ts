@@ -159,8 +159,8 @@ export function upsertTrackMeta(id: string, meta: TrackMeta): void {
   requireDb()
     .prepare(
       `
-      INSERT INTO tracks (id, title, artist, album, album_id, artist_id, year, original_year, original_year_source, is_compilation, era_untrusted, genres, duration_sec)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tracks (id, title, artist, album, album_id, artist_id, year, original_year, original_year_source, is_compilation, era_untrusted, genres, duration_sec, path)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         title        = COALESCE(excluded.title, tracks.title),
         artist       = COALESCE(excluded.artist, tracks.artist),
@@ -194,7 +194,10 @@ export function upsertTrackMeta(id: string, meta: TrackMeta): void {
         is_compilation = COALESCE(excluded.is_compilation, tracks.is_compilation),
         era_untrusted  = COALESCE(excluded.era_untrusted, tracks.era_untrusted),
         genres       = COALESCE(excluded.genres, tracks.genres),
-        duration_sec = COALESCE(excluded.duration_sec, tracks.duration_sec)
+        duration_sec = COALESCE(excluded.duration_sec, tracks.duration_sec),
+        -- Only an absolute path is ever passed (below): a walk with Report Real
+        -- Path off keeps the path an earlier walk recorded.
+        path         = COALESCE(excluded.path, tracks.path)
     `,
     )
     .run(
@@ -211,6 +214,7 @@ export function upsertTrackMeta(id: string, meta: TrackMeta): void {
       meta.eraUntrusted == null ? null : meta.eraUntrusted ? 1 : 0,
       meta.genres?.length ? JSON.stringify(meta.genres) : null,
       Number.isFinite(meta.duration as number) ? (meta.duration as number) : null,
+      typeof meta.path === 'string' && meta.path.length > 1 && meta.path.startsWith('/') ? meta.path : null,
     );
   markTextVectorDirtyIfEraChanged(id, eraBefore);
 }

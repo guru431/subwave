@@ -27,6 +27,7 @@ export function rowToTrack(row: TrackRow): TrackRecord {
     genres: row.genres ? safeParseArray(row.genres) : [],
     genre: row.genre,
     durationSec: row.duration_sec,
+    path: row.path ?? null,
     lastfmTags: row.lastfm_tags ? safeParseArray(row.lastfm_tags) : null,
     lyricExcerpt: row.lyric_excerpt,
     enrichedAt: row.enriched_at,

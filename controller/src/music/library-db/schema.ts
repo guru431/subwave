@@ -438,6 +438,16 @@ export async function migrate(embeddingDim: number, reseed = false, adoptStoredD
     }).immediate();
   }
 
+  // Fork (radio): absolute track path for the Blocked tab's Folder rules and
+  // folder genres. On v1.8.0 this was migration 21; upstream has since taken
+  // 21..27, so it is no longer a numbered step but an idempotent column check
+  // that runs after upstream's chain and never touches user_version — the next
+  // upstream migration can take any number without colliding with it.
+  const trackCols = d.prepare(`PRAGMA table_info(tracks)`).all() as { name: string }[];
+  if (!trackCols.some((c) => c.name === 'path')) {
+    runDdl(d, `ALTER TABLE tracks ADD COLUMN path TEXT;`);
+  }
+
   // Reconcile the requested embedding dim against what physically exists. The
   // vec0 table's FLOAT[N] schema is the authority for what inserts accept, not
   // embedding_meta, which is written separately by the tagger and can lag.

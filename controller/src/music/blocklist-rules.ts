@@ -7,11 +7,13 @@ import {
   genreMatches,
   trackAllTags,
   trackMoods,
+  trackPath,
   type FilterTrack,
 } from './show-filter.js';
 // The artist rule must fold through the same normaliser as the id list's name
 // fallback (#1603), hence its own compiled set rather than valueSet's normText.
 import { artistNameKey, artistParticipantKeys } from './recency.js';
+import { normFolder, pathInFolder } from './folder-genres.js';
 // Shape lives in the shared schema so the admin card runs the same rules;
 // re-exported here. This module keeps the half a mirrored module cannot: matching.
 import {
@@ -50,7 +52,15 @@ export function validateRulePatch(raw: unknown): Omit<BlockRule, 'id' | 'addedAt
   if (!raw || typeof raw !== 'object') throw new Error('rule must be an object');
   const parsed = blockRuleSchema.safeParse(raw);
   if (!parsed.success) throw new Error(parsed.error.issues[0]?.message || 'invalid rule');
-  return parsed.data;
+  if (parsed.data.field !== 'folder') return parsed.data;
+  // Folder values are matched as absolute paths on a "/" boundary. The shared
+  // schema can't say so (upstream's schema test parses every field with a plain
+  // name), so the store checks it and drops trailing slashes.
+  const folders = parsed.data.values.map(normFolder);
+  if (folders.some((f) => f === null)) {
+    throw new Error('rule.values for a folder rule must be absolute folder paths');
+  }
+  return { ...parsed.data, values: [...new Set(folders as string[])] };
 }
 
 // from <= to is a closed interval; from > to wraps the year end.
@@ -83,6 +93,7 @@ export interface CompiledRule {
   rule: BlockRule;
   genreTargets: string[];  // field=genre — normGenre'd, for genreMatches
   artistKeys: Set<string>; // field=artist — artistNameKey'd, matched per credited act
+  folderTargets: string[]; // field=folder — normFolder'd absolute paths, case kept
   valueSet: Set<string>;   // every other field — normText'd exact match
 }
 
@@ -91,6 +102,9 @@ export function compileRules(rules: BlockRule[]): CompiledRule[] {
     rule,
     genreTargets: rule.field === 'genre' ? rule.values.map(normGenre).filter(Boolean) : [],
     artistKeys: rule.field === 'artist' ? new Set(rule.values.map(artistNameKey).filter(Boolean)) : new Set<string>(),
+    folderTargets: rule.field === 'folder'
+      ? rule.values.map(normFolder).filter((f): f is string => f !== null)
+      : [],
     valueSet: new Set(rule.values.map(normText).filter(Boolean)),
   }));
 }
@@ -104,6 +118,8 @@ export type RuleTrack = FilterTrack & { artist?: string | null; album?: string |
 //   tag/mood/album/title - normalised exact, never substring
 //   artist   - whole credit, then every act credited on the row
 //   playlist - track id in the pre-resolved member set; a stale id is inert
+//   folder   - the track's absolute path lies under a listed folder, "/"
+//              boundary (.../Hits keeps .../Hits 2); no real path matches nothing
 export function ruleMatches(
   cr: CompiledRule,
   track: RuleTrack | null | undefined,
@@ -136,6 +152,10 @@ export function ruleMatches(
         if (playlistMembers.get(pid)?.has(track.id)) return true;
       }
       return false;
+    }
+    case 'folder': {
+      const path = trackPath(track);
+      return !!path && cr.folderTargets.some((folder) => pathInFolder(folder, path));
     }
     default:
       return false;

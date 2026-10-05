@@ -131,6 +131,7 @@ export async function walkNavidrome(): Promise<{ walked: number; liveIds: Set<st
       eraUntrusted: song.albumEraUntrusted ?? null,
       genres: subsonic.songGenres(song),
       duration: song.duration,
+      path: song.path,
     });
     liveIds.add(song.id);
     if (song.albumEraUntrusted && song.albumEraReason) {

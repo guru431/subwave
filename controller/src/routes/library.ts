@@ -3,6 +3,7 @@ import express from 'express';
 import { requireAdmin } from '../middleware/auth.js';
 import * as library from '../music/library.js';
 import * as blocklist from '../music/blocklist.js';
+import * as folderGenres from '../music/folder-genres.js';
 import * as likes from '../broadcast/likes.js';
 import * as db from '../music/library-db.js';
 import * as analyzer from '../music/analyzer.js';
@@ -49,6 +50,7 @@ interface LibrarySong {
   eraUntrusted?: boolean | null;
   genre?: string | null;
   duration?: number | null;
+  path?: string | null;
 }
 
 router.get('/library/browse', requireAdmin, async (req, res) => {
@@ -721,6 +723,7 @@ router.post('/library/retag', requireAdmin, async (req, res) => {
       album: song.album,
       year: song.year ?? null,
       genres: subsonic.songGenres(song),
+      path: song.path ?? null,
     });
 
     let lastfmTags: string[] | null = null;
@@ -871,6 +874,7 @@ router.post(
           year: t.year ?? null,
           genres: subsonic.songGenres(t),
           duration: t.duration ?? null,
+          path: t.path ?? null,
         });
         if (clearing) {
           db.clearTrackTags(t.id);
@@ -979,6 +983,43 @@ router.post(
     }
   },
 );
+
+// ---------------------------------------------------------------------------
+// Folder tree + folder genres (Blocked tab). GET /library/folders lists every
+// folder holding tracks, and its ancestors, with cumulative counts; the
+// folder-genre table is what a track WITHOUT a genre tag reads as its genre
+// (music/folder-genres.ts). Paths are the absolute ones Navidrome reports to
+// the station's player with Report Real Path on; tracks without one are
+// counted in `withoutPath`, so the card can say why a folder is missing.
+// ---------------------------------------------------------------------------
+
+router.get('/library/folders', requireAdmin, async (_req, res) => {
+  try {
+    await library.load();
+    res.json(folderGenres.aggregateFolders(db.folderRows(), folderGenres.assigned()));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/library/folder-genres', requireAdmin, (_req, res) => {
+  res.json({ entries: folderGenres.list() });
+});
+
+router.put('/library/folder-genres', requireAdmin, async (req, res) => {
+  try {
+    const entries = await folderGenres.save(req.body);
+    queue.log('blocked', `folder genres updated (${entries.length} folder${entries.length === 1 ? '' : 's'})`);
+    // A folder genre can bring tracks under an existing Genre rule — drop them
+    // from upcoming and rebuild auto.m3u, exactly as a rule change does.
+    const purged = queue.purgeBlocked();
+    refreshAutoPlaylist().catch((err: any) => queue.log('error', `folder-genres auto-playlist refresh failed: ${err.message}`));
+    res.json({ entries, purged });
+  } catch (err) {
+    // Validation errors are the operator's input, not a server fault.
+    res.status(400).json({ error: err.message });
+  }
+});
 
 // Never-play blocklist at track/album/artist granularity. Enforcement lives in
 // music/blocklist.ts; these routes only manage the list.

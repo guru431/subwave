@@ -97,6 +97,10 @@ const SPECIAL = ['original_year', 'original_year_source', 'text_vector_dirty'];
 const COALESCE_COLS = [
   'original_year_checked_at', 'vocal_ranges_json', 'outro_json', 'stems_at',
   'tail_silence_ms', 'tail_start_ms',
+  // Fork (radio): the absolute file path. Walk-written, but only when Navidrome
+  // reports a real one (Report Real Path), and never blanked — so `new ?? old`
+  // is its own write rule, not WALK_OWNED's "new wins".
+  'path',
 ];
 
 type Row = Record<string, unknown>;

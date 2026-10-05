@@ -89,6 +89,9 @@ export function get(songId: string): any {
     yearUntrusted: t.yearUntrusted,
     genres: t.genres,
     genre: t.genre,
+    // Absolute file path — folder genres and Folder rules resolve through this
+    // projection for rows that carry no path of their own (queue items).
+    path: t.path ?? null,
     moods: t.moods,
     audioMoods: t.audioMoods,
     // show-filter.trackAllTags (blocklist `tag` rules) resolves these through
@@ -163,6 +166,7 @@ export function set(songId: string, data: any) {
       ? data.genres
       : data.genre ? [data.genre] : null,
     duration: data.duration ?? null,
+    path: data.path ?? null,
   });
   if (Array.isArray(data.moods) || data.energy !== undefined) {
     db.upsertTrackTags(songId, {

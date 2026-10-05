@@ -7,7 +7,8 @@ import * as settings from '../settings.js';
 import * as subLog from './subsonic-log.js';
 import * as blocklist from './blocklist.js';
 import * as sceneVocab from './scene-vocab.js';
-import { trackEraYear } from './show-filter.js';
+// normGenre closes an import cycle (show-filter → library → blocklist → show-playlist → subsonic): safe only because it is a hoisted function used at call time — never use it at module top level here.
+import { normGenre, trackEraYear } from './show-filter.js';
 import { albumEraSuspect } from './era-suspect.js';
 
 function buildAuth() {
@@ -356,7 +357,9 @@ export async function getGenres() {
 // exact normalised match wins, then substring either way. null when no hit.
 export async function resolveGenreName(name) {
   if (!name) return null;
-  const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+  // show-filter's normaliser, not a local copy: the two were kept in step by
+  // hand, and both dropped every non a-z letter.
+  const norm = normGenre;
   const target = norm(name);
   if (!target) return null;
   const genres = await getGenres();
