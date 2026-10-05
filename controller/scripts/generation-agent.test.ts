@@ -24,6 +24,12 @@ test('agent without discovery tools honors its tighter cascade deadline', async 
   writeFileSync(path.join(process.env.STATE_DIR!, 'settings.json'), JSON.stringify({ llm: { provider: 'openai-compatible', model: 'test', baseUrl: `http://127.0.0.1:${port}/v1` } }));
   await settings.load();
   try {
+    // Fork: warm the client first. The FIRST call in a process dispatches its
+    // request only ~90 ms in on the station host (lazy provider setup), so a
+    // cold 40 ms deadline aborted it before anything reached the server and
+    // `calls` read 0. Warm, the request leaves in 3-12 ms (measured 2026-10-05).
+    await djAgent({ system: 'test', messages: [{ role: 'user', content: 'test' }], tools: {}, schema: z.object({ ok: z.boolean() }), timeoutMs: 10_000 });
+    calls = 0;
     await assert.rejects(djAgent({ system: 'test', messages: [{ role: 'user', content: 'test' }], tools: {}, schema: z.object({ ok: z.boolean() }), timeoutMs: 40 }), { name: 'AgentDeadlineError' });
     assert.equal(calls, 1);
   } finally {
