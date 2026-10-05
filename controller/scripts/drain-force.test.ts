@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import test, { after } from 'node:test';
+import test, { after, type TestContext } from 'node:test';
 
 process.env.STATE_DIR = mkdtempSync(join(tmpdir(), 'subwave-drain-force-'));
 process.env.NAVIDROME_URL = 'http://127.0.0.1:9';
@@ -47,7 +47,8 @@ const item = (id: string, sent = false) => ({
 
 function reset(items: any[]) {
   queue.current = {
-    track: { id: 'on-air', title: 'On Air', artist: 'Someone', duration: 200 },
+    // Ten minutes left: a pair-held head is nowhere near its hard deadline.
+    track: { id: 'on-air', title: 'On Air', artist: 'Someone', duration: 600 },
     startedAt: new Date().toISOString(), source: 'ai',
   } as any;
   queue.lastSeenKey = null;
@@ -67,10 +68,55 @@ test('a forced drain with the head already handed over sends nothing more', asyn
   assert.deepEqual(sentIds(), ['a'], 'b and c stay on our side, where a request can still jump them');
 });
 
-test('a forced drain sends the held head and only the head', async () => {
-  reset([item('a'), item('b'), item('c')]);
+// The pair-aware hold needs a DJ-mode persona and transitions.pairDrain on;
+// a head with no successor is then held until its successor arrives.
+async function withPairHold(t: TestContext) {
+  const personas = settings.get().personas;
+  await settings.update({
+    personas: personas.map((p: any, i: number) => (i === 0 ? { ...p, djMode: true } : p)),
+    transitions: { pairDrain: true },
+  } as never);
+  t.after(async () => {
+    await settings.update({ personas, transitions: { pairDrain: false } } as never);
+  });
+  assert.equal(queue.pairDrainActive(), true, 'the pair hold is in effect');
+}
+
+test('a forced drain sends a pair-held head', async (t) => {
+  await withPairHold(t);
+  reset([item('a')]);
+  await queue.drainToLiquidsoap();
+  assert.deepEqual(sentIds(), [], 'control: the ordinary drain holds a head with no successor');
   await queue.drainToLiquidsoap(true);
+  assert.deepEqual(sentIds(), ['a'], 'force reaches past the pair hold');
+});
+
+test('a forced drain that meets a busy sender runs when the sender frees', async (t) => {
+  await withPairHold(t);
+  reset([item('a')]);
+  queue.senderBusy = true;
+  await queue.drainToLiquidsoap(true);
+  assert.equal(queue.pendingForceDrain, true, 'the force is remembered, not dropped');
+  assert.deepEqual(sentIds(), []);
+  // The in-flight drain finishing is what re-runs the pending force.
+  queue.senderBusy = false;
+  await queue.drainToLiquidsoap();
+  for (let i = 0; i < 200 && !queue.upcoming[0].sent; i++) await new Promise(r => setTimeout(r, 10));
+  await settled();
   assert.deepEqual(sentIds(), ['a']);
+});
+
+test('a clip-as-track target that meets a busy sender is reached after release', async () => {
+  reset([item('a', true), item('b'), item('c')]);
+  queue.senderBusy = true;
+  await queue.drainToLiquidsoap(queue.upcoming[1]);
+  assert.equal(queue.pendingForceItem, queue.upcoming[1]);
+  queue.senderBusy = false;
+  await queue.drainToLiquidsoap();
+  for (let i = 0; i < 200 && !queue.upcoming[1].sent; i++) await new Promise(r => setTimeout(r, 10));
+  await settled();
+  assert.deepEqual(sentIds(), ['a', 'b'], 'b past DRAIN_AHEAD; c is not forced');
+  assert.equal(queue.pendingForceItem, null);
 });
 
 test('the clip-as-track guard drains the item that fired, and nothing behind it', async () => {
