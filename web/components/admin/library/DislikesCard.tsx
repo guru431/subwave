@@ -1,7 +1,7 @@
 'use client';
 
 // Dislikes (Blocked tab): listeners mark tracks and artists with 👎 in the
-// player; the room (deploy/room) keeps the marks and turns them into block
+// player; the room (station/room) keeps the marks and turns them into block
 // suggestions. A dislike never changes the air by itself — Block here is the
 // only way it does. Two backends on purpose: suggestions and decisions come
 // from /room/admin/dislikes (the room has the controller check this same Basic

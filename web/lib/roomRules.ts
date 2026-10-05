@@ -83,7 +83,7 @@ export function mergeFeed(messages: RoomMessage[], events: FeedItem[], limit: nu
     text: m.text,
   }));
   // Без тай-брейка по ключу: комната отдаёт `at` с секундной точностью
-  // (deploy/room/store.py, isoformat(timespec="seconds")), и у двух сообщений
+  // (station/room/store.py, isoformat(timespec="seconds")), и у двух сообщений
   // подряд равный `at` — норма, а не теория. Строковое сравнение ключей вида
   // `m<id>` совпадает с числовым только пока у id одинаковая длина (`m100`
   // встаёт перед `m99`), и это переставляло ответ раньше вопроса. sort

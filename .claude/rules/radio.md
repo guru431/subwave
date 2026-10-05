@@ -43,8 +43,9 @@
   именами. Разворачивать `_settings_values()`.
 - `persona.soul` и `djHouseRules` молча режутся до 2000 символов (видно только в `GET /api/dj`).
 - Ручки `humour`/`warmth`/`localColour` действуют только при `≤3` и `≥7`; 4–6 — директивы нет.
-- Новая настройка — в четырёх местах: схема, `settings/patch-registry.ts`, дефолт в
-  `settings.ts`, выдача в `routes/settings/core.ts`. Пропуск любого молчалив.
+- Новая настройка — в пяти местах: схема, `settings/patch-registry.ts`, дефолт в
+  `settings/defaults.ts`, нормализация в `settings.ts`, выдача в `routes/settings/core.ts`
+  (+ список в `settings-patch-schema.test.ts`). Пропуск любого молчалив.
 - `llm.reasoning` включён **намеренно** (модель thinking-only) — не «чинить».
 - Операторский навык приходит `enabled: false`: `POST /api/dj/skill-toggle {"name","on"}`;
   ручной прогон `POST /api/dj/skill {"name"}` минует гейты.
