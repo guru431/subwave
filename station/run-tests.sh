@@ -172,6 +172,8 @@ failures() {
 }
 is_known() {
   local p
+  # Пункты KNOWN — шаблоны case (`файл :: *`): раскрытие без кавычек намеренное.
+  # shellcheck disable=SC2254
   for p in "${KNOWN[@]}"; do case "$1" in $p) return 0 ;; esac; done
   return 1
 }
