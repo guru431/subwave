@@ -1752,11 +1752,6 @@ class Queue {
     return cut.cueOutSec;
   }
 
-  // Whether pair-aware drains are in effect. The toggle is transitions.
-  // pairDrain, but the feature only pays off under a DJ-mode persona — both
-  // consumers of the hold (applyPairStamps, maybeRenderBlend) no-op without
-  // djMode, so holding would cost dj_queue visibility (and a wider restart
-  // window) for nothing. Non-DJ personas keep the eager drain byte-for-byte.
   // How many more tracks the pick cycle should add right now. The show
   // boundary is measured at the moment the topped-up track would AIR: the
   // queue ahead of it plays in full, so its durations add to what is left of
@@ -1780,6 +1775,11 @@ class Queue {
     return topUpDepth({ lookahead, queued: this.upcoming.length, sameShow });
   }
 
+  // Whether pair-aware drains are in effect. The toggle is transitions.
+  // pairDrain, but the feature only pays off under a DJ-mode persona — both
+  // consumers of the hold (applyPairStamps, maybeRenderBlend) no-op without
+  // djMode, so holding would cost dj_queue visibility (and a wider restart
+  // window) for nothing. Non-DJ personas keep the eager drain byte-for-byte.
   pairDrainActive(): boolean {
     return settings.get().transitions?.pairDrain !== false
       && !!settings.getEffectivePersona()?.djMode;
