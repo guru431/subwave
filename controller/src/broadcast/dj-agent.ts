@@ -1154,6 +1154,9 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
       track: { title: song.title, artist: song.artist, id: song.id },
       introScript: intro || null,
       guard: guardVerdict,
+      // Fork: push()'s position of THIS item — a request jumps ahead of
+      // undrained auto-picks, so the queue length is not the listener's place.
+      queuePosition: pos,
     };
   });
 }

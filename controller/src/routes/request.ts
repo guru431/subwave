@@ -414,10 +414,12 @@ async function resolveRequest(entry) {
       meta: { trackId: pick.id, requester },
     });
     entry.introScript = introScript || null;
+    // Fork: position from push(), not the queue length — a request jumps ahead
+    // of undrained auto-picks, so the tail is somebody else (see song-id above).
     return resolved({
       ack: withWaitNotice(ackLine, pick.id),
       track: { title: pick.title, artist: pick.artist },
-      queuePosition: queue.upcoming.length,
+      queuePosition: pos,
     });
   }
 
@@ -455,7 +457,8 @@ async function resolveRequest(entry) {
       return resolved({
         ack: withWaitNotice(agentRes.ack, agentRes.track.id),
         track: agentRes.track,
-        queuePosition: queue.upcoming.length,
+        // Fork: the agent hands back push()'s own position (see song-id above).
+        queuePosition: agentRes.queuePosition,
       });
     }
   } catch (err) {
@@ -738,10 +741,11 @@ async function resolveRequest(entry) {
 
   entry.pickSource = pickSource;
   entry.introScript = introScript || null;
+  // Fork: position from push(), not the queue length (see song-id above).
   return resolved({
     ack: withWaitNotice(ack, pick.id),
     track: { title: pick.title, artist: pick.artist },
-    queuePosition: queue.upcoming.length,
+    queuePosition: pos,
   });
 }
 
