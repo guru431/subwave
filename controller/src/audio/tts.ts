@@ -13,7 +13,7 @@ import { heavyEnabledEngines } from './ttsHeavyClient.js';
 import * as remoteTts from './remoteTts.js';
 import { normalizeForSpeech } from './speech-text.js';
 import {
-  configuredSlot, fallbackTextFor, orderedFallbacks, sameTtsTarget,
+  configuredSlot, fallbackTextFor, orderedFallbacks, rescueForbidden, sameTtsTarget,
   type RescueSlot, type TtsTarget,
 } from './tts-fallback.js';
 import { localizedPreviewText } from './preview-text.js';
@@ -163,6 +163,10 @@ function resolveEngine(kind: string, personaTts: any): RescueSlot {
   // default is itself usable (except on the same-engine cloud hop below); if it
   // isn't, the runtime chain in speak() picks up the pieces.
   if (!engineUsable(chosen, personaCloudProvider(personaTts))) {
+    // Substitution banned: keep the persona's own engine and let the call
+    // throw. speak() then walks an empty chain and the segment is dropped —
+    // the pre-flight half of the rule the chain applies mid-render.
+    if (rescueForbidden(tts.fallback)) return plainSlot(chosen);
     // Probed with the fallback's OWN cloud provider, matching the credentials
     // the call would actually use — the same probe/call agreement rule the
     // mid-render chain follows.
@@ -218,6 +222,9 @@ function resolveEngine(kind: string, personaTts: any): RescueSlot {
 // At most four attempts; the ordering is pure and pinned by
 // scripts/tts-fallback.test.ts.
 function fallbackChain(primary: TtsTarget): RescueSlot[] {
+  // Substitution banned by the operator: no rescue at all, so a failed render
+  // drops the line instead of airing it in another engine's voice.
+  if (rescueForbidden(settings.get().tts?.fallback)) return [];
   return orderedFallbacks(
     primary,
     fallbackSlot(),

@@ -63,6 +63,22 @@ export interface TtsFallbackConfig {
 // know. Kept beside the chain so "what does a configured fallback look like"
 // has exactly one answer, shared by the pre-flight reroute and the mid-render
 // rescue.
+// A disabled fallback block (`settings.tts.fallback.enabled === false`) bans
+// engine substitution outright, not just the operator's own rung. The rescue
+// order below hardcodes defaultEngine → Piper → Kokoro, so dropping the
+// configured slot alone still lands on Piper and the operator's switch is
+// decorative. A station whose voice is a cloned reference would rather lose
+// the line than air it in a different voice.
+//
+// Strict comparison, not `!fallback?.enabled`: an absent block means upstream
+// behaviour, and reading it as a ban would silence every station that never
+// configured a fallback at all.
+export function rescueForbidden(
+  fallback: TtsFallbackConfig | null | undefined,
+): boolean {
+  return fallback?.enabled === false;
+}
+
 export function configuredSlot(
   fallback: TtsFallbackConfig | null | undefined,
   engines: readonly string[],

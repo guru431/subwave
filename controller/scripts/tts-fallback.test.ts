@@ -10,7 +10,8 @@
 
 import assert from 'node:assert/strict';
 import {
-  configuredSlot, fallbackTextFor, orderedFallbacks, sameTtsTarget, type RescueSlot,
+  configuredSlot, fallbackTextFor, orderedFallbacks, rescueForbidden, sameTtsTarget,
+  type RescueSlot,
 } from '../src/audio/tts-fallback.js';
 
 const allUsable = () => true;
@@ -311,5 +312,30 @@ assert.deepEqual(
   [['cloud', 'elevenlabs'], ['kokoro', null]],
   'configured rung probed with its own provider; hardcoded rungs with null',
 );
+
+// ---- Substitution ban ------------------------------------------------------
+//
+// tts.ts skips BOTH the pre-flight reroute and the rescue chain while this
+// holds, which is what makes the operator's switch real: without it the
+// hardcoded Piper rung speaks anyway. The boundary that matters is the absent
+// block — upstream stations have none, and reading it as a ban would take
+// their voice away at the first engine hiccup.
+assert.equal(
+  rescueForbidden({ enabled: false }),
+  true,
+  'explicit disable bans substitution',
+);
+assert.equal(
+  rescueForbidden({ enabled: true, engine: 'piper' }),
+  false,
+  'an enabled fallback keeps the rescue chain',
+);
+assert.equal(
+  rescueForbidden({ engine: 'piper' }),
+  false,
+  'a block without the flag is not a ban',
+);
+assert.equal(rescueForbidden(undefined), false, 'absent block keeps upstream behaviour');
+assert.equal(rescueForbidden(null), false, 'null block keeps upstream behaviour');
 
 console.log('tts-fallback.test.ts: all assertions passed');
