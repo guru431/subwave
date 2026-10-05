@@ -3466,7 +3466,9 @@ class Queue {
     if (session.pendingHandoff()) return;
     this.tracksUntilLink--;
     if (this.tracksUntilLink > 0) return;
-    this.tracksUntilLink = pickLinkInterval();
+    // Every return below leaves the counter DUE (≤ 0): a seam with nothing to
+    // write for must not spend the interval, or the next eligible seam would
+    // wait a whole one more. It resets only when a line is actually written.
     const idx = this.upcoming.findIndex(i => !i.sent);
     if (idx < 0) return;                       // everything is already handed over
     const item = this.upcoming[idx];
@@ -3475,6 +3477,7 @@ class Queue {
     if (item.introScript || item.requestedBy) return;
     const previous = idx > 0 ? this.upcoming[idx - 1].track : this.current?.track;
     if (!previous) return;
+    this.tracksUntilLink = pickLinkInterval();
     // Fire-and-forget, like the pick cycle: the seam must not wait on the LLM.
     djAgent.writeSeamLink(this, item, previous).catch(err => {
       this.log('error', `Seam link failed: ${(err as Error).message}`);

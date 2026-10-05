@@ -4,6 +4,10 @@
 //    take tens of seconds. By the time the line comes back the item may have
 //    aired, been cancelled, or got a line of its own (a request intro, a pick's
 //    link). The line is then dropped — no fields, no persist, no render.
+//  * maybeWriteSeamLink spends the shared `tracksUntilLink` cadence only when
+//    it actually writes. A seam with nothing to write for (everything handed
+//    over, a request or a scripted item at the head) leaves the counter due,
+//    so the next eligible seam speaks instead of waiting a whole interval.
 // Only the model and the weather are faked.
 // Run: npm test -- seam-link
 
@@ -101,4 +105,37 @@ test('an item that got its own line during the model call keeps it', async () =>
   assert.equal(next.introScript, 'Its own line.');
   assert.equal(next.introKind, 'dj-speak');
   assert.equal(persists, 0);
+});
+
+// ── maybeWriteSeamLink: the cadence ─────────────────────────────────────────
+
+test('a seam with everything handed over does not spend the due counter', () => {
+  reset([item('a', { sent: true })]);
+  queue.tracksUntilLink = 1;
+  queue.maybeWriteSeamLink(true);
+  assert.equal(queue.tracksUntilLink, 0, 'still due — the next seam writes');
+});
+
+test('a request at the head does not spend the due counter', () => {
+  reset([item('r', { aiPicked: false, requestedBy: 'alice' })]);
+  queue.tracksUntilLink = 0;
+  queue.maybeWriteSeamLink(true);
+  assert.ok(queue.tracksUntilLink <= 0, `still due (got ${queue.tracksUntilLink})`);
+});
+
+test('a head that already has a line does not spend the due counter', () => {
+  reset([item('s', { introScript: 'Already scripted.' })]);
+  queue.tracksUntilLink = 1;
+  queue.maybeWriteSeamLink(true);
+  assert.equal(queue.tracksUntilLink, 0);
+});
+
+test('control: a seam that writes resets the counter', async () => {
+  const next = item('w');
+  reset([next]);
+  queue.tracksUntilLink = 1;
+  queue.maybeWriteSeamLink(true);
+  assert.ok(queue.tracksUntilLink > 0, `a fresh interval (got ${queue.tracksUntilLink})`);
+  for (let i = 0; i < 200 && !next.introScript; i++) await new Promise(r => setTimeout(r, 10));
+  assert.ok(next.introScript, 'and the line was written');
 });
