@@ -404,6 +404,7 @@ class Queue {
   _nowPlayingFresh = false;            // true once the watcher's first tick has landed
   senderBusy = false;          // drain-to-Liquidsoap mutex
   pendingForceDrain = false;   // a forced drain arrived while senderBusy — re-run on release
+  pendingForceItem: QueueItem | null = null;   // Fork: the item that pending force must reach (clip-as-track)
   pickerBusy = false;          // prevent concurrent LLM picks
   autoPick = true;             // toggle: should we ask Ollama for next track when idle
   // How many picked-but-unplayed tracks may sit in Liquidsoap's dj_queue.
@@ -1840,7 +1841,13 @@ class Queue {
   // draining around a held item). The watcher tick re-runs this as the clock
   // advances; past the hard deadline the item drains with track-intrinsic
   // stamps only. transitions.pairDrain off → eager drain, today's behaviour.
-  async drainToLiquidsoap(force = false) {
+  //
+  // Fork: `force` is `true` (commitBeforeSkip — the HEAD must be committed) or
+  // the one QueueItem a clip-as-track fire is waiting for. It reaches that item
+  // and whatever is still unsent ahead of it, past the pair hold and past
+  // DRAIN_AHEAD; everything behind it drains by the ordinary rules. A bare
+  // "force everything" emptied a deep queue into dj_queue on every skip.
+  async drainToLiquidsoap(force: boolean | QueueItem = false) {
     this.invalidateObsoleteHostSpeech();
     if (this.senderBusy) {
       // A forced drain (the clip-as-track recovery) must not vanish into a
@@ -1849,23 +1856,30 @@ class Queue {
       // Single-flight stays single: flag it and the in-flight drain re-runs
       // forced the moment it releases.
       if (force) this.pendingForceDrain = true;
+      if (force && force !== true) this.pendingForceItem = force;
       return;
     }
     this.senderBusy = true;
+    // Resolved once: the head as it stands now, or the named item.
+    const forceUpTo: QueueItem | null = force === true ? (this.upcoming[0] ?? null) : (force || null);
     try {
       while (true) {
         const item = this.upcoming.find(i => !i.sent);
         if (!item) break;
+
+        const idx = this.upcoming.indexOf(item);
+        // Gone from the queue (aired, cancelled) → indexOf is -1 and nothing
+        // is forced any more.
+        const forced = !!forceUpTo && idx >= 0 && idx <= this.upcoming.indexOf(forceUpTo);
 
         // Feeding Liquidsoap deeper than DRAIN_AHEAD would undo queue depth
         // rather than use it: dj_queue is handed over, so a listener request
         // can no longer jump the line (push() inserts before the first UNSENT
         // auto-pick) and a cancel turns into a removal by rid. The queue stays
         // deep on OUR side, where it can still be reordered and trimmed.
-        // `force` is the clip-as-track recovery path and never holds.
-        if (!force && this.upcoming.filter(i => i.sent).length >= Queue.DRAIN_AHEAD) break;
+        // A forced item never holds; nothing behind it is forced.
+        if (!forced && this.upcoming.filter(i => i.sent).length >= Queue.DRAIN_AHEAD) break;
 
-        const idx = this.upcoming.indexOf(item);
         const hasSuccessor = idx >= 0 && idx + 1 < this.upcoming.length;
         // The clock that governs THIS item's drain is the end of the track it
         // will FOLLOW — the on-air track extended past any sent-but-unaired
@@ -1875,7 +1889,7 @@ class Queue {
         // caught live in the first on-air smoke test.
         // `force` is the clip-as-track recovery path (onTrackStarted's guard):
         // never hold, but a known successor still earns its pair stamps.
-        const action = force
+        const action = forced
           ? (hasSuccessor ? 'send-pair' : 'send-intrinsic')
           : drainAction({
               pairDrain: this.pairDrainActive(),
@@ -2126,7 +2140,11 @@ class Queue {
       this.senderBusy = false;
       if (this.pendingForceDrain) {
         this.pendingForceDrain = false;
-        void this.drainToLiquidsoap(true);
+        // Fork: a pending clip-as-track item still queued is the furthest
+        // reach asked for — it covers the head as well.
+        const target = this.pendingForceItem;
+        this.pendingForceItem = null;
+        void this.drainToLiquidsoap(target && this.upcoming.includes(target) ? target : true);
       }
     }
   }
@@ -2147,6 +2165,8 @@ class Queue {
     const t0 = Date.now();
     // One forced kick covers every held item; a busy sender re-runs it forced
     // on release (pendingForceDrain), so the loop below only observes.
+    // Fork: "every held item" is the HEAD — the one the skip lands on; the
+    // rest of a deep queue stays behind DRAIN_AHEAD.
     void this.drainToLiquidsoap(true);
     let headSentAt: number | null = null;
     const deadline = t0 + SKIP_COMMIT_WAIT_MS;
@@ -3181,9 +3201,14 @@ class Queue {
     // introduced never airs. Force-drain NOW (bypassing the pair hold) and leave
     // this fire unprocessed: lastSeenKey stays unset, so the track's REAL fire
     // re-enters and the normal consume path takes over.
-    if (np.subsonic_id && this.upcoming.some(u => !u.sent && u.track.id === np.subsonic_id)) {
+    const unsentFired = np.subsonic_id
+      ? this.upcoming.find(u => !u.sent && u.track.id === np.subsonic_id)
+      : undefined;
+    if (unsentFired) {
       this.log('scheduler', `"${np.title}" fired while its queue item was still unsent — force-draining it (clip-as-track guard)`);
-      void this.drainToLiquidsoap(true);
+      // Fork: force exactly that item (and anything unsent ahead of it), not
+      // the whole deep queue behind it.
+      void this.drainToLiquidsoap(unsentFired);
       return;
     }
     this.lastSeenKey = key;
