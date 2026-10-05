@@ -453,7 +453,9 @@ requestPath: true })` в `runRequestViaAgent`. Это тот приём, кот�
 
 Апстримный диагностический тест `scripts/pair-drain-interleaving.test.ts` переписан:
 тот же повтор артиста из заказа, но теперь сначала спасение пулом, и строка
-называет окно, а не слоты.
+называет окно, а не слоты. Имя теста — по сути проверки: «…puts the candidate
+inside the artist window, and the empty pool rescue lets it stand» (было апстримное
+«…soft spacing repeat»).
 
 **Проверено.** `scripts/artist-guard-run.test.ts` — пять тестов окна (перевыбор,
 спасение пулом при исчерпании, артист якоря не возвращается, сорванный перевыбор

@@ -169,7 +169,7 @@ test('the event prompt names the captured anchor without claiming current adjace
   assert.doesNotMatch(observed.eventPrompt ?? '', /Now playing "Heads We're Dancing"|immediately preceding|twice in a row/);
 });
 
-test('the interleaved Bill Evans request currently makes the candidate a soft spacing repeat', () => {
+test('the interleaved Bill Evans request puts the candidate inside the artist window, and the empty pool rescue lets it stand', () => {
   assert.ok(observed);
   // Fork: the station's hours window (ArtistGuardDeps.windowRoots) is a hard
   // rule, so the queued request's artist sends this pick to the pool rescue
