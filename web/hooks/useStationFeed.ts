@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import { pollWhileVisible } from '@/lib/poll';
 import { splitAudibleTurns } from '@/lib/sessionFeed';
 import { useStationClient } from '@/lib/stationClient';
@@ -52,6 +52,22 @@ export interface StationFeed {
 const EMPTY_STATE: StationState = { upcoming: [], history: [], djLog: [] };
 const EMPTY_SESSION: SessionPayload = { session: null, messages: [] };
 const OFFLINE_CONFIRM_POLLS = 4;
+// Cadence while the page is hidden but the stream is still playing (see
+// UseStationFeedOptions). Three times slower than the foreground poll: the only
+// consumer that far back is the OS lock screen, and a track change it learns
+// about ~15s late is invisible next to a track that never changes at all.
+const BACKGROUND_POLL_MS = 15_000;
+
+export interface UseStationFeedOptions {
+  /** Hidden page → the poll normally stops, and everything derived from the
+   *  feed freezes with it. On a phone that includes the lock screen's track
+   *  title and progress, which is exactly when the listener is looking at it,
+   *  so a tuned-in player keeps polling in the background instead.
+   *  A ref rather than a boolean because this hook runs BEFORE usePlayer (the
+   *  Opus gate needs the feed first) and because tuning in must not tear down
+   *  and re-subscribe the poll. */
+  keepAliveWhenHidden?: RefObject<boolean>;
+}
 
 // Returning `prev` from the updater skips the re-render, so a quiet poll tick
 // costs nothing. Server JSON keeps stable key order, so the stringify compare is
@@ -70,7 +86,7 @@ function setIfChanged<T>(setter: Dispatch<SetStateAction<T>>, next: T): void {
 // cache it never exposes), so it read 2.25s while the listener was genuinely
 // 22.5s behind, flipping every title ~20s early. The burst is also sized in
 // SECONDS per mount server-side now, so every mount lands on bufferSeconds.
-export function useStationFeed(): StationFeed {
+export function useStationFeed({ keepAliveWhenHidden }: UseStationFeedOptions = {}): StationFeed {
   const client = useStationClient();
   const [nowPlaying, setNowPlaying] = useState<NowPlayingTrack | null>(null);
   const [context, setContext] = useState<StationContext | null>(null);
@@ -205,7 +221,11 @@ export function useStationFeed(): StationFeed {
         }
       } catch {}
     };
-    const stopPolling = pollWhileVisible(() => { void tick(); }, 5000);
+    const stopPolling = pollWhileVisible(
+      () => { void tick(); },
+      5000,
+      () => (keepAliveWhenHidden?.current ? BACKGROUND_POLL_MS : null),
+    );
     return () => {
       stopPolling();
       // A held track switch (or a held spoken line) must not land after teardown.
@@ -218,7 +238,7 @@ export function useStationFeed(): StationFeed {
         voiceTimerRef.current = null;
       }
     };
-  }, [client]);
+  }, [client, keepAliveWhenHidden]);
 
   return { nowPlaying, context, dj, activeShow, listeners, streamOnline, llmTokens, state, session, trackStartedAt, opusEnabled, timezone, locale };
 }

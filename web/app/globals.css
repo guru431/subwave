@@ -972,6 +972,23 @@ html.lite .sw-ripple-circle {
     font-variant-numeric: tabular-nums;
 }
 
+/* The status-bar strip on a notched iPhone. viewport-fit=cover plus a
+   translucent status bar puts the header's frosted glass UNDER the Dynamic
+   Island, so the page smeared through around it and the clock sat on a moving
+   blur. Fill that strip with flat page background instead — the rest of the
+   header stays frosted. Height is the inset itself, so this is zero-height (and
+   invisible) on every device without one. */
+.player-topbar::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    left: 0;
+    height: env(safe-area-inset-top);
+    background: var(--bg);
+    pointer-events: none;
+}
+
 /* Player header runs larger than the shared v3 scale (readable at arm's length)
    and swaps the wordmark to the display serif; other header labels stay sans. */
 .player-topbar .v3-eyebrow {
