@@ -727,9 +727,12 @@ export async function writeSeamLink(queue, item, previous): Promise<boolean> {
   // linkClockAt takes back off; without it the forecast ran two minutes early.
   const now = Date.now();
   const airAt = linkClockAt(seamLinkShowAt(queue.remainingUntilItemAirs(item), now), now);
+  // The station clock switch, as the pool path applies it: the prompt packet
+  // offers an air time on clockIsAirTime alone.
+  const clockAllowed = speakClockAllowed();
   const generated = await generatePickLink({
     previous, current: item.track, context: speechClockContext(ctx, airAt),
-    clockIsAirTime: !!airAt,
+    clockIsAirTime: !!airAt && clockAllowed,
     recap: queue.getDjRecap(), recentTracks: queue.getRecentTracks(),
     recentOpeners: queue.getRecentOpeners(),
     lastLink: queue.getLastLinkText(),
@@ -750,7 +753,7 @@ export async function writeSeamLink(queue, item, previous): Promise<boolean> {
   // Stamped only when a clock was OFFERED, exactly as the pick paths do: a
   // line written under the station clock ban names no time, and the drift
   // guard must not drop it for naming the wrong one.
-  item.linkClockAt = linkClockStampFor(airAt, speakClockAllowed())?.getTime() ?? null;
+  item.linkClockAt = linkClockStampFor(airAt, clockAllowed)?.getTime() ?? null;
   queue.persist();
   queue.log('link', trimmed);
   // The drain renders a WAV when it hands an item over, but the seam item is
