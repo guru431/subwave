@@ -119,8 +119,15 @@ export function usePlayer({ initialVolume = 1, opusEnabled = null }: UsePlayerOp
   useEffect(() => { streamsRef.current = streams; }, [streams]);
   useEffect(() => { volumeRef.current = volume; }, [volume]);
 
+  // Volume 0 also rides the element's native `muted` flag. On iOS `volume` is
+  // read-only at the system level, so muting by level alone did nothing there
+  // and the mute button read as broken; `muted` is honoured on every platform,
+  // and setting both keeps the behaviour identical everywhere else (#298).
   useEffect(() => {
-    if (audioRef.current) audioRef.current.volume = volume;
+    const el = audioRef.current;
+    if (!el) return;
+    el.volume = volume;
+    el.muted = volume === 0;
   }, [volume]);
 
   // Restore the listener's last-used volume (issue #783). Effect-only, so SSR
@@ -215,6 +222,7 @@ export function usePlayer({ initialVolume = 1, opusEnabled = null }: UsePlayerOp
       const myGen = ++gen.current;
       audio.src = withStreamAuth(`${streamUrlRef.current}?t=${Date.now()}`);
       audio.volume = volumeRef.current;
+      audio.muted = volumeRef.current === 0;
       setStatus('connecting');
       const p = audio.play();
       playPromise.current = p;
@@ -358,6 +366,7 @@ export function usePlayer({ initialVolume = 1, opusEnabled = null }: UsePlayerOp
     retryCount.current = 0;
     el.src = withStreamAuth(`${streamUrl}?t=${Date.now()}`);
     el.volume = volume;
+    el.muted = volume === 0;
     setTunedIn(true);
     setStatus('connecting');
     const p = el.play();
@@ -371,8 +380,9 @@ export function usePlayer({ initialVolume = 1, opusEnabled = null }: UsePlayerOp
     });
   };
 
-  // Mute is volume 0; toggling restores the last non-zero level so the 'M'
-  // shortcut and the command palette round-trip.
+  // Mute is volume 0 (mirrored onto the element's `muted` flag — see the volume
+  // effect); toggling restores the last non-zero level so the 'M' shortcut and
+  // the command palette round-trip.
   const toggleMute = () => {
     if (volume > 0) {
       preMuteVolume.current = volume;
