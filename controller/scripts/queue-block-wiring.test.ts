@@ -16,7 +16,7 @@
 // Run: npm test -- queue-block-wiring
 
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import { queue } from '../src/broadcast/queue.js';
 import { queueBlockSchema, QUEUE_BLOCK_MAX_TRACKS } from '../src/schemas/dj.js';
 import { formatWait, requestWaitClause, REQUEST_WAIT_NOTICE_SEC } from '../src/broadcast/queue/pure.js';
@@ -30,6 +30,16 @@ import { formatWait, requestWaitClause, REQUEST_WAIT_NOTICE_SEC } from '../src/b
 function reset() {
   queue.upcoming = [];
   queue.current = null;
+}
+
+// Fork: airForecastSec counts from Date.now(), so two readings a millisecond
+// apart differ (323.999 !== 324) and a test comparing two of them flaked.
+// Pin the clock for the test that compares, restore it after.
+function freezeNow(t: TestContext) {
+  const realNow = Date.now;
+  const frozen = realNow();
+  Date.now = () => frozen;
+  t.after(() => { Date.now = realNow; });
 }
 
 const err = (body: unknown): string => {
@@ -247,7 +257,8 @@ test('the forecast counts unsent items ahead, which the drain clock does not', a
 // this forecast's callers are understated by the miss in the direction that
 // matters: the listener is told their request is closer than it is, and
 // runsPastShowChange under-reports the overrun.
-test('the forecast counts a bed queued ahead, which is not an upcoming entry', async () => {
+test('the forecast counts a bed queued ahead, which is not an upcoming entry', async (t) => {
+  freezeNow(t);
   reset();
   queue.current = {
     track: { id: 'onair', title: 'On air', duration: 100 },
@@ -266,7 +277,8 @@ test('the forecast counts a bed queued ahead, which is not an upcoming entry', a
 });
 
 // The item's own bed plays immediately ahead of it, so it delays this item too.
-test("the forecast counts the item's OWN bed", async () => {
+test("the forecast counts the item's OWN bed", async (t) => {
+  freezeNow(t);
   reset();
   queue.current = {
     track: { id: 'onair', title: 'On air', duration: 100 },
@@ -279,7 +291,8 @@ test("the forecast counts the item's OWN bed", async () => {
   assert.equal(queue.airForecastSec(request), bare + 18);
 });
 
-test('the forecast counts pause-and-talk silence hidden ahead of a request', async () => {
+test('the forecast counts pause-and-talk silence hidden ahead of a request', async (t) => {
+  freezeNow(t);
   reset();
   queue.current = {
     track: { id: 'onair', title: 'On air', duration: 100 },
@@ -294,7 +307,8 @@ test('the forecast counts pause-and-talk silence hidden ahead of a request', asy
   assert.equal(queue.airForecastSec(request), bare + 34.75);
 });
 
-test("the forecast counts the item's OWN pause-and-talk delay", async () => {
+test("the forecast counts the item's OWN pause-and-talk delay", async (t) => {
+  freezeNow(t);
   reset();
   queue.current = {
     track: { id: 'onair', title: 'On air', duration: 100 },
@@ -310,7 +324,8 @@ test("the forecast counts the item's OWN pause-and-talk delay", async () => {
 // An UNSENT item ahead has had no bed pushed — the decision happens at ITS
 // drain — so a zero contribution is correct rather than a miss. Pinned so the
 // next person to touch bedDelayBeforeItemAirs does not "fix" the sent gate.
-test('an unsent item ahead contributes no bed, because it has none yet', async () => {
+test('an unsent item ahead contributes no bed, because it has none yet', async (t) => {
+  freezeNow(t);
   reset();
   queue.current = {
     track: { id: 'onair', title: 'On air', duration: 100 },
