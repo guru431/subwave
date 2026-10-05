@@ -1,0 +1,10 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+markers = [
+    "integration: ходит на шару/SSH/в живые службы или дольше ~1с",
+    "manual: запускается руками",
+]
+addopts = "-v --tb=short -m 'not integration and not manual'"
+# pytest-timeout: зависший тест падает за 30 с со стеком, а не держит прогон
+timeout = 30

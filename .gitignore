@@ -56,3 +56,18 @@ ds-bundle/
 .design-sync/node_modules
 web/.ds-styles.css
 __pycache__/
+
+# --- radio (форк): приватное и локальное — в git не попадает ---
+/CLAUDE.local.md
+/FINDINGS.md
+/FINDINGS-archive.md
+/IDEAS.md
+/IDEAS-archive.md
+/.sanitize-patterns
+/.sanitize-map.json
+/.github-push-deny
+/station/.env
+/station/tts-f5/voices/
+/station/tts-bridge/refs/
+__pycache__/
+.pytest_cache/
