@@ -45,7 +45,7 @@ export default memo(function TopBar({
             data-spinning={tunedIn ? 'true' : undefined}
             aria-hidden="true"
           />
-          <span className="v3-eyebrow shrink-0">{stationName?.trim() || 'SUB/WAVE'}</span>
+          <span className="v3-eyebrow shrink-0">{stationName?.trim() || 'AI радио'}</span>
           {showName && (
             onOpenSchedule ? (
               <button
