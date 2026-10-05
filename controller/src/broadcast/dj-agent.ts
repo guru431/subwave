@@ -979,7 +979,9 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
       ? `The request to resolve now — listener "${requester}" asks: "${text}"`
       : `The request to resolve now — an unnamed listener asks: "${text}"`)
       + (cur ? ` (currently playing "${cur.title}" by ${cur.artist}${cur.id ? ` [id: ${cur.id}]` : ''})` : '');
-    const messages = session.windowMessages();
+    // Without anyone's earlier requests: the tail is the only request the run
+    // may see, or the model resolves somebody else's (session.windowMessages).
+    const messages = session.windowMessages({ omitRequests: true });
     const last = messages[messages.length - 1];
     if (last && last.role === 'user') last.content += '\n' + tail;
     else messages.push({ role: 'user', content: tail });

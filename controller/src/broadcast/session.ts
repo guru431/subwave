@@ -684,7 +684,13 @@ function softShift(ctx: SessionContext, nextKey: string): Session {
 // event (older asks are already answered and add ambiguity). The DJ's own
 // `dj`/`pick` rationales are kept to the most recent RATIONALE_WINDOW — left
 // unbounded, the agent reads its own commentary as a mandate to keep the thread.
-export function windowMessages() {
+//
+// `omitRequests` (the request agent): EVERY request turn, the listener's event
+// and the DJ's answer alike — a request run is pinned to its own tail line, yet
+// the model took its search query from an earlier listener's request in the
+// window ("вулючи барбарики" searched for the previous ask, "Муцураев"). An
+// already answered request is no context for resolving a new one.
+export function windowMessages({ omitRequests = false }: { omitRequests?: boolean } = {}) {
   if (!_session) return [];
   const raw: { role: 'user' | 'assistant'; content: string }[] = [];
   if (_session.handoff) {
@@ -708,6 +714,7 @@ export function windowMessages() {
     if (m.kind === 'sfx') continue;        // audio-production cue, not conversation — bare effect name reads as spoken
     if (m.role === 'event' && m.kind === 'pick' && i !== lastPickEventIdx) continue;  // old pick asks
     if (m.role === 'dj' && m.kind === 'pick' && !keepRationaleIdx.has(i)) continue;   // stale pick rationales
+    if (omitRequests && m.kind === 'request' && (m.role === 'event' || m.role === 'dj')) continue;
     const role = (m.role === 'dj' || m.role === 'segment') ? 'assistant' : 'user';
     // Coalescing below would glue a private pick rationale, or a line voiced by
     // another persona (a sign-off stored in the new session, a guest co-host's
