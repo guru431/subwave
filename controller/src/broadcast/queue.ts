@@ -114,6 +114,7 @@ import {
   knownDurationSec,
   linkClockDrifted,
   nextTransitionLabel,
+  pickAnchorFrame,
   pickLeadSec,
   topUpDepth,
   pickLinkInterval,
@@ -3562,10 +3563,11 @@ class Queue {
         // here and the :00 cron won it mid-song, airing the changeover track
         // (already picked under the incoming brief) BEFORE anyone handed over.
         // With one date there is no second date to disagree with.
-        const leadSec = pickLeadSec(
-          this.remainingSecOnAir(),
-          pickAnchorItem ? knownDurationSec(pickAnchorItem.track) : null,
-        );
+        // Fork: with an anchor the lead runs through EVERY queued track up to
+        // it (a top-up anchors on the tail), not just the anchor's own length.
+        const leadSec = pickAnchorItem
+          ? this.pickAnchorFrame(pickAnchorItem).leadSec
+          : pickLeadSec(this.remainingSecOnAir(), null);
         let showAt: Date | null = null;
         if (leadSec != null) {
           showAt = new Date(Date.now() + (leadSec + PICK_SHOW_LOOKAHEAD_SEC) * 1000);
@@ -3637,7 +3639,9 @@ class Queue {
           wantLink: wantLink && !finalTrackHandoff,
           showAt,
           pickAnchor: pickAnchorItem?.track ?? null,
-          anchorPrior: pickAnchorItem ? (this.current?.track ?? null) : null,
+          // Fork: what the anchor itself follows — the item ahead of it in the
+          // queue, or the on-air track when it is the head.
+          anchorPrior: pickAnchorItem ? (this.pickAnchorFrame(pickAnchorItem).prior?.track ?? null) : null,
         });
       } catch (err) {
         this.log('error', `DJ track event failed: ${(err as Error).message}`);
@@ -3653,6 +3657,18 @@ class Queue {
         }
       }
     })();
+  }
+
+  // Fork: the anchored pick's lead and predecessor, read off the live queue
+  // (the rule itself is pure — queue/pure.ts pickAnchorFrame).
+  pickAnchorFrame(anchor: QueueItem) {
+    return pickAnchorFrame({
+      upcoming: this.upcoming,
+      anchor,
+      current: this.current,
+      remainingSec: this.remainingSecOnAir(),
+      durationSec: i => knownDurationSec(i.track),
+    });
   }
 
   // Pair-drain deadline routine, run every watcher tick. When the on-air track

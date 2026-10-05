@@ -258,6 +258,30 @@ export function pickLeadSec(remainingSec: number | null, heldSec: number | null 
   return rem + heldSec;
 }
 
+// Fork: the lead and the predecessor of a pick that lands right behind
+// `anchor` in `upcoming`. A top-up anchors on the queue's TAIL, so every queued
+// track up to and including the anchor plays first and all of them count
+// toward the lead — not the anchor alone. The anchor itself follows the item
+// ahead of it, or the on-air track when it is the head (the deadline path,
+// whose answer is unchanged: remaining + held, after `current`). An anchor no
+// longer in the queue reads as a head. Any of those tracks with no known
+// length → null lead, pickLeadSec's "no look-ahead" for a held track.
+export function pickAnchorFrame<T>(opts: {
+  upcoming: readonly T[];
+  anchor: T;
+  current: T | null;
+  remainingSec: number | null;
+  durationSec: (item: T) => number;
+}): { leadSec: number | null; prior: T | null } {
+  const idx = opts.upcoming.indexOf(opts.anchor);
+  const ahead = idx >= 0 ? opts.upcoming.slice(0, idx + 1) : [opts.anchor];
+  const secs = ahead.map(opts.durationSec);
+  const leadSec = secs.every(s => Number.isFinite(s) && s > 0)
+    ? pickLeadSec(opts.remainingSec, secs.reduce((sum, s) => sum + s, 0))
+    : null;
+  return { leadSec, prior: idx > 0 ? opts.upcoming[idx - 1] : opts.current };
+}
+
 // Has this events-log play already been recorded by recordPlay? The old dedup
 // keyed on `${endedAt}|${title}` — an EXACT timestamp match — but recordPlay's
 // end-stamp never equals the event's start `t`, so it never fired and every
