@@ -5,7 +5,7 @@ import { config } from './config.js';
 import { fetchWithTimeout } from './util/fetch-timeout.js';
 import { resolveActiveShow, resolveOnAirLocation, get as getSettings, moodScheduleFor, weatherMoodFor } from './settings.js';
 import * as session from './broadcast/session.js';
-import { getListenerCount } from './broadcast/listeners.js';
+import { getListenerCount, singleFlight } from './broadcast/listeners.js';
 import { zonedParts, zonedISODate, clockDisplay, spokenHourPhrase, spokenTimePhrases, spokenDaypartPhrase } from './time.js';
 import { nextShowChangeMs } from './broadcast/show-boundary.js';
 
@@ -64,6 +64,12 @@ let weatherCache: { data: any; fetchedAt: number; configKey: string } = {
   configKey: '',
 };
 const WEATHER_TTL_MS = 30 * 60 * 1000;
+// Неудача тоже помнится: getWeather() зовут /now-playing (плеер и админка —
+// каждые 5 с), заказ, пик и подводки, и без памяти о неудаче недоступный
+// Open-Meteo стоил каждому из них таймаут в 10 с (23.09 — «тормозит админка»).
+// Помнится для того же места (ключ настроек погоды): другое место — новая попытка.
+export const WEATHER_FAIL_TTL_MS = 10 * 60 * 1000;
+let weatherFailed = { at: 0, configKey: '' };
 
 // Weather is settings-layer state, so read the live settings cache directly.
 // The old config.weather mirror was refreshed by POST /settings and at boot,
@@ -88,6 +94,7 @@ function weatherConfigKey(weather: ReturnType<typeof weatherConfig>) {
 // their location in /settings.
 export function invalidateWeatherCache() {
   weatherCache = { data: null, fetchedAt: 0, configKey: '' };
+  weatherFailed = { at: 0, configKey: '' };
 }
 
 // The place the weather readout is ATTRIBUTED to — the broad on-air location,
@@ -114,6 +121,23 @@ export async function getWeather() {
   ) {
     return weatherCache.data;
   }
+  if (weatherFailed.configKey === configKey && Date.now() - weatherFailed.at < WEATHER_FAIL_TTL_MS) {
+    return unknownWeather(weather);
+  }
+  return (await fetchWeatherOnce()) ?? unknownWeather(weather);
+}
+
+function unknownWeather(weather = weatherConfig()) {
+  const tempUnit = weather.units === 'imperial' ? 'F' : 'C';
+  return { condition: 'unknown', mood: null, temp: null, tempUnit, location: attributedLocation(weather) };
+}
+
+// Параллельные вызовы ждут один запрос, а не шлют каждый свой.
+const fetchWeatherOnce = singleFlight(fetchWeather);
+
+async function fetchWeather() {
+  const weather = weatherConfig();
+  const configKey = weatherConfigKey(weather);
   const imperial = weather.units === 'imperial';
   const tempUnit = imperial ? 'F' : 'C';
   try {
@@ -134,7 +158,8 @@ export async function getWeather() {
     weatherCache = { data: result, fetchedAt: Date.now(), configKey };
     return result;
   } catch {
-    return { condition: 'unknown', mood: null, temp: null, tempUnit, location: attributedLocation(weather) };
+    weatherFailed = { at: Date.now(), configKey };
+    return null;
   }
 }
 
