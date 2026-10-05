@@ -7,7 +7,21 @@ import { AUDIO_EMBEDDING_DIM, requireDb } from './handle.js';
 // `adoptStoredDim`, else `embeddingDim`) — the live schema dim.
 export async function migrate(embeddingDim: number, reseed = false, adoptStoredDim = false): Promise<number> {
   const d = requireDb();
-  const userVersion = (d.pragma('user_version', { simple: true }) as number) || 0;
+  let userVersion = (d.pragma('user_version', { simple: true }) as number) || 0;
+
+  // Fork (radio): the v1.8 fork stamped `tracks.path` as migration 21, and
+  // upstream's 21 is `era_untrusted`. A library.db from that image (restored
+  // from a backup, say) reads 21 with `path` and without `era_untrusted`, and
+  // would skip upstream 21..27 as if it had run them. Rewind it to 20; the
+  // column check at the end of the chain then finds `path` and leaves it.
+  if (userVersion === 21) {
+    const cols = (d.prepare(`PRAGMA table_info(tracks)`).all() as { name: string }[]).map((c) => c.name);
+    if (cols.includes('path') && !cols.includes('era_untrusted')) {
+      console.warn('[library-db] v1.8-fork database (user_version 21 = tracks.path) — rewinding to 20 so upstream 21+ run');
+      d.pragma('user_version = 20');
+      userVersion = 20;
+    }
+  }
 
   if (userVersion < 1) {
     runDdl(d, `
@@ -442,7 +456,8 @@ export async function migrate(embeddingDim: number, reseed = false, adoptStoredD
   // folder genres. On v1.8.0 this was migration 21; upstream has since taken
   // 21..27, so it is no longer a numbered step but an idempotent column check
   // that runs after upstream's chain and never touches user_version — the next
-  // upstream migration can take any number without colliding with it.
+  // upstream migration can take any number without colliding with it. (A v1.8
+  // database stamped 21 by the old step is rewound at the top of migrate().)
   const trackCols = d.prepare(`PRAGMA table_info(tracks)`).all() as { name: string }[];
   if (!trackCols.some((c) => c.name === 'path')) {
     runDdl(d, `ALTER TABLE tracks ADD COLUMN path TEXT;`);

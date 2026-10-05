@@ -69,5 +69,52 @@ assert.deepEqual(trackGenres({ id: 't3' }), ['Поп'], 'an id-only untagged ite
   assert.equal(db.getTrack('t1')?.path, REAL, 'a second migrate keeps the column and its data');
 }
 
+// ── a v1.8-fork database runs upstream 21..27 ──────────────────────────────
+// The fork's v1.8 image stamped `path` as migration 21; upstream's 21 is
+// era_untrusted. A library.db restored from a v1.8-fork backup arrives at
+// user_version 21 with `path` and without `era_untrusted`, and must not skip
+// upstream's 21..27 as if it had run them.
+{
+  const Database = (await import('better-sqlite3')).default;
+  const file = join(process.env.STATE_DIR!, 'library.db');
+  db.close();
+  // Recreate that file: take upstream 27..21 back off, newest first.
+  const raw = new Database(file);
+  // The schema holds vec0 tables; ALTER re-checks the whole schema, so load
+  // the module the way lifecycle.open() does.
+  (await import('sqlite-vec')).load(raw);
+  raw.exec(`
+    DROP TRIGGER tracks_moods_insert;
+    DROP TRIGGER tracks_moods_update;
+    DROP TRIGGER tracks_moods_delete;
+    DROP TABLE track_moods;
+    DROP INDEX idx_tracks_energy;
+    DROP TABLE id_rotation_journal;
+    ALTER TABLE tracks DROP COLUMN tail_start_ms;
+    ALTER TABLE tracks DROP COLUMN lead_silence_ms;
+    ALTER TABLE tracks DROP COLUMN tail_silence_ms;
+    DROP INDEX idx_tracks_album_id;
+    DROP INDEX idx_tracks_artist_id;
+    ALTER TABLE tracks DROP COLUMN album_id;
+    ALTER TABLE tracks DROP COLUMN artist_id;
+    ALTER TABLE tracks DROP COLUMN text_vector_dirty;
+    ALTER TABLE tracks DROP COLUMN era_untrusted;
+  `);
+  raw.pragma('user_version = 21');
+  raw.close();
+
+  await db.open({ embeddingDim: 768, adoptStoredDim: true });
+  const check = new Database(file, { readonly: true });
+  const cols = (check.prepare('PRAGMA table_info(tracks)').all() as { name: string }[]).map((c) => c.name);
+  const version = check.pragma('user_version', { simple: true }) as number;
+  const moods = check.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='track_moods'`).get();
+  check.close();
+  assert.ok(cols.includes('era_untrusted'), 'upstream 21 ran on the v1.8-fork database');
+  assert.ok(cols.includes('tail_start_ms'), 'and so did the rest of the chain');
+  assert.ok(moods, 'through 27');
+  assert.ok(version >= 27, `user_version reached upstream's head (got ${version})`);
+  assert.equal(db.getTrack('t1')?.path, REAL, 'the fork column and its data survive');
+}
+
 console.log('library-path.test.ts: all assertions passed');
 process.exit(0);

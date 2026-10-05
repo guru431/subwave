@@ -586,11 +586,15 @@ the crates matched that», «Easy there — try again in 12s» и ещё пол�
 tracks ADD COLUMN path TEXT` — только если колонки нет. `user_version` она не
 трогает, так что следующая миграция апстрима может взять любой номер.
 
-Переход базы, которую вела сборка форка на v1.8.0: там `user_version = 21` (наша
-прежняя миграция), а у v1.17 под номером 21 — `era_untrusted`, и блок `userVersion <
-21` молча не выполнился бы. Поэтому перед первым стартом нового образа, на
-остановленном контроллере, `state/library.db` получает `PRAGMA user_version = 20`:
-миграции 21–27 апстрима проходят, а проверка видит колонку `path` и ничего не делает.
+Переход базы, которую вела сборка форка на v1.8.0, — без ручного шага. Там
+`user_version = 21` (наша прежняя миграция), а у v1.17 под номером 21 —
+`era_untrusted`, и блок `userVersion < 21` молча не выполнился бы вместе с 22–27.
+Поэтому `migrate()` первым делом узнаёт подпись такой базы — `user_version = 21`,
+колонка `tracks.path` есть, `era_untrusted` нет — и откатывает `user_version` на 20
+(в журнале `[library-db] v1.8-fork database … rewinding to 20`): миграции 21–27
+апстрима проходят, а проверка в конце видит колонку `path` и ничего не делает. Это
+касается и базы, восстановленной из бэкапа времён v1.8. База апстрима на 21 несёт
+`era_untrusted` и под подпись не попадает.
 
 **Путь даёт флаг плеера Navidrome.** Без Report Real Path у плеера `sub-wave [node]`
 Navidrome отдаёт станции поддельный путь `Артист/Альбом/Трек`, и ни правила Folder,
@@ -631,7 +635,10 @@ Blocked появится «N tracks have no real path». Сохранённые 
 
 **Проверено.** `scripts/genre-cyrillic.test.ts`, `scripts/library-path.test.ts`
 (включая повторную миграцию: без проверки колонки — `duplicate column name`, RED →
-GREEN; `user_version` остаётся апстримным), `scripts/folder-genres.test.ts`,
+GREEN; `user_version` остаётся апстримным; и базу v1.8-форка — тест снимает с базы
+миграции 27…21 апстрима и ставит `user_version = 21`, после `open()` есть
+`era_untrusted`, `track_moods` и путь, RED → GREEN: без отката — `no such column:
+era_untrusted`), `scripts/folder-genres.test.ts`,
 `scripts/folder-rules.test.ts`. При переносе — `run-tests.sh --src`, `library-path`,
 `genre-cyrillic`, `folder*`, `blocklist*`, `show-filter*`, `library*`, `subsonic*`,
 `*genre*`, `id-adoption*`, `id-rotation*` (158/158).
