@@ -30,7 +30,7 @@ import * as library from '../music/library.js';
 import * as subsonic from '../music/subsonic.js';
 import * as dj from '../llm/dj.js';
 import { energyForDaypart, getClockContext, getDateContext, getTimeContext, getFullContext } from '../context.js';
-import { linkClockAt, linkClockStampFor } from './queue/pure.js';
+import { linkClockAt, linkClockStampFor, seamLinkShowAt } from './queue/pure.js';
 import { djObject, nearestId, modelTolerant } from '../llm/sdk.js';
 import * as budget from './dj-budget.js';
 import { withTrace, logEvent } from '../observability/events.js';
@@ -758,9 +758,12 @@ export async function writeSeamLink(queue, item, previous): Promise<boolean> {
   // returns this line — so the drain found no script, and airIntro rendered it
   // at AIR time: the host spoke 20s into the song, or a busy TTS answered 503
   // and the line never aired. The line is known minutes ahead of its seam, so
-  // render it now. An unsent item is still the drain's to render.
+  // render it now — through the same tracked render the drain uses
+  // (startIntroRender: it snapshots the line's identity, so a line replaced
+  // meanwhile never receives this WAV). An unsent item is still the drain's.
   if (item.sent && queue.upcoming.includes(item) && !item.introWav && autoVoiceAllowed()) {
-    await queue.prerenderIntro(item);
+    await queue.startIntroRender(item);
+    queue.persist();
   }
   return true;
 }

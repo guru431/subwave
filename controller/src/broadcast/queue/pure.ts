@@ -137,6 +137,19 @@ export function linkClockAt(showAt: Date | null | undefined, nowMs: number): Dat
   return airAt;
 }
 
+// The `showAt` a SEAM link (djAgent.writeSeamLink) hands linkClockAt. That
+// reads its argument through linkAirDate, i.e. as runPickCycle's
+// `now + leadSec + PICK_SHOW_LOOKAHEAD_SEC`, and takes the padding back off —
+// so a bare `now + leadSec` landed every seam forecast PICK_SHOW_LOOKAHEAD_SEC
+// early, and airIntro dropped the line as a drifted clock ("this seam is 110s
+// later": 6 of 10 seam links on one evening). `leadSec` is the time until THIS
+// item airs (Queue.remainingUntilItemAirs), not the on-air remainder: behind a
+// sent-but-unaired item the two differ by a whole track.
+export function seamLinkShowAt(leadSec: number | null | undefined, nowMs: number): Date | null {
+  if (typeof leadSec !== 'number' || !Number.isFinite(leadSec)) return null;
+  return new Date(nowMs + (Math.max(0, leadSec) + PICK_SHOW_LOOKAHEAD_SEC) * 1000);
+}
+
 // How far the real air moment may sit from the time a link was told to speak
 // before the line is dropped instead of aired.
 //

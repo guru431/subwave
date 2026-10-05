@@ -41,6 +41,7 @@ import {
   linkClockAt,
   linkClockDrifted,
   linkClockStampFor,
+  seamLinkShowAt,
 } from '../src/broadcast/queue/pure.js';
 import { DRAIN_DEADLINE_SEC, HARD_DEADLINE_SEC } from '../src/broadcast/drain-policy.js';
 
@@ -104,6 +105,38 @@ function main() {
 
   test('a forecast already in the past never speaks', () => {
     assert.equal(linkClockAt(showAtFor(NOW, 0), NOW + 60_000), null);
+  });
+
+  console.log('\nseam links (seamLinkShowAt):');
+
+  test('a seam forecast is the AIR moment, not two minutes before it', () => {
+    // The seam path used to hand linkClockAt `now + lead` bare; linkAirDate took
+    // PICK_SHOW_LOOKAHEAD_SEC off it, and airIntro dropped the line as drifted.
+    const lead = 300;
+    const at = linkClockAt(seamLinkShowAt(lead, NOW), NOW);
+    assert.ok(at, 'expected a clock with 5 minutes of runway');
+    assert.equal(at!.getTime(), NOW + lead * 1000);
+  });
+
+  test('the seam landing on schedule keeps its line', () => {
+    const lead = 300;
+    const at = linkClockAt(seamLinkShowAt(lead, NOW), NOW)!;
+    const seam = NOW + lead * 1000;
+    assert.equal(linkClockDrifted(at.getTime(), seam), false);
+    // The regression, pinned: the bare forecast drops the very same seam.
+    const bare = linkClockAt(new Date(NOW + lead * 1000), NOW);
+    assert.ok(!bare || linkClockDrifted(bare.getTime(), seam), 'bare forecast should not survive');
+  });
+
+  test('no forecast → no clock; a lead in the past clamps to now', () => {
+    assert.equal(seamLinkShowAt(null, NOW), null);
+    assert.equal(seamLinkShowAt(NaN, NOW), null);
+    assert.equal(seamLinkShowAt(-30, NOW)!.getTime(), showAtFor(NOW, 0).getTime());
+  });
+
+  test('the runway floor holds on the seam path too', () => {
+    assert.equal(linkClockAt(seamLinkShowAt(LINK_CLOCK_MIN_RUNWAY_SEC - 1, NOW), NOW), null);
+    assert.ok(linkClockAt(seamLinkShowAt(LINK_CLOCK_MIN_RUNWAY_SEC, NOW), NOW));
   });
 
   console.log('\nair-time drift guard (linkClockDrifted):');
