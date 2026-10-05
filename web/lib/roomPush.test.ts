@@ -40,7 +40,7 @@ test('подписка на тот же ключ остаётся', () => {
 
 test('подписка на прежний ключ опознаётся как мёртвая', () => {
   const other = keyBytes(RFC_KEY);
-  other[64] ^= 1;
+  other[64] = (other[64] ?? 0) ^ 1;
   assert.equal(sameKey(other.buffer as ArrayBuffer, RFC_KEY), false);
 });
 
