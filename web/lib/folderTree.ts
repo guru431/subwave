@@ -84,6 +84,17 @@ export function filterTree(
   return children.length ? { ...root, children } : null;
 }
 
+// Selected paths the tree gives no checkbox to — a folder renamed or gone since
+// the rule was saved, or the collapsed root and its ancestors. FolderTree can
+// only untick what it shows, so the editor lists these separately to remove.
+// No tree at all (empty library) means none of them can be unticked there.
+export function untickablePaths(root: FolderNode | null, selected: readonly string[]): string[] {
+  const inTree = new Set<string>();
+  const walk = (n: FolderNode) => n.children.forEach(c => { inTree.add(c.path); walk(c); });
+  if (root) walk(root);
+  return selected.filter(p => !inTree.has(p));
+}
+
 // A folder path as a rule row shows it: relative to the collapsed root.
 export function displayPath(root: FolderNode, path: string): string {
   return root.path && path.startsWith(`${root.path}/`) ? path.slice(root.path.length + 1) : path;

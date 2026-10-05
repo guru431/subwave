@@ -3,7 +3,9 @@
 // Запуск из корня клона:  npx tsx web/lib/folderTree.test.ts
 
 import assert from 'node:assert/strict';
-import { buildFolderTree, displayPath, filterTree, type FolderNode, type FolderStat } from './folderTree';
+import {
+  buildFolderTree, displayPath, filterTree, untickablePaths, type FolderNode, type FolderStat,
+} from './folderTree';
 
 let failures = 0;
 function test(name: string, fn: () => void) {
@@ -92,6 +94,21 @@ test('назначение для исчезнувшей папки остаёт
 
 test('без запроса и без keep — всё дерево', () => {
   assert.deepEqual(names(filtered(tree(LIB), '')), ['Sorted', 'Unsorted']);
+});
+
+console.log('untickablePaths');
+
+test('исчезнувшая папка правила попадает в список, живые — нет', () => {
+  const gone = `${M}/Sorted/Переименовано`;
+  assert.deepEqual(untickablePaths(tree(LIB), [`${M}/Sorted`, gone, `${M}/Unsorted/Юля Кошкина`]), [gone]);
+});
+
+test('корень и папки над ним флажка не имеют — попадают в список', () => {
+  assert.deepEqual(untickablePaths(tree(LIB), [M, '/mnt/nas']), [M, '/mnt/nas']);
+});
+
+test('без дерева снять в нём нельзя ничего', () => {
+  assert.deepEqual(untickablePaths(null, ['/a', '/b']), ['/a', '/b']);
 });
 
 console.log('displayPath');

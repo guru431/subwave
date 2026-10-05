@@ -34,7 +34,7 @@ import { settingsKeys } from '../settings/queries';
 import { showKeys } from '../shows/queries';
 import type { SettingsResponse as ShowSettingsResponse } from '../shows/types';
 import { FolderTree } from './FolderTree';
-import { buildFolderTree, displayPath, type FolderStat } from '@/lib/folderTree';
+import { buildFolderTree, displayPath, untickablePaths, type FolderStat } from '@/lib/folderTree';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -468,10 +468,26 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
                 const aria = fieldAria(baseId, fieldState.error);
                 if (fieldWatch === 'folder') {
                   const selected = field.value;
+                  // Three states the old single hint blurred: still loading, the
+                  // read failed (say why, offer a retry), or really no folders.
+                  const loaded = folderData !== undefined;
+                  const failed = !loaded && foldersQuery.error !== null;
+                  // Selected paths the tree cannot untick (renamed, gone) — listed
+                  // apart so a rule never holds a folder the editor can't remove.
+                  const untickable = loaded || failed ? untickablePaths(folderRoot, selected) : [];
                   return (
                     <div className="field">
                       <Label {...aria.labelledByProps}>Folders</Label>
-                      {folderRoot === null ? (
+                      {failed ? (
+                        <div className="field-hint flex flex-wrap items-center gap-2">
+                          <span>Couldn&apos;t load folders: {errorMessage(foldersQuery.error)}</span>
+                          <Btn sm onClick={() => { void foldersQuery.refetch(); }} disabled={foldersQuery.isFetching}>
+                            Retry
+                          </Btn>
+                        </div>
+                      ) : !loaded ? (
+                        <div className="field-hint">Loading folders…</div>
+                      ) : folderRoot === null ? (
                         <div className="field-hint">No folders yet — they appear after Reconcile with Navidrome, once Navidrome reports real paths to the station.</div>
                       ) : (
                         <div {...aria.groupProps} className="grid gap-2">
@@ -490,6 +506,30 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
                             )}
                             renderMeta={n => <span className="mono-num text-[10px] text-muted">{n.total}</span>}
                           />
+                        </div>
+                      )}
+                      {untickable.length > 0 && (
+                        <div className="mt-2">
+                          <div className="field-hint">
+                            {failed
+                              ? 'Folders in this rule:'
+                              : 'Not in the folder tree — renamed, moved or gone since the rule was saved:'}
+                          </div>
+                          <div className="mt-1.5 flex flex-wrap gap-1.5">
+                            {untickable.map(p => (
+                              <span key={p} className="lib-mtag inline-flex items-center gap-1" title={p}>
+                                {folderRoot ? displayPath(folderRoot, p) : p}
+                                <button
+                                  type="button"
+                                  className="cursor-pointer border-0 bg-transparent p-0 leading-none text-muted hover:text-ink"
+                                  onClick={() => field.onChange(selected.filter(v => v !== p))}
+                                  aria-label={`remove ${p}`}
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            ))}
+                          </div>
                         </div>
                       )}
                       {withoutPath > 0 && (
