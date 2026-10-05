@@ -63,6 +63,17 @@ export interface PickerScope {
   // Request path only: registers identifyRequestedTrack. No-op unless a
   // web-search provider is ready. Never set on the per-track picker.
   resolveReferences: boolean;
+  // A listener named something specific and it is THIS run's job to find it.
+  //
+  // Every other caller of these tools is picking music to fill a slot, so the
+  // defaults are tuned for variety: collect() shows 8 tracks and at most 3 per
+  // artist, in a freshness-biased shuffle, and searchLibrary rolls a random
+  // deep page. On a request that inverts the job. A library holding 103 Агата
+  // Кристи tracks answered "Агата Кристи — Как на войне" with 3 of them, drawn
+  // at random, and the agent aired a different song by the same band — the ask
+  // was in the library the whole time. Diversity caps belong on the pick path;
+  // an explicit ask needs the whole shelf.
+  requestPath: boolean;
 }
 
 // Every field defaults to "no constraint". Spread over a partial so there is
@@ -83,6 +94,7 @@ const NO_SCOPE: PickerScope = {
   excludedIds: null,
   audioWaypoint: null,
   resolveReferences: false,
+  requestPath: false,
 };
 
 export function pickerScope(partial: Partial<PickerScope> = {}): PickerScope {
@@ -114,11 +126,16 @@ export interface PickerContext {
   textIndexDegraded: boolean;
 }
 
+// How many candidates a request may surface. Wide enough that a named track
+// survives an artist's whole shelf (the library's biggest is ~103 tracks by one
+// band), still bounded — these rows become agent input tokens.
+const REQUEST_CAP = 120;
+
 export function buildPickerContext(scope: PickerScope): PickerContext {
   const {
     recentIds, recentKeys, hardRecentIds, hardRecentKeys,
     genreLock, eraLock, moodLock, energyLock, vocalLock,
-    minTrackSec, playlistLock, excludedIds,
+    minTrackSec, playlistLock, excludedIds, requestPath,
   } = scope;
 
   const seen = new Map<string, any>();
@@ -140,7 +157,8 @@ export function buildPickerContext(scope: PickerScope): PickerContext {
   // tools (topSongsByArtist, recentByArtist) opt out. A strict PLAYLIST show opts
   // out wholesale — playlistLock has already intersected the pool with the
   // operator's pinned set, and a single-artist playlist is the point of pinning.
-  const collect = (list: any, cap = 8, opts: { maxPerArtist?: number } = {}) => {
+  const collect = (list: any, cap = requestPath ? REQUEST_CAP : 8,
+                   opts: { maxPerArtist?: number } = {}) => {
     // Strict show: filter BEFORE recency + cap, so the 8 the agent sees are
     // genre-/era-/mood-/energy-pure. Each lock is HARD (starve:true) — a tool
     // with no match contributes nothing and emptyResult steers the model
@@ -171,7 +189,9 @@ export function buildPickerContext(scope: PickerScope): PickerContext {
       hardRecentIds,
       hardRecentKeys,
       seenIds: new Set(seen.keys()),
-      maxPerArtist: opts.maxPerArtist ?? (playlistLock ? Infinity : 3),
+      // On a request the per-artist cap is what hides the asked-for track
+      // behind three of its shelf-mates, so it lifts to the cap itself.
+      maxPerArtist: opts.maxPerArtist ?? (requestPath ? REQUEST_CAP : playlistLock ? Infinity : 3),
       cap,
     });
     const out: any[] = [];
