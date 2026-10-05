@@ -7,7 +7,6 @@
 import importlib.util
 import sys
 import threading
-import time
 import urllib.error
 from pathlib import Path
 
@@ -269,16 +268,24 @@ def test_busy_engine_waits_for_its_turn(monkeypatch):
     # 2026-09-22 — одновременно 1 успех из 6, теми же фразами подряд 6 из 6).
     # Поэтому синтез идёт по одному, а занятый движок значит «подожди», а не
     # «откажи»: на отказ станция меняет движок, и слушатель слышит чужой голос.
-    _upstream(monkeypatch, [b"WAV"])
+    seen = _upstream(monkeypatch, [b"WAV"])
     monkeypatch.setattr(bridge, "_synthesis", threading.BoundedSemaphore(1))
     monkeypatch.setattr(bridge, "QUEUE_WAIT", 5)
     bridge._synthesis.acquire()
-    threading.Timer(0.1, bridge._synthesis.release).start()
+    # Проверяется порядок, а не часы: замер «прошло ≥ 0.1 с» от момента после
+    # старта таймера под нагрузкой давал 0.0989 и краснел (2026-10-05).
+    synth_before_release = []
+
+    def release():
+        synth_before_release.append(len(seen))
+        bridge._synthesis.release()
+
+    threading.Timer(0.1, release).start()
     handler = _FakeHandler(b'{"text":"\xd0\xb0"}')
-    started = time.monotonic()
     handler.do_POST()
     assert handler.sent[0][0] == 200
-    assert time.monotonic() - started >= 0.1   # дождался очереди, а не проскочил
+    assert synth_before_release == [0]   # дождался очереди, а не проскочил
+    assert len(seen) == 1
 
 
 def test_queue_that_never_clears_answers_503(monkeypatch):

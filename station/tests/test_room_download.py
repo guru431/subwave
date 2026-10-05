@@ -579,19 +579,32 @@ def test_keep_alive_after_a_download_gets_the_short_timeout_back(tmp_path, monke
 
     Отдельный сервер с коротким read_timeout: с таймаутом загрузки (300 с)
     простаивающее keep-alive соединение сервер не закрыл бы за время теста.
+
+    Короткий таймаут включается только к концу тела: с 0.2 с с самого начала
+    сервер под нагрузкой рвал соединение раньше, чем клиент успевал отправить
+    первый запрос (ConnectionResetError, 2026-10-05). Обработчик берёт
+    `read_timeout` при создании класса (ожидание запроса) и заново в `finally`
+    отдачи — второе и проверяется.
     """
     store = store_mod.Store(str(tmp_path / "room-timeout.db"))
     config = server_mod.Config(navidrome=("http://navidrome", "u", "p"),
                                controller_url="http://controller:7701",
-                               read_timeout=0.2)
+                               read_timeout=5)
     station = Station()
     real_urlopen = urllib.request.urlopen
+
+    class ShortensTimeoutAtEnd(FakeUpstream):
+        def read(self, size=-1):
+            chunk = super().read(size)
+            if not chunk:
+                config.read_timeout = 0.2
+            return chunk
 
     def fake_urlopen(req, timeout=None):
         url = req.full_url if hasattr(req, "full_url") else req
         if url.startswith("http://127.0.0.1:"):
             return real_urlopen(req, timeout=timeout)
-        return station.response() if "/state" in url else FakeUpstream()
+        return station.response() if "/state" in url else ShortensTimeoutAtEnd()
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     srv = _Server(("127.0.0.1", 0), server_mod.build_handler(store, config))
