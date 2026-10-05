@@ -86,13 +86,36 @@ function buildSuggestions(
   return out.slice(0, 5);
 }
 
+// Ответ комнаты на сверку набранного с коллекцией (GET /room/resolve).
+// Контроллер в этом пути не участвует: у него весь поиск по библиотеке закрыт
+// requireAdmin, а слушателю нужен публичный ответ «есть такой трек или нет».
+interface ResolveCandidate {
+  id: string;
+  title: string;
+  artist: string;
+  album: string | null;
+  year: number | null;
+  duration: number | null;
+}
+
+interface ResolveResult {
+  exact: ResolveCandidate | null;
+  alternatives: ResolveCandidate[];
+}
+
+// Пауза после последнего нажатия клавиши: без неё каждая буква — запрос в
+// Navidrome, а набирают тут с телефона.
+const RESOLVE_DEBOUNCE_MS = 400;
+// Короче трёх символов сверять нечего: ответом будет вся коллекция.
+const RESOLVE_MIN_CHARS = 3;
+
 export interface RequestDrawerProps {
   requestText: string;
   setRequestText: (text: string) => void;
   requesterName: string;
   setRequesterName: (name: string) => void;
   isSubmitting: boolean;
-  onSubmit: () => Promise<RequestResult | null>;
+  onSubmit: (songId?: string) => Promise<RequestResult | null>;
   onPoll?: (requestId: string) => Promise<RequestResult | null>;
   onClose?: () => void;
   nowPlaying: NowPlayingTrack | null;
@@ -109,6 +132,36 @@ export default function RequestDrawer({
   // Null while idle. On accept it holds a `pending` success card with the
   // templated ack; polling fills in the real track + on-air ack.
   const [result, setResult] = useState<RequestResult | null>(null);
+  const [resolved, setResolved] = useState<ResolveResult | null>(null);
+  const [songId, setSongId] = useState<string | null>(null);
+
+  // Сверка набранного с коллекцией. Ответ комнаты — «этот трек есть», «есть
+  // похожие» или «нет ничего»; последнее НЕ запрещает отправку: ведущий умеет
+  // разбирать настроение и намёк, а не только «артист — название».
+  useEffect(() => {
+    const query = requestText.trim();
+    setSongId(null);
+    if (query.length < RESOLVE_MIN_CHARS) {
+      setResolved(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const r = await fetch(`/room/resolve?q=${encodeURIComponent(query)}`);
+        if (!r.ok || cancelled) return;
+        const body = (await r.json()) as ResolveResult;
+        if (cancelled) return;
+        setResolved(body);
+        if (body.exact) setSongId(body.exact.id);
+      } catch {
+        // Комната недоступна — заказ всё равно уйдёт текстом, и каскад станции
+        // его разберёт. Подсказка не обязательна для отправки.
+        if (!cancelled) setResolved(null);
+      }
+    }, RESOLVE_DEBOUNCE_MS);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [requestText]);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollStopRef = useRef(false);
@@ -164,7 +217,7 @@ export default function RequestDrawer({
     // Capture before the await — onSubmit clears requestText on accept.
     const askedText = requestText.trim();
     const askedName = requesterName.trim();
-    const data = await onSubmit();
+    const data = await onSubmit(songId ?? undefined);
     if (!data) return;
     // 429 / 503 / network error — surface the miss banner, no polling.
     if (!data.success) {
@@ -266,6 +319,45 @@ export default function RequestDrawer({
                 </div>
               </div>
             </div>
+
+            {resolved?.exact && (
+              <p className="mt-3 text-[11px] leading-relaxed text-muted">
+                Нашёл в коллекции:{' '}
+                <span className="text-ink">{resolved.exact.artist} — {resolved.exact.title}</span>
+              </p>
+            )}
+            {resolved && !resolved.exact && resolved.alternatives.length > 0 && (
+              <div className="mt-3 flex flex-col gap-1">
+                <p className="text-[11px] leading-relaxed text-muted">
+                  Точного совпадения нет. Может быть, это:
+                </p>
+                {resolved.alternatives.map(c => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => {
+                      setSongId(c.id);
+                      setRequestText(`${c.artist} — ${c.title}`);
+                      taRef.current?.focus();
+                    }}
+                    className={cn(
+                      'v3-focus rounded border px-2 py-1 text-left text-[11px]',
+                      songId === c.id
+                        ? 'border-vermilion text-ink'
+                        : 'border-soft-border text-muted',
+                    )}
+                  >
+                    {c.artist} — {c.title}
+                  </button>
+                ))}
+              </div>
+            )}
+            {resolved && !resolved.exact && resolved.alternatives.length === 0 && (
+              <p className="mt-3 text-[11px] leading-relaxed text-muted">
+                В коллекции такого нет. Можно всё равно отправить — ведущий читает
+                записку целиком и подберёт что-то близкое.
+              </p>
+            )}
 
             <p className="mt-3 text-[11px] leading-relaxed text-muted">
               Опишите настроение, воспоминание, артиста. Ведущий прочтёт записку,

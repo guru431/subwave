@@ -278,11 +278,13 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
 
   // The controller accepts in ~50ms and returns a request id; the matching
   // runs in the booth, and the drawer polls pollRequest() for the outcome.
-  const submitRequest = async (): Promise<RequestResult | null> => {
+  const submitRequest = async (songId?: string): Promise<RequestResult | null> => {
     if (!requestText.trim() || isSubmitting) return null;
     setIsSubmitting(true);
     try {
-      const data = await coreSubmitRequest(requestText.trim(), requesterName.trim());
+      // songId приходит из ящика: он сверяет набранное с коллекцией через
+      // комнату и знает, выбрал ли слушатель конкретный трек.
+      const data = await coreSubmitRequest(requestText.trim(), requesterName.trim(), songId);
       if (data.success) setRequestText('');
       return data;
     } catch {

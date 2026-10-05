@@ -76,7 +76,7 @@ export interface StationClient {
   health(init?: { signal?: AbortSignal }): Promise<Response>;
   schedule(): Promise<SchedulePayload>;
   themes(): Promise<ThemesPayload>;
-  submitRequest(text: string, name: string): Promise<RequestResult>;
+  submitRequest(text: string, name: string, songId?: string): Promise<RequestResult>;
   /** 404 → status 'unknown'; network error → null so drawers keep polling. */
   requestStatus(requestId: string): Promise<RequestResult | null>;
   /** `songId` is what the client believes is on air; the controller rejects a
@@ -111,11 +111,14 @@ export function createStationClient(origin: StationOrigin): StationClient {
       if (!r.ok) throw new Error(`themes fetch ${r.status}`);
       return json<ThemesPayload>(r);
     },
-    submitRequest: async (text, name) => {
+    submitRequest: async (text, name, songId) => {
       const r = await fetch(`${api}/request`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, name }),
+        // songId уходит только когда он есть: undefined JSON.stringify
+        // выбрасывает сам, и тело остаётся прежним для скинов, которые о
+        // точном заказе не знают.
+        body: JSON.stringify({ text, name, songId }),
       });
       return json<RequestResult>(r);
     },
