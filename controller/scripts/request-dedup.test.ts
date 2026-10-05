@@ -108,8 +108,8 @@ async function main() {
     queue.upcoming = [{ track: trackY }];
     const onAir = queue.dedupAck('song-X');
     const queued = queue.dedupAck('song-Y');
-    assert.match(onAir, /spinning right now/i, 'on-air track should read as playing now');
-    assert.match(queued, /already queued|on the way/i, 'queued track should read as on the way');
+    assert.match(onAir, /сейчас в эфире/i, 'on-air track should read as playing now');
+    assert.match(queued, /уже в очереди/i, 'queued track should read as on the way');
   });
 
   if (failures > 0) {

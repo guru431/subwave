@@ -43,9 +43,9 @@ test('the greeting clause is positive and the screening clause is still negative
 });
 
 test('the decline copy addresses a signed listener and stays impersonal otherwise', () => {
-  assert.equal(sorryNoMatch('María'), 'Sorry María, nothing in the crates matched that.');
-  assert.equal(sorryNoMatch(ANON_REQUESTER), 'Sorry, nothing in the crates matched that.');
-  assert.equal(sorryNoMatch(''), 'Sorry, nothing in the crates matched that.');
+  assert.equal(sorryNoMatch('María'), 'María, простите — в коллекции такого не нашлось.');
+  assert.equal(sorryNoMatch(ANON_REQUESTER), 'Простите — в коллекции такого не нашлось.');
+  assert.equal(sorryNoMatch(''), 'Простите — в коллекции такого не нашлось.');
   // The literal 'anon' must not survive into anything aired.
   assert.doesNotMatch(sorryNoMatch(ANON_REQUESTER), /anon/);
 });

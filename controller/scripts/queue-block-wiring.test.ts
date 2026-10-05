@@ -190,23 +190,28 @@ test('the wait clause says nothing when the forecast is unknown or short', () =>
 test('the wait clause names the block when one is ahead', () => {
   const line = requestWaitClause({ waitSec: 40 * 60, blockLabel: 'Immunity — Jon Hopkins' });
   assert.match(line, /Immunity — Jon Hopkins/);
-  assert.match(line, /about 40 minutes/);
+  assert.match(line, /примерно через 40 минут/);
 });
 
 test('with no block ahead it still gives the number', () => {
   const line = requestWaitClause({ waitSec: 12 * 60 });
-  assert.doesNotMatch(line, /right through/);
-  assert.match(line, /about 12 minutes/);
+  assert.doesNotMatch(line, /целиком/);
+  assert.match(line, /примерно через 12 минут/);
 });
 
 // Rounded and hedged, because it IS a forecast — but never rounded into
 // vagueness, which is the whole point of telling the listener at all.
+// Fork: Russian, after «через» — the accusative with the numeral's agreement
+// (1 минуту, 2 минуты, 5 минут, 21 минуту; 1 час, 2 часа, 5 часов).
 test('the wait reads as minutes, then as hours and minutes', () => {
-  assert.equal(formatWait(59), '1 minute');
-  assert.equal(formatWait(12 * 60), '12 minutes');
-  assert.equal(formatWait(89 * 60), '89 minutes');
-  assert.equal(formatWait(90 * 60), '1 hour 30 minutes');
-  assert.equal(formatWait(120 * 60), '2 hours');
+  assert.equal(formatWait(59), '1 минуту');
+  assert.equal(formatWait(2 * 60), '2 минуты');
+  assert.equal(formatWait(12 * 60), '12 минут');
+  assert.equal(formatWait(21 * 60), '21 минуту');
+  assert.equal(formatWait(89 * 60), '89 минут');
+  assert.equal(formatWait(90 * 60), '1 час 30 минут');
+  assert.equal(formatWait(120 * 60), '2 часа');
+  assert.equal(formatWait(301 * 60), '5 часов 1 минуту');
 });
 
 // airForecastSec is deliberately NOT remainingUntilItemAirs: that one walks the

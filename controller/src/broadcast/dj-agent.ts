@@ -1014,7 +1014,7 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
     // session turn later `windowMessages()` calls condition on, so an unguarded
     // echo poisons future generations even though it never reaches tts.speak.
     if (object?.kind === 'chat' && !object?.id && typeof object?.ack === 'string' && object.ack.trim()) {
-      const screened = screenAck(object.ack, text, 'Heard you loud and clear.');
+      const screened = screenAck(object.ack, text, 'Принято.');
       if (screened.guard) queue.log('request-guard', `agent chat ack echoed request text — replaced`);
       session.appendTurn({ role: 'dj', kind: 'request', text: screened.ack, meta: { requester, toolCalls } });
       return { ack: screened.ack, track: null, introScript: null, guard: screened.guard };
@@ -1100,8 +1100,8 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
     // means the listener gets the named line in both cases the fallback covers
     // — the model wrote nothing, and the model echoed their own text back.
     const screened = screenAck(object.ack, text, isNamedRequester(requester)
-      ? `Coming up for you, ${requester}.`
-      : 'Coming up for you.');
+      ? `${requester}, ваш заказ — уже скоро.`
+      : 'Ваш заказ — уже скоро.');
     if (screened.guard) queue.log('request-guard', `agent ack echoed request text — replaced`);
     const ack = screened.ack;
     // Both guards can fire on one request (the model echoed in the ack AND in

@@ -545,12 +545,23 @@ export const REQUEST_WAIT_NOTICE_SEC = 5 * 60;
 // hedged with "about", because it IS a forecast (queue.airForecastSec), but
 // never rounded into vagueness: the whole point is that a listener sitting
 // behind a queued album is told so in a number they can act on.
+//
+// Fork: Russian, in the form that follows «через» — the accusative agreeing
+// with the numeral (1 минуту, 2 минуты, 5 минут, 21 минуту; 1 час, 2 часа).
+function ruCount(n: number, one: string, few: string, many: string): string {
+  const d = n % 10, dd = n % 100;
+  if (d === 1 && dd !== 11) return `${n} ${one}`;
+  if (d >= 2 && d <= 4 && (dd < 12 || dd > 14)) return `${n} ${few}`;
+  return `${n} ${many}`;
+}
 export function formatWait(sec: number): string {
   const mins = Math.max(1, Math.round(sec / 60));
-  if (mins < 90) return `${mins} minute${mins === 1 ? '' : 's'}`;
+  const minutes = (n: number) => ruCount(n, 'минуту', 'минуты', 'минут');
+  if (mins < 90) return minutes(mins);
   const h = Math.floor(mins / 60);
   const m = mins % 60;
-  return m ? `${h} hour${h === 1 ? '' : 's'} ${m} minute${m === 1 ? '' : 's'}` : `${h} hour${h === 1 ? '' : 's'}`;
+  const hours = ruCount(h, 'час', 'часа', 'часов');
+  return m ? `${hours} ${minutes(m)}` : hours;
 }
 
 // The sentence appended to a queued request's acknowledgement when it is a long
@@ -582,6 +593,6 @@ export function requestWaitClause(input: {
   const wait = formatWait(waitSec);
   const label = (blockLabel || '').trim();
   return label
-    ? ` We're playing ${label} right through first, so yours is about ${wait} away.`
-    : ` There's a fair bit queued ahead of it — about ${wait} away.`;
+    ? ` Сначала целиком играет ${label}, так что ваш заказ — примерно через ${wait}.`
+    : ` Впереди в очереди немало — ваш заказ прозвучит примерно через ${wait}.`;
 }
