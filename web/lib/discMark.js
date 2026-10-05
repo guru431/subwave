@@ -1,53 +1,89 @@
-// Shared SUB/WAVE disc mark for the favicons and PWA install icons. Kept in
-// lockstep with app/assets/icon.png and the .bs-wordmark-disc-face hover state
-// in globals.css. Inline SVG so next/og (Satori) reproduces it at any size.
+// Знак «AI радио» для favicon, apple-touch и иконок установки PWA. Заменяет
+// апстримный диск: у станции своё имя, и на домашнем экране среди двух десятков
+// ярлыков буквы находятся глазами быстрее, чем очередной кружок.
+//
+// Монограмма «AI» под двумя эфирными дугами. Буквы нарисованы линиями, а не
+// шрифтом: next/og (Satori) внутри образа шрифтов не догружает, а линии
+// одинаковы везде и не зависят от того, что установлено в системе.
+//
+// Inline SVG — как и у апстрима: Satori воспроизводит его чётко в любом размере.
 
-const BG = '#100e0c'; // dark plate (--bg)
-const DISC = '#ece6dc'; // cream face (--ink, dark theme)
-const SPOKE = '#141310'; // ink spokes
-const HUB = '#d94b2a'; // hot vermilion hub (--accent)
+const BG = '#100e0c'; // тёмная подложка (--bg), она же theme_color манифеста
+const INK = '#ece6dc'; // кремовый (--ink тёмной темы) — сами буквы
+const ACCENT = '#d94b2a'; // вермильон (--accent) — дуги эфира
 
-// 20 wedges (9deg ink, 9deg cream gap) as SVG arc paths on a 100x100 canvas
-// centred at (50,50).
-function spokePaths(r) {
-  const rad = (deg) => (deg * Math.PI) / 180;
-  const paths = [];
-  for (let i = 0; i < 20; i++) {
-    const a0 = rad(i * 18);
-    const a1 = rad(i * 18 + 9);
-    const x0 = (50 + r * Math.cos(a0)).toFixed(3);
-    const y0 = (50 + r * Math.sin(a0)).toFixed(3);
-    const x1 = (50 + r * Math.cos(a1)).toFixed(3);
-    const y1 = (50 + r * Math.sin(a1)).toFixed(3);
-    paths.push(`M50 50 L${x0} ${y0} A${r} ${r} 0 0 1 ${x1} ${y1} Z`);
-  }
-  return paths;
-}
+// Геометрия задана в долях от половины холста: (0,0) — центр, 1 — край.
+// Числа те же, что в утверждённом макете (вариант Б), пересчитанные из его
+// сетки 512×512 делением на 256.
+const LETTER_STROKE = 0.1016;
+const ARC_STROKE = 0.0625;
+const LETTERS = [
+  [[-0.2734, 0.4648], [-0.0781, -0.1211], [0.1172, 0.4648]], // A
+  [[-0.2148, 0.2891], [0.0586, 0.2891]], // перекладина A
+  [[0.2734, -0.1211], [0.2734, 0.4648]], // I
+];
+const ARCS = [
+  { from: [-0.2344, -0.2344], to: [0.2344, -0.2344], r: 0.2969 },
+  { from: [-0.3516, -0.2891], to: [0.3516, -0.2891], r: 0.4375 },
+];
 
-// `fill` (0-1) is how much of the canvas the disc occupies; maskable icons
-// shrink so the disc stays inside the Android launcher safe zone.
-// `opaque` fills the canvas behind the disc. Maskable icons MUST set it or
-// Android's adaptive mask drops the icon onto a system backdrop and clips it.
+// `fill` и `opaque` апстрим передаёт из своих маршрутов; здесь ни то, ни другое
+// не применяется, и оба случая намеренные:
+//
+// — `fill` ужимал диск для maskable-иконок, чтобы тот уцелел под адаптивной
+//   маской Android. Этому знаку ужиматься не нужно: он по построению лежит
+//   внутри безопасной зоны (радиус 29.5 из 50 при допустимых 40), а ужатый
+//   выглядел бы на домашнем экране заметно мельче соседних иконок.
+// — `opaque` оставлял прозрачные углы вокруг круглого диска. Здесь подложка
+//   рисуется всегда: знак светлый, а под прозрачную apple-touch иконку iOS
+//   подставляет белый фон — от знака осталась бы одна дуга.
+//
+// Масштаб 50 даёт по высоте те же ~52 % холста, что и в утверждённом макете.
 export function DiscMark({ size, fill = 0.8, opaque = false }) {
-  const r = 50 * fill;
-  const hub = r * 0.31;
-  const wedges = spokePaths(r);
+  const s = 50;
+  const at = (u, v) => `${(50 + u * s).toFixed(3)} ${(50 + v * s).toFixed(3)}`;
+  const px = (n) => +(n * s).toFixed(3);
+
+  const letters = LETTERS.map(
+    (pts) => pts.map(([u, v], i) => `${i ? 'L' : 'M'}${at(u, v)}`).join(' '),
+  );
+  const arcs = ARCS.map(
+    ({ from, to, r }) =>
+      `M${at(from[0], from[1])} A${px(r)} ${px(r)} 0 0 1 ${at(to[0], to[1])}`,
+  );
+
   return (
     <div
       style={{
         width: '100%',
         height: '100%',
         display: 'flex',
-        background: opaque ? BG : 'transparent',
+        background: BG,
       }}
     >
       <svg width={size} height={size} viewBox="0 0 100 100">
-        <circle cx="50" cy="50" r={r} fill={DISC} />
-        {wedges.map((d, i) => (
-          <path key={i} d={d} fill={SPOKE} />
+        <rect x="0" y="0" width="100" height="100" fill={BG} />
+        {arcs.map((d, i) => (
+          <path
+            key={`arc-${i}`}
+            d={d}
+            fill="none"
+            stroke={ACCENT}
+            strokeWidth={px(ARC_STROKE)}
+            strokeLinecap="round"
+          />
         ))}
-        <circle cx="50" cy="50" r={hub + 1.4} fill={BG} />
-        <circle cx="50" cy="50" r={hub} fill={HUB} />
+        {letters.map((d, i) => (
+          <path
+            key={`letter-${i}`}
+            d={d}
+            fill="none"
+            stroke={INK}
+            strokeWidth={px(LETTER_STROKE)}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        ))}
       </svg>
     </div>
   );
