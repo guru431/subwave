@@ -12,7 +12,9 @@
 
 import assert from 'node:assert/strict';
 import { artistKey, artistRootKey, filterPickerCandidates } from '../src/music/recency.js';
-import { ARTIST_VARIETY_WINDOW, alternativeCandidates } from '../src/broadcast/dj-agent/artist-guard.js';
+import {
+  ARTIST_VARIETY_WINDOW, alternativeCandidates, artistGuardTrigger, artistWindowRoots, guardRepickSet,
+} from '../src/broadcast/dj-agent/artist-guard.js';
 import { queue } from '../src/broadcast/queue.js';
 
 // ── artistRootKey: collaborations collapse, band names don't ────────────────
@@ -240,5 +242,72 @@ assert(
 // would match every untagged candidate.
 setPlays([{ id: 'D', title: 'Untitled', artist: '', endedAt: '2026-07-30T18:00:00.000Z' }]);
 assert.equal(queue.neighbourArtistRoots(3).size, 0, 'an artist-less play adds no key');
+
+// ── the artist window on the pick path ──────────────────────────────────────
+
+// The guard fired only when the pick repeated the artist ON AIR, and the agent
+// path carries no recentArtists filter at all (#618) — so the artist-recency
+// window the pool picker honours did not exist for the agent's picks. Live
+// 21–22.09: one band aired 15 times in a day with 11 of 14 gaps under the
+// 3-hour window (minimum 8 minutes), and 32 of the agent's "new artist" picks
+// named an artist heard 8–155 minutes earlier.
+
+const agata = { id: 'a1', title: 'Сказочная тайга', artist: 'Агата Кристи' };
+const nautilus = { id: 'n1', title: 'Прогулки по воде', artist: 'Nautilus Pompilius' };
+const kino = { id: 'k1', title: 'Кукушка', artist: 'Кино' };
+const queen = { id: 'q1', title: 'Innuendo', artist: 'Queen' };
+
+// The window's keys: raw names from recentArtistsSince land on their lead act,
+// and the queue neighbours (queued, on air, last few plays) ride along.
+{
+  const roots = artistWindowRoots(['агата кристи feat. гость', 'nautilus pompilius', ''], new Set(['кино']));
+  assert(roots.has('агата кристи'), 'a collaboration heard in the window registers under its lead act');
+  assert(roots.has('nautilus pompilius'), 'every artist heard in the window is in it');
+  assert(roots.has('кино'), 'the queue neighbours ride along');
+  assert(!roots.has(''), 'an untagged play adds no key');
+}
+
+{
+  const window = new Set(['агата кристи', 'queen']);
+  assert.equal(artistGuardTrigger('queen', 'queen', window), 'on-air', 'repeating the on-air artist is the #1124 case');
+  assert.equal(artistGuardTrigger('агата кристи', 'queen', window), 'recent', 'an artist heard within the window fires the guard although not on air');
+  assert.equal(artistGuardTrigger('кино', 'queen', window), null, 'an artist outside the window is a fresh pick');
+  assert.equal(artistGuardTrigger('', 'queen', window), null, 'an untagged pick is not evidence of a repeat');
+  assert.equal(artistGuardTrigger('агата кристи', '', window), 'recent', 'the window holds with nothing on air');
+}
+
+// A recent-artist re-pick steps around the whole window.
+{
+  const window = new Set(['агата кристи', 'queen', 'nautilus pompilius']);
+  const { alt } = guardRepickSet('recent', seenOf(agata, nautilus, kino, queen), 'агата кристи', 'queen', window);
+  assert.deepEqual([...alt.keys()], ['k1'], 'a recent-artist re-pick may choose only a fresh artist');
+}
+
+// Where the two triggers part: the fallback. With every alternative inside the
+// window, the on-air path hands back the bare exclusion (a repeat five slots on
+// beats one slot on) — but on the recent path that bare set can hold the artist
+// ON AIR, trading a repeat within hours for a back-to-back one. So it offers
+// nothing, and the caller escalates to the pool rescue, which honours the window.
+{
+  const window = new Set(['агата кристи', 'queen']);
+  const pool = guardRepickSet('recent', seenOf(agata, queen), 'агата кристи', 'queen', window);
+  assert.equal(pool.alt.size, 0, 'a wholly-recent run must not offer the on-air artist as the alternative');
+  assert.equal(pool.starved, true, 'reported as starved, so the booth log can say why the pool took over');
+}
+
+// The on-air artist is never a recent-path alternative, even if the caller's
+// window misses it.
+{
+  const { alt } = guardRepickSet('recent', seenOf(agata, queen, kino), 'агата кристи', 'queen', new Set(['агата кристи']));
+  assert.deepEqual([...alt.keys()], ['k1'], 'the on-air artist is excluded from a recent-path re-pick');
+}
+
+// The on-air path keeps its #1251 shape.
+{
+  const window = new Set(['queen', 'агата кристи', 'nautilus pompilius']);
+  const { alt, starved } = guardRepickSet('on-air', seenOf(queen, agata, nautilus), 'queen', 'queen', window);
+  assert.deepEqual([...alt.keys()].sort(), ['a1', 'n1'], 'the on-air fallback still hands back the bare exclusion');
+  assert.equal(starved, true, 'and still reports the waived window');
+}
 
 console.log('artist-guard checks passed');

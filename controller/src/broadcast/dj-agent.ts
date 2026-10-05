@@ -36,7 +36,7 @@ import * as budget from './dj-budget.js';
 import { withTrace, logEvent } from '../observability/events.js';
 import { recencyWindowsForLibrary, effectiveNoRepeatWindow, artistRootKey } from '../music/recency.js';
 import { EXPLORE_SEED_PROBABILITY } from '../music/airing.js';
-import { ARTIST_VARIETY_WINDOW, alternativeCandidates } from './dj-agent/artist-guard.js';
+import { ARTIST_VARIETY_WINDOW, artistGuardTrigger, artistWindowRoots, guardRepickSet } from './dj-agent/artist-guard.js';
 import { hasEraBound, genreResolutionWarningOnce, type VocalMode } from '../music/show-filter.js';
 import { djCallsAllowed } from './listeners.js';
 import { autoVoiceAllowed } from './voice-policy.js';
@@ -368,17 +368,30 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // plays, because a re-pick that knows only the on-air artist keeps returning to
   // whoever ranks next-highest — the every-other-slot repeat this guard exists
   // to prevent.
+  //
+  // The same guard also holds the library-scaled artist window (our patch): a
+  // pick by an artist heard within windows.artistHours, or already queued, is
+  // re-picked the same way. Without it the agent path had no artist window at
+  // all — see the note in dj-agent/artist-guard.ts.
   const curArtist = artistRootKey(current || {});
-  if (curArtist && artistRootKey(song) === curArtist) {
-    const { alt, dropped, starved } = alternativeCandidates<any>(
-      extras.seen, curArtist, queue.neighbourArtistRoots(ARTIST_VARIETY_WINDOW),
-    );
+  const pickArtist = artistRootKey(song);
+  const windowRoots = artistWindowRoots(
+    queue.recentArtistsSince(windows.artistHours), queue.neighbourArtistRoots(ARTIST_VARIETY_WINDOW),
+  );
+  const trigger = artistGuardTrigger(pickArtist, curArtist, windowRoots);
+  if (trigger) {
+    const { alt, dropped, starved } = guardRepickSet<any>(trigger, extras.seen, pickArtist, curArtist, windowRoots);
+    const why = trigger === 'on-air'
+      ? `back-to-back artist "${song.artist}"`
+      : `artist "${song.artist}" heard within ${windows.artistHours} h`;
     let altSong: any = null;
     if (alt.size) {
       const repicked = await repickFromSeen({
         seen: alt, badId: null, wantLink, showAt,
         playlistResolved: !!playlistTracks?.length,
-        reason: `The track you chose is by ${song.artist}, the artist already on air — never play the same artist twice in a row. Choose a DIFFERENT artist from the candidates above.`,
+        reason: trigger === 'on-air'
+          ? `The track you chose is by ${song.artist}, the artist already on air — never play the same artist twice in a row. Choose a DIFFERENT artist from the candidates above.`
+          : `The track you chose is by ${song.artist}, who already played within the last ${windows.artistHours} hours — not a new artist. Choose a DIFFERENT artist from the candidates above.`,
       });
       // Resolved from `alt`, not `extras.seen`: the re-pick's id is constrained
       // to the alternatives by construction (z.enum), and reading it back out of
@@ -386,8 +399,8 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
       // tolerance for ids it didn't offer.
       altSong = repicked?.id ? alt.get(repicked.id) : null;
       if (altSong) {
-        logEvent('pick.artistGuard', { relaxed: false, from: song.artist, to: altSong.artist, candidates: alt.size, recencySkipped: dropped, recencyStarved: starved });
-        queue.log('picker', `back-to-back artist "${song.artist}" avoided — re-picked "${altSong.title}" by ${altSong.artist} from ${alt.size} other-artist candidate(s)${dropped ? `, ${dropped} more skipped as recently-played artists` : ''}${starved ? ' (every alternative was recently played — recency window waived)' : ''}`);
+        logEvent('pick.artistGuard', { relaxed: false, trigger, from: song.artist, to: altSong.artist, candidates: alt.size, recencySkipped: dropped, recencyStarved: starved });
+        queue.log('picker', `${why} avoided — re-picked "${altSong.title}" by ${altSong.artist} from ${alt.size} other-artist candidate(s)${dropped ? `, ${dropped} more skipped as recently-played artists` : ''}${starved ? ' (every alternative was recently played — recency window waived)' : ''}`);
         object = repicked;
         song = altSong;
       }
@@ -408,10 +421,12 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
       // call over them failed — two different stations of the same rescue.
       const runWasThin = alt.size
         ? `re-pick from ${alt.size} other-artist candidate(s) didn't land`
-        : 'every agent candidate was that artist';
+        : starved
+          ? 'every other candidate was also heard within the window'
+          : 'every agent candidate was that artist';
       if (rescued === 'queued') {
-        logEvent('pick.artistGuard', { relaxed: false, reason: 'pool-rescue', artist: song.artist, candidates: alt.size });
-        queue.log('picker', `back-to-back artist "${song.artist}" avoided — ${runWasThin}, so the pick came from the fallback pool instead`);
+        logEvent('pick.artistGuard', { relaxed: false, trigger, reason: 'pool-rescue', artist: song.artist, candidates: alt.size });
+        queue.log('picker', `${why} avoided — ${runWasThin}, so the pick came from the fallback pool instead`);
         return true;
       }
       // poolRescue distinguishes 'empty' (the pool truly holds no other artist)
@@ -419,9 +434,9 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
       // already queued) — an operator reading #1187-style reports must be able
       // to tell "the library really had nothing" from "a request slipped in
       // mid-pick".
-      const reason = alt.size ? 'repick-failed' : 'no-other-artist';
-      logEvent('pick.artistGuard', { relaxed: true, reason, artist: song.artist, candidates: alt.size, poolRescue: rescued });
-      queue.log('picker', `back-to-back artist "${song.artist}" allowed — ${runWasThin} and the fallback pool ${rescued === 'collision' ? 'pick was already queued' : 'had none either'} (relaxed)`);
+      const reason = alt.size ? 'repick-failed' : starved ? 'window-starved' : 'no-other-artist';
+      logEvent('pick.artistGuard', { relaxed: true, trigger, reason, artist: song.artist, candidates: alt.size, poolRescue: rescued });
+      queue.log('picker', `${why} allowed — ${runWasThin} and the fallback pool ${rescued === 'collision' ? 'pick was already queued' : 'had none either'} (relaxed)`);
     }
   }
 
