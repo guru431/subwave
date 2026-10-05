@@ -32,6 +32,8 @@ export const libraryKeys = {
   likedAll: ['library', 'rows', 'liked'] as const,
   history: (page: number) => ['library', 'history', page] as const,
   blocked: () => ['library', 'blocked'] as const,
+  // Dislike suggestions from the room — not Tracks, so not under `rows`.
+  dislikes: () => ['library', 'dislikes'] as const,
   likeIndex: () => ['library', 'likeIndex'] as const,
   coverage: () => ['library', 'coverage'] as const,
   tagger: () => ['library', 'tagger'] as const,
