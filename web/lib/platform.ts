@@ -17,3 +17,17 @@ export function isIOSDevice(): boolean {
     (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)
   );
 }
+
+// Станция открыта как установленное приложение, а не как вкладка. Проверку
+// спрашивают двое — кнопка установки (ей нечего предлагать установленному) и
+// системные уведомления (на iOS они работают только отсюда), поэтому она живёт
+// здесь, а не внутри одного из них.
+export function isStandalone(): boolean {
+  if (typeof window === 'undefined') return false;
+  return (
+    window.matchMedia?.('(display-mode: standalone)').matches === true ||
+    window.matchMedia?.('(display-mode: window-controls-overlay)').matches === true ||
+    // Флаг самой Safari — у iOS нет media query на этот случай.
+    (navigator as Navigator & { standalone?: boolean }).standalone === true
+  );
+}

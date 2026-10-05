@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
-import { CalendarClock, History, Mic } from 'lucide-react';
+import { CalendarClock, History, MessageSquare, Mic } from 'lucide-react';
 import TopBar from './TopBar';
 import CenterStage from './CenterStage';
 import Waveform from './Waveform';
@@ -20,6 +20,7 @@ import TimelineDrawer from './drawers/TimelineDrawer';
 import BoothDrawer from './drawers/BoothDrawer';
 import RequestDrawer from './drawers/RequestDrawer';
 import ScheduleDrawer from './drawers/ScheduleDrawer';
+import ChatDrawer from './drawers/ChatDrawer';
 import { Sheet } from '@/components/ui/sheet';
 import {
   usePlayerActions,
@@ -34,12 +35,19 @@ import { cn } from '@/lib/cn';
 import { useStationClient } from '@/lib/stationClient';
 import type { SkinProps } from '@/components/skins/types';
 import type { QueueEntry, RequestResult } from '@/lib/types';
+import { useRoomFeed } from '@/hooks/useRoomFeed';
+import { notify } from '@/lib/notify';
+import { listener } from '@/lib/listener';
+import { showHidden } from '@/lib/roomNotify';
+import { enablePush } from '@/lib/roomPush';
+import { djChatReplies, fromOthers, mergeFeed, turnKey, type FeedItem, type RoomMessage } from '@/lib/roomRules';
 
 const DRAWER_TITLES: Record<PlayerDrawer, string> = {
   timeline: 'Лента',
   booth: 'Эфир студии',
   request: 'Заказать трек',
   schedule: 'Расписание',
+  chat: 'Чат',
 };
 
 // Hoisted so the DotRail counts memo below keeps stable element references —
@@ -47,6 +55,9 @@ const DRAWER_TITLES: Record<PlayerDrawer, string> = {
 const TIMELINE_ICON = <History size={18} strokeWidth={1.5} />;
 const BOOTH_ICON = <Mic size={18} strokeWidth={1.5} />;
 const SCHEDULE_ICON = <CalendarClock size={18} strokeWidth={1.5} />;
+const CHAT_ICON = <MessageSquare size={18} strokeWidth={1.5} />;
+// Сколько строк держим в ящике: сообщения комнаты плюс строки станции.
+const CHAT_FEED_MAX = 100;
 
 export default function ClassicSkin({ portalNode }: SkinProps) {
   const client = useStationClient();
@@ -79,6 +90,110 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
   const [requesterName, setRequesterName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [drawer, setDrawer] = useState<PlayerDrawer | null>(null);
+
+  const chatOpen = drawer === 'chat';
+  // Своя копия «эфир играет» ссылкой: такая же есть в PlayerCore для ленты
+  // станции, но она не выставлена наружу, а расширять контекст ради одного
+  // потребителя — дороже, чем две строки здесь.
+  const tunedInRef = useRef(false);
+  useEffect(() => { tunedInRef.current = tunedIn; }, [tunedIn]);
+
+  const [chatEvents, setChatEvents] = useState<FeedItem[]>([]);
+  const openChat = useCallback(() => setDrawer('chat'), []);
+
+  // Web Push (lib/roomPush.ts). Переподписка на каждом открытии плеера: имя для
+  // упоминаний не должно отставать от подписки, а подписку, потерянную комнатой,
+  // это возвращает. Нажатие на уведомление открывает плеер с `?chat=1` — либо,
+  // если вкладка уже открыта, service worker присылает `room:open-chat`.
+  useEffect(() => {
+    if (listener().notify) void enablePush();
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('chat') === '1') {
+      openChat();
+      params.delete('chat');
+      const rest = params.toString();
+      window.history.replaceState(null, '',
+        window.location.pathname + (rest ? `?${rest}` : '') + window.location.hash);
+    }
+    if (!('serviceWorker' in navigator)) return;
+    const onMessage = (e: MessageEvent) => {
+      if ((e.data as { type?: string } | null)?.type === 'room:open-chat') openChat();
+    };
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+  }, [openChat]);
+
+  // Громкое на сообщения комнаты: каждое чужое (lib/roomRules.ts::fromOthers).
+  // Первая пачка — это история, и звучать она не должна. Звенит последнее
+  // чужое сообщение пачки, а не каждое: после переподключения пачка бывает
+  // длинной, и стопка тостов — это шум, а не новость.
+  const onArrive = useCallback((fresh: RoomMessage[], firstLoad: boolean, ownIds: ReadonlySet<number>) => {
+    if (firstLoad) return;
+    const last = fromOthers(fresh, ownIds, listener().name).at(-1);
+    if (!last) return;
+    if (!chatOpen) notify.chat(last.name, last.text, openChat);
+    showHidden(last.name, last.text, openChat);
+  }, [chatOpen, openChat]);
+
+  const room = useRoomFeed({ open: chatOpen, keepAliveWhenHidden: tunedInRef, onArrive });
+
+  // Лента студии уже отфильтрована по слышимости (useStationFeed →
+  // splitAudibleTurns), поэтому реплика попадает в чат ровно тогда, когда
+  // слушатель её слышит, а не когда контроллер её сочинил.
+  const seenTurnsRef = useRef<Set<string>>(new Set());
+  const boothSeededRef = useRef(false);
+  useEffect(() => {
+    if (!boothFeed.length) return;
+    // Первая пришедшая лента — окно истории. Она должна быть ВИДНА: лента
+    // комнаты после перезагрузки возвращается целиком, и ответы ведущего не
+    // могут при этом пропадать — иначе в чате остаются люди, говорящие в
+    // пустоту. Молчать она обязана: иначе перезагрузка выстреливала бы тостами
+    // по всему, что ведущий успел сказать за последние полчаса. Взводится на
+    // первой непустой ленте, а не на первой ленте с репликами chat: иначе
+    // первый настоящий ответ за сессию (ведущий отвечает редко, и до него в
+    // окне ленты реплик chat нет) сходил бы за историю и звучал бы молча.
+    const seeded = boothSeededRef.current;
+    boothSeededRef.current = true;
+    const replies = djChatReplies(boothFeed, seenTurnsRef.current);
+    for (const t of replies) seenTurnsRef.current.add(turnKey(t));
+    if (!replies.length) return;
+    setChatEvents(prev => [
+      ...prev,
+      ...replies.map(t => ({
+        kind: 'dj' as const,
+        key: turnKey(t),
+        at: Date.parse(String(t.meta?.airedAt ?? '')) || Date.now(),
+        text: t.text || '',
+      })),
+    ].slice(-CHAT_FEED_MAX));
+    if (!seeded) return;   // история видна, но молчит
+    const last = replies.at(-1);
+    if (!last) return;
+    if (!chatOpen) notify.chat('Ведущий ответил', last.text || '', openChat);
+    showHidden('Ведущий ответил', last.text || '', openChat);
+  }, [boothFeed, chatOpen, openChat]);
+
+  // Смена трека в ленте чата — контекст разговора, а не повод дёргать человека:
+  // ни тоста, ни системного уведомления она не даёт.
+  const trackLineRef = useRef<string | null>(null);
+  useEffect(() => {
+    const title = nowPlaying?.title?.trim();
+    if (!title) return;
+    const line = `${nowPlaying?.artist?.trim() || 'неизвестный исполнитель'} — ${title}`;
+    if (trackLineRef.current === line) return;
+    const first = trackLineRef.current === null;
+    trackLineRef.current = line;
+    if (first) return;   // то, что играло при открытии страницы, новостью не является
+    setChatEvents(prev => [
+      ...prev,
+      { kind: 'track' as const, key: `t${Date.now()}`, at: Date.now(), text: `сейчас играет ${line}` },
+    ].slice(-CHAT_FEED_MAX));
+  }, [nowPlaying?.title, nowPlaying?.artist]);
+
+  const chatItems = useMemo(
+    () => mergeFeed(room.messages, chatEvents, CHAT_FEED_MAX),
+    [room.messages, chatEvents],
+  );
 
   // Stable handlers + counts for the memoized layout components, so a feed
   // update that doesn't touch them costs no re-render.
@@ -150,6 +265,7 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
       '2': () => setDrawer('booth'),
       '3': () => setDrawer('request'),
       '4': () => setDrawer('schedule'),
+      '5': () => setDrawer('chat'),
       r: () => setDrawer('request'),
       '?': () => setShortcutsOpen(true),
       'mod+k': () => setPaletteOpen(o => !o),
@@ -251,6 +367,7 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
           />
         )}
         {drawer === 'schedule' && <ScheduleDrawer activeShow={activeShow} context={context} />}
+        {drawer === 'chat'     && <ChatDrawer items={chatItems} send={room.send} sending={room.sending} />}
       </Sheet>
 
       <AnimatePresence>

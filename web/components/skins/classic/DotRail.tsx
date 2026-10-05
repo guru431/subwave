@@ -16,6 +16,7 @@ const ITEMS: readonly RailItem[] = [
   { k: 'timeline', l: 'Лента' },
   { k: 'booth',    l: 'Студия' },
   { k: 'request',  l: 'Заказ' },
+  { k: 'chat',     l: 'Чат' },
 ];
 
 export interface DotRailProps {
