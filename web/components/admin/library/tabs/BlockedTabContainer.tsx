@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { notify, errorMessage } from '../../../../lib/notify';
 import { adminJson } from '../../../../lib/admin-query';
 import { BlockedTab } from '../BlockedTab';
+import { DislikesCard } from '../DislikesCard';
 import { BlockRulesCard } from '../BlockRulesCard';
 import { FolderGenresCard } from '../FolderGenresCard';
 import { useLibrary } from '../LibraryContext';
@@ -57,6 +58,9 @@ export default function BlockedTabContainer() {
 
   return (
     <>
+      {/* Dislike suggestions first: they are the inbox — decisions waiting for
+          the operator. A Block there re-stamps and refreshes like any block. */}
+      <DislikesCard />
       {/* Attribute rules above the id entries — one "why won't this air"
           surface, two kinds of block. Self-contained; after a rule change only
           the row marks on the other tabs need re-stamping. */}
