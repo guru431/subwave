@@ -6,6 +6,8 @@ import { config } from '../config.js';
 import * as settings from '../settings.js';
 import * as subLog from './subsonic-log.js';
 import * as blocklist from './blocklist.js';
+// Closes an import cycle (show-filter → library → blocklist → show-playlist → subsonic): safe only because normGenre is a hoisted function used at call time — never use it at module top level here.
+import { normGenre } from './show-filter.js';
 
 function buildAuth() {
   const salt = crypto.randomBytes(8).toString('hex');
@@ -365,7 +367,9 @@ export async function getGenres() {
 // failures propagate — callers decide whether to log or fall through.
 export async function resolveGenreName(name) {
   if (!name) return null;
-  const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+  // show-filter's normaliser, not a local copy: the two were kept in step by
+  // hand, and both dropped every non a-z letter.
+  const norm = normGenre;
   const target = norm(name);
   if (!target) return null;
   const genres = await getGenres();

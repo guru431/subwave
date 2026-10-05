@@ -14,8 +14,10 @@ import {
   genreMatches,
   trackAllTags,
   trackMoods,
+  trackPath,
   type FilterTrack,
 } from './show-filter.js';
+import { normFolder, pathInFolder } from './folder-genres.js';
 // The rule's SHAPE — field vocabulary, caps, the season window and the
 // add/update validator — lives in the shared schema so the admin card runs the
 // same rules. Imported and re-exported here so no call site moved. This module
@@ -67,7 +69,15 @@ export function validateRulePatch(raw: unknown): Omit<BlockRule, 'id' | 'addedAt
   if (!raw || typeof raw !== 'object') throw new Error('rule must be an object');
   const parsed = blockRuleSchema.safeParse(raw);
   if (!parsed.success) throw new Error(parsed.error.issues[0]?.message || 'invalid rule');
-  return parsed.data;
+  if (parsed.data.field !== 'folder') return parsed.data;
+  // Folder values are matched as absolute paths on a "/" boundary. The shared
+  // schema can't say so (upstream's schema test parses every field with a plain
+  // name), so the store checks it and drops trailing slashes.
+  const folders = parsed.data.values.map(normFolder);
+  if (folders.some((f) => f === null)) {
+    throw new Error('rule.values for a folder rule must be absolute folder paths');
+  }
+  return { ...parsed.data, values: [...new Set(folders as string[])] };
 }
 
 // ── Season / scope activity ──────────────────────────────────────────────────
@@ -109,6 +119,7 @@ export function ruleActive(rule: BlockRule, ctx: RuleContext): boolean {
 export interface CompiledRule {
   rule: BlockRule;
   genreTargets: string[];  // field=genre — normGenre'd, for genreMatches
+  folderTargets: string[]; // field=folder — normFolder'd absolute paths, case kept
   valueSet: Set<string>;   // every other field — normText'd exact match
 }
 
@@ -116,6 +127,9 @@ export function compileRules(rules: BlockRule[]): CompiledRule[] {
   return rules.map((rule) => ({
     rule,
     genreTargets: rule.field === 'genre' ? rule.values.map(normGenre).filter(Boolean) : [],
+    folderTargets: rule.field === 'folder'
+      ? rule.values.map(normFolder).filter((f): f is string => f !== null)
+      : [],
     valueSet: new Set(rule.values.map(normText).filter(Boolean)),
   }));
 }
@@ -141,6 +155,9 @@ export type RuleTrack = FilterTrack & { artist?: string | null; album?: string |
 //            blocklist's name-fallback semantics, minus the id).
 //   playlist — track id ∈ the pre-resolved member set for any listed playlist
 //            id; an unresolved playlist contributes nothing (stale ids inert).
+//   folder — the track's absolute path lies under a listed folder, "/"
+//            boundary (blocking .../Hits keeps .../Hits 2); a track without a
+//            real path matches nothing.
 export function ruleMatches(
   cr: CompiledRule,
   track: RuleTrack | null | undefined,
@@ -169,6 +186,10 @@ export function ruleMatches(
         if (playlistMembers.get(pid)?.has(track.id)) return true;
       }
       return false;
+    }
+    case 'folder': {
+      const path = trackPath(track);
+      return !!path && cr.folderTargets.some((folder) => pathInFolder(folder, path));
     }
     default:
       return false;

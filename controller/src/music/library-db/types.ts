@@ -28,6 +28,10 @@ export interface TrackRecord {
   genres: string[];
   genre: string | null;
   durationSec: number | null;
+  // Absolute file path (Report Real Path on the station's Navidrome player);
+  // null when never reported. Optional so record literals built elsewhere stay
+  // valid without it.
+  path?: string | null;
   lastfmTags: string[] | null;
   lyricExcerpt: string | null;
   enrichedAt: string | null;
@@ -130,6 +134,7 @@ export interface TrackRow {
   genres: string | null; // JSON array; `genre` is generated from genres[0]
   genre: string | null;
   duration_sec: number | null;
+  path?: string | null;
   lastfm_tags: string | null;
   lyric_excerpt: string | null;
   enriched_at: string | null;
@@ -167,6 +172,8 @@ export interface TrackMeta {
   year?: number | string | null;
   genres?: string[] | null;
   duration?: number | null;
+  // A Subsonic child's `path` — stored only when absolute (see upsertTrackMeta).
+  path?: string | null;
   // Walk-time original-year surface (issue #842). `originalYear` here is the
   // ALBUM's originalReleaseDate.year (source 'album-tag'); the walk passes it
   // only for non-compilation albums (a compilation's original date is the

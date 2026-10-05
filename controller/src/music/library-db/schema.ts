@@ -403,6 +403,15 @@ export async function migrate(embeddingDim: number, reseed = false, adoptStoredD
     d.pragma('user_version = 20');
   }
 
+  if (userVersion < 21) {
+    // Absolute file path, as Navidrome reports it to a player with Report Real
+    // Path on — the input of the Blocked tab's Folder rules and folder genres
+    // (music/folder-genres.ts). NULL = never reported: the flag was off, or the
+    // row predates it. Walks only ever fill it, never blank it (upsertTrackMeta).
+    runDdl(d, `ALTER TABLE tracks ADD COLUMN path TEXT;`);
+    d.pragma('user_version = 21');
+  }
+
   // Reconcile the requested embedding dim against what physically exists.
   //
   // The vec0 table's `FLOAT[N]` schema is the authority for what inserts accept —

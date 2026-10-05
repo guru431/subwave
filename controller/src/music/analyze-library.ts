@@ -134,6 +134,7 @@ async function main() {
         year: song.year,
         genres: subsonic.songGenres(song),
         duration: song.duration,
+        path: song.path,
       });
       liveIds.add(song.id);
       walked += 1;

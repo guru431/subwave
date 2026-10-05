@@ -119,6 +119,7 @@ export async function walkNavidrome(): Promise<{ walked: number; liveIds: Set<st
       isCompilation: song.albumIsCompilation ?? null,
       genres: subsonic.songGenres(song),
       duration: song.duration,
+      path: song.path,
     });
     liveIds.add(song.id);
     walked += 1;

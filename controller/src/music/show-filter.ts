@@ -10,6 +10,7 @@
 // equally. An empty list means "no constraint" and passes everything through.
 
 import * as library from './library.js';
+import * as folderGenres from './folder-genres.js';
 
 // The narrow track shape the show filters read: raw Subsonic children and
 // slimTrack library rows both satisfy it structurally. Every field is optional
@@ -34,26 +35,55 @@ export interface FilterTrack {
   vocalRanges?: unknown[] | null;
   // Last.fm enrichment tags — part of trackAllTags' any-namespace union.
   lastfmTags?: string[] | null;
+  // Absolute file path, as Navidrome reports it to a player with Report Real
+  // Path on (a fake "Artist/Album/Track" path otherwise — ignored). Drives
+  // folder genres and Folder rules; library rows carry it from the reconcile.
+  path?: string | null;
 }
 
 // ── Genre ──────────────────────────────────────────────────────────────────
 
-// Normalised genre token for fuzzy comparison — mirrors subsonic.resolveGenreName
-// so the show's resolved tag and a track's tag compare the same way.
+// Normalised genre token for fuzzy comparison — shared with
+// subsonic.resolveGenreName so the show's resolved tag and a track's tag compare
+// the same way. Letters and digits of ANY script survive: an a-z0-9 filter
+// turned a Cyrillic "Рок" into "", and an empty target silently matched nothing.
 export function normGenre(s: unknown): string {
-  return String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return String(s ?? '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 }
+
+// One letter or digit of any script — the unit genreBoundaries walks.
+const GENRE_ALNUM = /[\p{L}\p{N}]/u;
 
 // Per-track genre tags — every tag the track carries, from the track itself
 // (Subsonic children and slimTrack library rows both carry `genres`; older
-// callers may carry only the scalar `genre`) or a library lookup. Empty when
-// the track has no genre tag.
+// callers may carry only the scalar `genre`) or a library lookup, falling back
+// to the genres assigned to its folder. Empty when neither exists.
 export function trackGenres(t: FilterTrack | null | undefined): string[] {
-  if (Array.isArray(t?.genres) && t.genres.length) return t.genres;
+  // Raw OpenSubsonic children carry genres as [{ name }] objects (as
+  // subsonic.songGenres reads them); library rows carry strings. Keep the
+  // non-empty names — an object would reach genreMatches as "[object Object]".
+  const inline = Array.isArray(t?.genres)
+    ? (t.genres as unknown[])
+        .map((g) => (typeof g === 'string' ? g : (g as { name?: unknown } | null)?.name))
+        .filter((g): g is string => typeof g === 'string' && g.trim() !== '')
+    : [];
+  if (inline.length) return inline;
   if (t?.genre) return [t.genre];
   const rec = t?.id ? library.get(t.id) : null;
   if (Array.isArray(rec?.genres) && rec.genres.length) return rec.genres;
-  return rec?.genre ? [rec.genre] : [];
+  if (rec?.genre) return [rec.genre];
+  // No genre tag anywhere: the genres the operator assigned to the track's
+  // folder (nearest assigned ancestor). A tag always wins, even a junk one.
+  return folderGenres.genresForPath(folderGenres.absolutePath(t?.path) ?? rec?.path ?? null);
+}
+
+// A track's absolute file path — inline (Subsonic children, library rows) or
+// from its library row. null when Navidrome never reported a real one.
+export function trackPath(t: FilterTrack | null | undefined): string | null {
+  const inline = folderGenres.absolutePath(t?.path);
+  if (inline) return inline;
+  const rec = t?.id ? library.get(t.id) : null;
+  return folderGenres.absolutePath(rec?.path);
 }
 
 // Normalised genre tag plus, per normalised character, whether it opens /
@@ -67,7 +97,7 @@ function genreBoundaries(s: unknown): { norm: string; opens: boolean[]; closes: 
   const opens: boolean[] = [];
   let prevAlnum = false;
   for (const ch of src) {
-    const alnum = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9');
+    const alnum = GENRE_ALNUM.test(ch);
     if (!alnum) { prevAlnum = false; continue; }
     chars.push(ch);
     opens.push(!prevAlnum);

@@ -8,6 +8,7 @@ import { config } from './config.js';
 import { envIssues } from './util/env.js';
 import * as settings from './settings.js';
 import * as blocklist from './music/blocklist.js';
+import * as folderGenres from './music/folder-genres.js';
 import * as jingles from './broadcast/jingles.js';
 import * as sfx from './broadcast/sfx.js';
 import * as beds from './broadcast/beds.js';
@@ -243,6 +244,11 @@ app.listen(config.server.port, async () => {
   // auto-playlist build and the first queue push. load() itself never throws
   // (a corrupt file starts empty), so no try/catch needed.
   await blocklist.load();
+
+  // Folder genres — what a track without a genre tag reads as its genre (Genre
+  // rules, genre shows). Same contract as the blocklist: in memory before the
+  // first pick, never throws.
+  await folderGenres.load();
 
   // Start the remote-TTS /health probe loop now that settings are loaded — its
   // URL lives in settings (not env), so it can't self-start at import time the

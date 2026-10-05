@@ -23,9 +23,10 @@ export function ruleMatchRows(): Array<{
   moods: string[] | null;
   audioMoods: string[] | null;
   lastfmTags: string[] | null;
+  path: string | null;
 }> {
   const rows = requireDb()
-    .prepare(`SELECT id, title, artist, album, genres, genre, moods, audio_moods, lastfm_tags FROM tracks`)
+    .prepare(`SELECT id, title, artist, album, genres, genre, moods, audio_moods, lastfm_tags, path FROM tracks`)
     .all() as Array<Record<string, any>>;
   return rows.map((r) => ({
     id: r.id,
@@ -37,6 +38,19 @@ export function ruleMatchRows(): Array<{
     moods: r.moods ? safeParseArray(r.moods) : null,
     audioMoods: r.audio_moods ? safeParseArray(r.audio_moods) : null,
     lastfmTags: r.lastfm_tags ? safeParseArray(r.lastfm_tags) : null,
+    path: r.path ?? null,
+  }));
+}
+
+// Every row's real path and whether it carries a genre tag — the input of the
+// Blocked tab's folder tree (music/folder-genres.aggregateFolders).
+export function folderRows(): Array<{ path: string | null; tagged: boolean }> {
+  const rows = requireDb()
+    .prepare(`SELECT path, genres FROM tracks`)
+    .all() as Array<{ path: string | null; genres: string | null }>;
+  return rows.map((r) => ({
+    path: r.path ?? null,
+    tagged: !!r.genres && safeParseArray(r.genres).length > 0,
   }));
 }
 
