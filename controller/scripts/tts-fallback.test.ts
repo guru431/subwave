@@ -317,13 +317,15 @@ assert.deepEqual(
 //
 // tts.ts skips BOTH the pre-flight reroute and the rescue chain while this
 // holds, which is what makes the operator's switch real: without it the
-// hardcoded Piper rung speaks anyway. The boundary that matters is the absent
-// block — upstream stations have none, and reading it as a ban would take
-// their voice away at the first engine hiccup.
+// hardcoded Piper rung speaks anyway. The default settings carry
+// `tts.fallback.enabled: false`, so the default is a ban; the rescue ladder
+// takes an explicit `enabled: true`. An absent or null block (never produced
+// by settings, which always fill it in) is the defensive edge and is not read
+// as a ban.
 assert.equal(
   rescueForbidden({ enabled: false }),
   true,
-  'explicit disable bans substitution',
+  'disabled — the default block — bans substitution',
 );
 assert.equal(
   rescueForbidden({ enabled: true, engine: 'piper' }),
@@ -335,7 +337,7 @@ assert.equal(
   false,
   'a block without the flag is not a ban',
 );
-assert.equal(rescueForbidden(undefined), false, 'absent block keeps upstream behaviour');
-assert.equal(rescueForbidden(null), false, 'null block keeps upstream behaviour');
+assert.equal(rescueForbidden(undefined), false, 'an absent block (defensive edge) is not a ban');
+assert.equal(rescueForbidden(null), false, 'a null block (defensive edge) is not a ban');
 
 console.log('tts-fallback.test.ts: all assertions passed');

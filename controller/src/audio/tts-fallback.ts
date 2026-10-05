@@ -61,9 +61,13 @@ export interface TtsFallbackConfig {
 // decorative. A station whose voice is a cloned reference would rather lose
 // the line than air it in a different voice.
 //
-// Strict comparison, not `!fallback?.enabled`: an absent block means upstream
-// behaviour, and reading it as a ban would silence every station that never
-// configured a fallback at all.
+// Strict comparison, not `!fallback?.enabled`, and only as a defensive edge:
+// an absent block keeps the rescue chain. In practice the block is never
+// absent — settings/defaults.ts creates `tts.fallback` with `enabled: false`,
+// and normalizeTtsFallback fills a missing or non-boolean flag with the same
+// `false` on load — so on this fork the DEFAULT is no substitution: a failed
+// engine drops the line rather than airing it as Piper. A station that wants
+// upstream's ladder sets `tts.fallback.enabled: true`.
 export function rescueForbidden(
   fallback: TtsFallbackConfig | null | undefined,
 ): boolean {
