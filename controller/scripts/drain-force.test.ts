@@ -132,3 +132,32 @@ test('an ordinary drain still holds at DRAIN_AHEAD', async () => {
   await queue.drainToLiquidsoap();
   assert.deepEqual(sentIds(), ['a']);
 });
+
+// Two clip-as-track fires in one busy spell: the pending target is the one
+// further down `upcoming`, since forcing up to it covers the one ahead.
+test('two pending clip-as-track targets keep the one further down the queue', async () => {
+  reset([item('a', true), item('b'), item('c'), item('d')]);
+  const [, b, c] = queue.upcoming;
+  queue.senderBusy = true;
+  await queue.drainToLiquidsoap(c);
+  await queue.drainToLiquidsoap(b);              // ahead of c — must not shorten the reach
+  assert.equal(queue.pendingForceItem, c);
+  queue.senderBusy = false;
+  await queue.drainToLiquidsoap();
+  for (let i = 0; i < 200 && !c.sent; i++) await new Promise(r => setTimeout(r, 10));
+  await settled();
+  assert.deepEqual(sentIds(), ['a', 'b', 'c'], 'c and b both reached; d is not forced');
+});
+
+test('a pending target that left the queue yields to the new one', async () => {
+  reset([item('a', true), item('b'), item('c')]);
+  const [, b, c] = queue.upcoming;
+  queue.senderBusy = true;
+  await queue.drainToLiquidsoap(c);
+  queue.upcoming = queue.upcoming.filter((i: any) => i !== c);   // cancelled meanwhile
+  await queue.drainToLiquidsoap(b);
+  assert.equal(queue.pendingForceItem, b);
+  queue.senderBusy = false;
+  queue.pendingForceDrain = false;
+  queue.pendingForceItem = null;
+});

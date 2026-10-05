@@ -1857,7 +1857,13 @@ class Queue {
       // Single-flight stays single: flag it and the in-flight drain re-runs
       // forced the moment it releases.
       if (force) this.pendingForceDrain = true;
-      if (force && force !== true) this.pendingForceItem = force;
+      // Two clip-as-track targets in one busy spell: keep the one further down
+      // `upcoming` — forcing up to it covers the one ahead. A target already
+      // gone from the queue yields to the other.
+      if (force && force !== true) {
+        const heldIdx = this.pendingForceItem ? this.upcoming.indexOf(this.pendingForceItem) : -1;
+        if (heldIdx < 0 || this.upcoming.indexOf(force) > heldIdx) this.pendingForceItem = force;
+      }
       return;
     }
     this.senderBusy = true;
