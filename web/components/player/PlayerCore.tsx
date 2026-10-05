@@ -51,7 +51,7 @@ export interface PlayerActions {
   toggleMute: () => void;
   setVolume: Dispatch<SetStateAction<number>>;
   /** Submit a listener request. Rejects on network error. */
-  submitRequest: (text: string, name: string) => Promise<RequestResult>;
+  submitRequest: (text: string, name: string, songId?: string) => Promise<RequestResult>;
   /** Poll a submitted request's outcome (null on network error, so drawers
    *  keep trying). */
   pollRequest: (requestId: string) => Promise<RequestResult | null>;
@@ -133,15 +133,15 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
       // controller's validateBody enforces, run once here for every skin. A
       // refusal comes back as an ordinary failed RequestResult and never touches
       // the network.
-      submitRequest: (text, name) => {
-        const parsed = listenerRequestSchema.safeParse({ text, name });
+      submitRequest: (text, name, songId) => {
+        const parsed = listenerRequestSchema.safeParse({ text, name, songId });
         if (!parsed.success) {
           return Promise.resolve({
             success: false,
             message: parsed.error.issues[0]?.message,
           });
         }
-        return client.submitRequest(parsed.data.text, parsed.data.name);
+        return client.submitRequest(parsed.data.text, parsed.data.name, parsed.data.songId);
       },
       pollRequest: requestId => client.requestStatus(requestId),
       likeCurrent: songId => client.likeCurrent(songId),
