@@ -7,7 +7,7 @@ import { definePickerTool } from '../defs.js';
 
 export default definePickerTool({
   name: 'searchLibrary',
-  build: ({ collect, emptyResult, knnExclude }) => tool({
+  build: ({ collect, emptyResult, knnExclude, scope }) => tool({
     description: 'Search the library for something NAMED — an artist, a song title, or a real genre word (e.g. "jazz", "punjabi"). Falls back to vibe search when nothing matches literally, so "punjabi r&b romantic" also works. Not for browsing by feel: a mood, an energy or "something like what\'s on now" belongs to tracksByMood, tracksByEnergy and the similarity tools, which read the station\'s own tagging instead of guessing from text.',
     inputSchema: z.object({
       query: z.string().describe('an artist name, song title, genre, or vibe'),
@@ -33,8 +33,11 @@ export default definePickerTool({
         // legitimately diverse); anything less means we ran off the end of a
         // narrow set and page 0 is the right answer. Costs one extra call only
         // in that case.
-        const PAGE = 25;
-        const songOffset = Math.floor(Math.random() * 3) * PAGE;
+        // On the request path both of these invert: a deep page is the
+        // relevance TAIL, and 25 rows can cut an artist's shelf in half before
+        // the asked-for title is reached. An explicit ask reads page 0, wide.
+        const PAGE = scope.requestPath ? 200 : 25;
+        const songOffset = scope.requestPath ? 0 : Math.floor(Math.random() * 3) * PAGE;
         let songs = await subsonic.search(query, { songCount: PAGE, songOffset });
         if (songs.length < PAGE && songOffset > 0) {
           songs = await subsonic.search(query, { songCount: PAGE });

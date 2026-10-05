@@ -932,7 +932,7 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
     // here rather than being built from the active show.
     const run = await requestAgent.run({
       messages,
-      scope: pickerScope({ recentIds }),
+      scope: pickerScope({ recentIds, requestPath: true }),
     });
     const { toolCalls, extras } = run;
     // Reassigned when the unknown-id salvage below (repickRequestFromSeen)
