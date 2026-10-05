@@ -2,6 +2,7 @@
 
 import { memo } from 'react';
 import { buildTagline } from '@/lib/tagline';
+import InstallButton from '@/components/InstallButton';
 import ThemeSwitcher from '@/components/ThemeSwitcher';
 import type { ActiveShow, StationContext } from '@/lib/types';
 
@@ -87,7 +88,10 @@ export default memo(function TopBar({
             </span>
           )}
         </div>
-        <div className="flex shrink-0 items-center">
+        <div className="flex shrink-0 items-center gap-3">
+          {/* Renders only where installing is actually on offer — see
+              InstallButton. */}
+          <InstallButton />
           <ThemeSwitcher variant="player" />
         </div>
       </div>
