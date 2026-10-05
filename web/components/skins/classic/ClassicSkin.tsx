@@ -21,6 +21,7 @@ import BoothDrawer from './drawers/BoothDrawer';
 import RequestDrawer from './drawers/RequestDrawer';
 import ScheduleDrawer from './drawers/ScheduleDrawer';
 import ChatDrawer from './drawers/ChatDrawer';
+import { DislikesProvider } from './DislikesContext';
 import { Sheet } from '@/components/ui/sheet';
 import {
   usePlayerActions,
@@ -220,6 +221,9 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
     () => (nextTitle ? { title: nextTitle, artist: nextArtist } : null),
     [nextTitle, nextArtist],
   );
+  // Отметки «не нравится» перечитываются на смене трека: ключ — текущая песня
+  // и голова истории (прозвучавшее уехало в ленту).
+  const dislikeWindowKey = `${nowPlaying?.subsonic_id ?? ''}|${state.history?.[0]?.subsonic_id ?? ''}`;
   const [tickerOn, setTickerOn] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -294,7 +298,7 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
   };
 
   return (
-    <>
+    <DislikesProvider windowKey={dislikeWindowKey}>
       <div
         ref={ambientRef}
         aria-hidden="true"
@@ -396,6 +400,6 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
         onOpenChange={setShortcutsOpen}
         container={portalNode}
       />
-    </>
+    </DislikesProvider>
   );
 }
