@@ -1,0 +1,314 @@
+"""bridge.py: аренда слота GPU берётся перед синтезом и не ломает работу.
+
+Карта на gpu-host одна на шесть слотов, и слот без аренды пульт вправе погасить
+в любой момент — в том числе на середине фразы (находка _boss 2026-08-25).
+Мостик берёт слот сам, как это делает шим ollama-gate.
+"""
+import importlib.util
+import sys
+import threading
+import time
+import urllib.error
+from pathlib import Path
+
+import pytest
+
+BRIDGE = Path(__file__).resolve().parent.parent / "tts-bridge" / "bridge.py"
+_spec = importlib.util.spec_from_file_location("tts_bridge", BRIDGE)
+bridge = importlib.util.module_from_spec(_spec)
+sys.modules["tts_bridge"] = bridge
+_spec.loader.exec_module(bridge)
+
+
+def _load_prep_voice():
+    path = Path(__file__).resolve().parent.parent / "tts-bridge" / "prep_voice.py"
+    spec = importlib.util.spec_from_file_location("tts_prep_voice", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.fixture
+def calls(monkeypatch):
+    seen = []
+
+    def fake_urlopen(req, timeout=None):
+        seen.append({"url": req.full_url, "method": req.get_method(),
+                     "headers": dict(req.header_items())})
+        raise urllib.error.URLError("не ходим в сеть из теста")
+
+    monkeypatch.setattr(bridge.urllib.request, "urlopen", fake_urlopen)
+    return seen
+
+
+def test_lease_asks_controller_for_the_slot(monkeypatch, calls):
+    monkeypatch.setattr(bridge, "GPU_CTL_URL", "http://10.0.0.5:8119")
+    monkeypatch.setattr(bridge, "GPU_CTL_TOKEN", "secret")
+    monkeypatch.setattr(bridge, "GPU_CTL_SLOT", "chatterbox")
+    bridge.lease_slot()
+    assert len(calls) == 1
+    assert calls[0]["url"] == "http://10.0.0.5:8119/ensure-up?slot=chatterbox"
+    assert calls[0]["method"] == "POST"
+    assert calls[0]["headers"].get("X-token") == "secret"
+
+
+def test_no_controller_configured_means_no_call(monkeypatch, calls):
+    """Пульт не задан — мостик работает как раньше, без обращений наружу."""
+    monkeypatch.setattr(bridge, "GPU_CTL_URL", "")
+    bridge.lease_slot()
+    assert calls == []
+
+
+def test_unreachable_controller_does_not_break_synthesis(monkeypatch, calls):
+    """Fail-open: молчащий TTS хуже, чем TTS без аренды."""
+    monkeypatch.setattr(bridge, "GPU_CTL_URL", "http://10.0.0.5:8119")
+    bridge.lease_slot()   # urlopen бросает URLError — исключение наружу не идёт
+    assert len(calls) == 1
+
+
+def test_payload_refuses_json_of_the_wrong_shape():
+    # `[]` проходит json.loads и падал на req.get уже после аренды GPU
+    assert bridge.speak_payload([])[0] is None
+    assert bridge.speak_payload("строка")[0] is None
+    assert bridge.speak_payload({})[0] is None
+    assert bridge.speak_payload({"text": "   "})[0] is None
+    assert bridge.speak_payload({"text": 5})[0] is None
+    # числовой voice падал на .strip()
+    assert bridge.speak_payload({"text": "привет", "voice": 7})[0] is None
+
+
+def test_payload_passes_valid_request():
+    payload, problem = bridge.speak_payload({"text": "привет", "voice": " dmitri "})
+    assert problem is None and payload == {"input": "привет", "voice": "dmitri"}
+    payload, _ = bridge.speak_payload({"text": "привет", "voice": ""})
+    assert payload == {"input": "привет"}     # пустой голос = голос сервера
+
+
+class _FakeHandler(bridge.Handler):
+    """Обработчик без сокета: тело из BytesIO, ответ — в список."""
+
+    def __init__(self, body: bytes, headers: dict | None = None):
+        import io
+        self.rfile = io.BytesIO(body)
+        self.headers = {"Content-Length": str(len(body)), **(headers or {})}
+        self.path = "/speak"
+        self.sent = []
+
+    def _send(self, code, body, ctype, close=False):
+        self.sent.append((code, body, close))
+
+
+def test_bad_request_answers_400_without_touching_gpu(monkeypatch):
+    leased = []
+    monkeypatch.setattr(bridge, "lease_slot", lambda: leased.append(1))
+    handler = _FakeHandler(b"[]")
+    handler.do_POST()
+    assert handler.sent[0][0] == 400 and leased == []
+
+
+def test_oversized_body_answers_413_without_reading_it(monkeypatch):
+    monkeypatch.setattr(bridge, "MAX_BODY_BYTES", 10)
+    leased = []
+    monkeypatch.setattr(bridge, "lease_slot", lambda: leased.append(1))
+    handler = _FakeHandler(b'{"text":"' + b"a" * 100 + b'"}')
+    handler.do_POST()
+    assert handler.sent[0][0] == 413 and leased == []
+
+
+def test_refusal_before_reading_the_body_closes_the_connection(monkeypatch):
+    # непрочитанное тело на keep-alive-соединении разбирается как строка
+    # следующего запроса: subwave получал каскад ложных 400/404 после одного
+    # отвергнутого запроса
+    monkeypatch.setattr(bridge, "MAX_BODY_BYTES", 10)
+    monkeypatch.setattr(bridge, "lease_slot", lambda: None)
+    oversized = _FakeHandler(b'{"text":"' + b"a" * 100 + b'"}')
+    oversized.do_POST()
+    assert oversized.sent[0][0] == 413 and oversized.sent[0][2] is True
+
+    bad_length = _FakeHandler(b'{"text":"a"}', {"Content-Length": "многовато"})
+    bad_length.do_POST()
+    assert bad_length.sent[0][0] == 400 and bad_length.sent[0][2] is True
+
+    unknown = _FakeHandler(b'{"text":"a"}')
+    unknown.path = "/synthesize"
+    unknown.do_POST()
+    assert unknown.sent[0][0] == 404 and unknown.sent[0][2] is True
+
+    # тело прочитано целиком — соединение переиспользуется как обычно
+    bad_json = _FakeHandler(b"[]")
+    bad_json.do_POST()
+    assert bad_json.sent[0][0] == 400 and bad_json.sent[0][2] is False
+
+
+def test_negative_content_length_is_refused(monkeypatch):
+    # read(-1) читал бы до EOF и держал обработчик до READ_TIMEOUT (30 с)
+    leased = []
+    monkeypatch.setattr(bridge, "lease_slot", lambda: leased.append(1))
+    handler = _FakeHandler(b'{"text":"a"}', {"Content-Length": "-1"})
+    handler.do_POST()
+    assert handler.sent[0][0] == 400 and handler.sent[0][2] is True
+    assert leased == []
+
+
+# ── повтор срыва генерации ───────────────────────────────────────────────────
+#
+# Chatterbox срывается на части запросов независимо от текста. Слушателю это
+# видно не как ошибка, а как смена голоса: subwave откатывается на piper и
+# озвучивает фразу запасным движком.
+#
+# Срывы зависят от темпа и идут пачками — замер 2026-09-22 на одной и той же
+# фразе: запросы подряд дали 20% отказов с чередой до трёх, а с паузой 6 с —
+# 0 из 15. Поэтому лечит не сам повтор, а повтор с паузой: мгновенный попадает
+# в ту же пачку и бесполезен (проверено на живом сервисе).
+
+
+def _upstream(monkeypatch, answers):
+    """Подменяет upstream списком исходов: HTTPError(код) либо байты аудио."""
+    import io
+    seen = []
+
+    def fake_urlopen(req, timeout=None):
+        if "audio/speech" not in req.full_url:
+            raise urllib.error.URLError("не аренда — тест про синтез")
+        outcome = answers[min(len(seen), len(answers) - 1)]
+        seen.append(req.full_url)
+        if isinstance(outcome, int):
+            raise urllib.error.HTTPError(
+                req.full_url, outcome, "err", {},
+                io.BytesIO(b'{"error":"TTS generation failed"}'))
+
+        class _Resp:
+            headers = {"Content-Type": "audio/wav"}
+            def read(self): return outcome
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        return _Resp()
+
+    monkeypatch.setattr(bridge.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(bridge, "lease_slot", lambda: None)
+    return seen
+
+
+def test_generation_failure_is_retried(monkeypatch):
+    seen = _upstream(monkeypatch, [500, b"WAV"])
+    monkeypatch.setattr(bridge, "RETRIES", 2)
+    monkeypatch.setattr(bridge.time, "sleep", lambda s: None)
+    handler = _FakeHandler(b'{"text":"\xd0\xb0"}')
+    handler.do_POST()
+    assert handler.sent[0][0] == 200 and handler.sent[0][1] == b"WAV"
+    assert len(seen) == 2          # первый сорвался, второй отдал звук
+
+
+def test_retry_waits_before_trying_again(monkeypatch):
+    # срывы идут пачками: замер 2026-09-22 дал 20% отказов при запросах подряд
+    # и 0 из 15 с паузой 6 с. Повтор без паузы попадает в ту же пачку, поэтому
+    # пауза — не вежливость к серверу, а единственное, что делает повтор рабочим
+    slept = []
+    _upstream(monkeypatch, [500, b"WAV"])
+    monkeypatch.setattr(bridge, "RETRIES", 2)
+    monkeypatch.setattr(bridge, "RETRY_DELAY", 5)
+    monkeypatch.setattr(bridge.time, "sleep", lambda s: slept.append(s))
+    handler = _FakeHandler(b'{"text":"\xd0\xb0"}')
+    handler.do_POST()
+    assert slept == [5]            # ровно одна пауза — перед единственным повтором
+
+
+def test_successful_call_does_not_wait(monkeypatch):
+    slept = []
+    _upstream(monkeypatch, [b"WAV"])
+    monkeypatch.setattr(bridge, "RETRIES", 2)
+    monkeypatch.setattr(bridge.time, "sleep", lambda s: slept.append(s))
+    handler = _FakeHandler(b'{"text":"\xd0\xb0"}')
+    handler.do_POST()
+    assert handler.sent[0][0] == 200 and slept == []
+
+
+def test_client_error_is_not_retried(monkeypatch):
+    # 4xx — упрёк в наш адрес: повтор его не исправит, а карту займёт
+    seen = _upstream(monkeypatch, [400])
+    monkeypatch.setattr(bridge, "RETRIES", 2)
+    handler = _FakeHandler(b'{"text":"\xd0\xb0"}')
+    handler.do_POST()
+    assert handler.sent[0][0] == 502 and len(seen) == 1
+
+
+def test_retries_are_finite_and_the_failure_surfaces(monkeypatch):
+    # бесконечный повтор держал бы слот GPU и вешал реплику вместо отката
+    seen = _upstream(monkeypatch, [500])
+    monkeypatch.setattr(bridge, "RETRIES", 2)
+    monkeypatch.setattr(bridge.time, "sleep", lambda s: None)
+    handler = _FakeHandler(b'{"text":"\xd0\xb0"}')
+    handler.do_POST()
+    assert handler.sent[0][0] == 502
+    assert len(seen) == 3          # первая попытка плюс два повтора
+
+
+def test_retry_renews_the_gpu_lease(monkeypatch):
+    # повтор растягивает окно, в которое пульт вправе погасить слот
+    leased = []
+    _upstream(monkeypatch, [500, b"WAV"])
+    monkeypatch.setattr(bridge, "lease_slot", lambda: leased.append(1))
+    monkeypatch.setattr(bridge, "RETRIES", 2)
+    monkeypatch.setattr(bridge.time, "sleep", lambda s: None)
+    handler = _FakeHandler(b'{"text":"\xd0\xb0"}')
+    handler.do_POST()
+    assert len(leased) == 2
+
+
+def test_retries_can_be_switched_off(monkeypatch):
+    seen = _upstream(monkeypatch, [500])
+    monkeypatch.setattr(bridge, "RETRIES", 0)
+    handler = _FakeHandler(b'{"text":"\xd0\xb0"}')
+    handler.do_POST()
+    assert handler.sent[0][0] == 502 and len(seen) == 1
+
+
+def test_busy_engine_waits_for_its_turn(monkeypatch):
+    # Chatterbox не потокобезопасен: два синтеза разом попадают в общий батч и
+    # падают оба, причём с одинаковыми размерами тензоров в ошибке (замер
+    # 2026-09-22 — одновременно 1 успех из 6, теми же фразами подряд 6 из 6).
+    # Поэтому синтез идёт по одному, а занятый движок значит «подожди», а не
+    # «откажи»: на отказ станция меняет движок, и слушатель слышит чужой голос.
+    _upstream(monkeypatch, [b"WAV"])
+    monkeypatch.setattr(bridge, "_synthesis", threading.BoundedSemaphore(1))
+    monkeypatch.setattr(bridge, "QUEUE_WAIT", 5)
+    bridge._synthesis.acquire()
+    threading.Timer(0.1, bridge._synthesis.release).start()
+    handler = _FakeHandler(b'{"text":"\xd0\xb0"}')
+    started = time.monotonic()
+    handler.do_POST()
+    assert handler.sent[0][0] == 200
+    assert time.monotonic() - started >= 0.1   # дождался очереди, а не проскочил
+
+
+def test_queue_that_never_clears_answers_503(monkeypatch):
+    # ждать без потолка нельзя: запросы копились бы молча, а контроллер всё
+    # равно отваливается по своему таймауту в 180 с
+    monkeypatch.setattr(bridge, "lease_slot", lambda: None)
+    monkeypatch.setattr(bridge, "_synthesis", threading.BoundedSemaphore(1))
+    monkeypatch.setattr(bridge, "QUEUE_WAIT", 0.05)
+    bridge._synthesis.acquire()
+    try:
+        handler = _FakeHandler(b'{"text":"\xd0\xb0"}')
+        handler.do_POST()
+        assert handler.sent[0][0] == 503
+    finally:
+        bridge._synthesis.release()
+
+
+def test_prep_voice_takes_library_url_from_environment(monkeypatch):
+    prep = _load_prep_voice()
+    monkeypatch.delenv("CHATTERBOX_VOICES_URL", raising=False)
+    with pytest.raises(SystemExit):
+        prep.library_url()
+    monkeypatch.setenv("CHATTERBOX_VOICES_URL", "http://10.0.0.5:4123/voices/")
+    assert prep.library_url() == "http://10.0.0.5:4123/voices"
+
+
+def test_prep_voice_takes_bridge_url_from_environment(monkeypatch):
+    prep = _load_prep_voice()
+    monkeypatch.delenv("TTS_BRIDGE_URL", raising=False)
+    with pytest.raises(SystemExit):
+        prep.bridge_url()
+    monkeypatch.setenv("TTS_BRIDGE_URL", "http://10.0.0.5:4124/")
+    assert prep.bridge_url() == "http://10.0.0.5:4124"
