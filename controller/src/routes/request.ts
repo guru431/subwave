@@ -271,6 +271,18 @@ async function resolveRequest(entry) {
       queue.log('request', `song-id ${entry.songId} не найден в коллекции`);
       return failed(sorryNoMatch(requester));
     }
+    // Пауза повтора — как у каскада ниже (и до подводки, чтобы отказ не стоил
+    // вызова модели): точность выбора не даёт права заказывать одну песню
+    // каждый раз, как она отзвучит.
+    const cdMin = Number((settings.get() as any)?.requests?.repeatCooldownMin ?? 120);
+    if (cdMin > 0 && queue.recentlyPlayedIds(cdMin / 60).has(pick.id)) {
+      entry.pick = pick;
+      entry.pickSource = 'song-id:cooldown';
+      entry.refused = true;
+      const cdAck = queue.cooldownAck(pick.id, pick.title);
+      session.appendTurn({ role: 'dj', kind: 'request', text: cdAck, meta: { trackId: pick.id, requester } });
+      return resolved({ ack: cdAck, track: { title: pick.title, artist: pick.artist }, queuePosition: null });
+    }
     // Подводка — тем же путём, что у каскада: выключенный голос станции значит
     // ни подводки, ни вызова модели, а ответ слушатель получает всё равно.
     const generatedIntro = await generateQueuedRequestIntro({
