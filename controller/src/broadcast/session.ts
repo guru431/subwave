@@ -481,7 +481,14 @@ function softShift(ctx: SessionContext, nextKey: string): Session {
 // a mandate to keep the thread going (one artist re-airing every ~1.2h). Keeping
 // a few preserves short-term memory without the momentum, and track-recency is
 // enforced at the tool layer either way.
-export function windowMessages() {
+//
+// `omitRequests` (the request agent): EVERY request turn, the listener's event
+// and the DJ's answer alike. They are the same ambiguity the old pick events
+// were, only worse — a request run is pinned to its own tail line, and the
+// model still took its search query from an earlier listener's request in the
+// window ("вулючи барбарики" searched for the previous ask, "Муцураев"). An
+// already answered request is no context for resolving a new one.
+export function windowMessages({ omitRequests = false }: { omitRequests?: boolean } = {}) {
   if (!_session) return [];
   const raw: { role: 'user' | 'assistant'; content: string }[] = [];
   if (_session.handoff) {
@@ -508,6 +515,7 @@ export function windowMessages() {
     if (m.kind === 'sfx') continue;        // audio-production cue, not conversation — bare effect name reads as spoken
     if (m.role === 'event' && m.kind === 'pick' && i !== lastPickEventIdx) continue;  // old pick asks
     if (m.role === 'dj' && m.kind === 'pick' && !keepRationaleIdx.has(i)) continue;   // stale pick rationales
+    if (omitRequests && m.kind === 'request' && (m.role === 'event' || m.role === 'dj')) continue;
     const role = (m.role === 'dj' || m.role === 'segment') ? 'assistant' : 'user';
     // A dj/pick turn's text is the agent's private pick rationale (object.reason),
     // not words it spoke on air. Coalescing (below) would otherwise glue it into
