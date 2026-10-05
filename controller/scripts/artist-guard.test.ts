@@ -12,7 +12,7 @@
 
 import assert from 'node:assert/strict';
 import { artistKey, artistRootKey, filterPickerCandidates } from '../src/music/recency.js';
-import { ARTIST_VARIETY_WINDOW, alternativeCandidates, artistGuardCause } from '../src/broadcast/dj-agent/artist-guard.js';
+import { ARTIST_VARIETY_WINDOW, alternativeCandidates, artistGuardCause, artistWindowRoots } from '../src/broadcast/dj-agent/artist-guard.js';
 import { queue } from '../src/broadcast/queue.js';
 
 // ── artistRootKey: collaborations collapse, band names don't ────────────────
@@ -350,5 +350,20 @@ assert(
 // would match every untagged candidate.
 setPlays([{ id: 'D', title: 'Untitled', artist: '', endedAt: '2026-07-30T18:00:00.000Z' }]);
 assert.equal(queue.neighbourArtistRoots(3).size, 0, 'an artist-less play adds no key');
+
+// ── fork: the hours window's keys ─────────────────────────────────────────
+// queue.recentArtistsSince returns RAW lowercase names; the window keys them
+// onto the lead act (#1251: a collaboration must not walk past it) and adds the
+// queued-and-unaired neighbours, which will air before the pick does.
+{
+  const roots = artistWindowRoots(
+    ['marvin gaye & tammi terrell', 'the clash', ''],
+    new Set([artistRootKey('Curtis Mayfield')]),
+  );
+  assert(roots.has(artistRootKey('Marvin Gaye')), 'a collaboration keys onto its lead act');
+  assert(roots.has(artistRootKey('The Clash')), 'a plain name keeps its own key');
+  assert(roots.has(artistRootKey('Curtis Mayfield')), 'queued neighbours join the window');
+  assert(!roots.has(''), 'an empty name adds no key');
+}
 
 console.log('artist-guard checks passed');

@@ -171,6 +171,10 @@ test('the event prompt names the captured anchor without claiming current adjace
 
 test('the interleaved Bill Evans request currently makes the candidate a soft spacing repeat', () => {
   assert.ok(observed);
-  assert.match(observed.guard ?? '', /^recently-played artist "Bill Evans" allowed/,
+  // Fork: the station's hours window (ArtistGuardDeps.windowRoots) is a hard
+  // rule, so the queued request's artist sends this pick to the pool rescue
+  // first; the empty test pool then relaxes it — the same repeat, named by the
+  // window instead of by slot spacing.
+  assert.match(observed.guard ?? '', /^recently-played artist "Bill Evans" \(heard within [\d.]+ h\) allowed/,
     'this diagnostic pins the pre-existing tail/artist race for its separate fix');
 });

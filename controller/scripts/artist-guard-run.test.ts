@@ -259,3 +259,81 @@ test('every firing names its cause and window, so the two are separable in the l
   assert.equal(h2.events[0].basis, 'recent-window');
   assert.equal(h2.events[0].window, 9, 'the configured window rides the event');
 });
+
+// ── fork: the library-scaled artist window (hours) ─────────────────────────
+//
+// The slot spacing above is a preference over the last few slots. The station
+// also holds the artist window the pool picker honours (recencyWindowsForLibrary:
+// 3 h at 3k+ tracks) on the agent path — a HARD rule, as it was on v1.8: a pick
+// inside it is re-picked away from, and when the run offers no artist outside
+// it the pool rescue (which applies the window itself) takes the slot.
+
+const runWindow = (
+  h: ReturnType<typeof harness>,
+  o: { song: Cand; pickAnchor: Cand | null; seen: Map<string, Cand>; windowRoots: Set<string>; recentRoots?: Set<string> },
+) => runArtistGuard<Cand>({
+  song: o.song,
+  object: { id: o.song.id, say: 'a line' },
+  pickAnchor: o.pickAnchor,
+  seen: o.seen,
+  recentRoots: o.recentRoots ?? new Set(),
+  window: 5,
+  windowRoots: o.windowRoots,
+  windowHours: 3,
+  ...h.deps,
+});
+
+test('fork: a pick inside the hours window is re-picked away from', async () => {
+  const h = harness();
+  const out = await runWindow(h, {
+    song: marvin, pickAnchor: beatles, seen: seenOf(marvin, clash),
+    windowRoots: rootsOf('Marvin Gaye'),
+  });
+  assert.equal(out.kind, 'repicked');
+  assert.equal((out as any).song.id, 'c1');
+  assert.match(h.reasons[0], /within the last 3 hours/);
+  assert.equal(h.events[0].cause, 'window');
+  assert.equal(h.calls.poolRescue, 0);
+});
+
+test('fork: a window hit with no artist outside it escalates to the pool instead of keeping', async () => {
+  const h = harness({ poolRescue: 'queued' });
+  const out = await runWindow(h, {
+    song: marvin, pickAnchor: beatles, seen: seenOf(marvin, sly),
+    windowRoots: rootsOf('Marvin Gaye', 'Sly & the Family Stone'),
+  });
+  assert.equal(out.kind, 'rescued');
+  assert.equal(h.calls.repick, 0, 'nothing outside the window to re-pick from');
+  assert.equal(h.calls.poolRescue, 1);
+});
+
+test('fork: the starved window never hands back the anchor artist', async () => {
+  const h = harness({ poolRescue: 'empty' });
+  const out = await runWindow(h, {
+    song: marvin, pickAnchor: beatles, seen: seenOf(marvin, beatles),
+    windowRoots: rootsOf('Marvin Gaye'),
+  });
+  assert.equal(h.calls.repick, 0, 'the anchor act is no escape from a window hit');
+  assert.equal(out.kind, 'kept');
+  assert(h.lines.some((l) => /within 3 h/.test(l) && /allowed/.test(l)), 'the relaxation names the window');
+});
+
+test('fork: a failed window re-pick still escalates to the pool', async () => {
+  const h = harness({ repick: () => null, poolRescue: 'queued' });
+  const out = await runWindow(h, {
+    song: marvin, pickAnchor: beatles, seen: seenOf(marvin, clash),
+    windowRoots: rootsOf('Marvin Gaye'),
+  });
+  assert.equal(out.kind, 'rescued');
+  assert.deepEqual(h.calls, { repick: 1, poolRescue: 1 });
+});
+
+test('fork: the hours window outranks soft slot spacing for the same artist', async () => {
+  const h = harness({ poolRescue: 'queued' });
+  const out = await runWindow(h, {
+    song: marvin, pickAnchor: beatles, seen: seenOf(marvin, sly),
+    recentRoots: rootsOf('Marvin Gaye', 'Sly & the Family Stone'),
+    windowRoots: rootsOf('Marvin Gaye', 'Sly & the Family Stone'),
+  });
+  assert.equal(out.kind, 'rescued', 'spacing alone would have kept this pick');
+});

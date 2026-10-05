@@ -20,7 +20,7 @@ export const ARTIST_VARIETY_WINDOW = 5;
 // that yields to whatever the run already surfaced. `onair` is the historical
 // telemetry spelling and is kept for compatibility; it does not assert that
 // the anchor is still on air or remains the FIFO predecessor after awaits.
-export type ArtistGuardCause = 'onair' | 'recent' | null;
+export type ArtistGuardCause = 'onair' | 'recent' | 'window' | null;
 
 // `recentRoots` (queue.neighbourArtistRoots) already CONTAINS the logical
 // neighbours visible at the caller's snapshot. The anchor test runs first to
@@ -35,6 +35,21 @@ export function artistGuardCause(
   if (!pickRoot) return null;
   if (anchorRoot && pickRoot === anchorRoot) return 'onair';
   return recentRoots.has(pickRoot) ? 'recent' : null;
+}
+
+// Fork: the keys of the library-scaled artist window. `recentArtists` is
+// queue.recentArtistsSince — RAW lowercase names, matched raw-to-raw by the pool
+// picker — so they are keyed onto the lead act here (#1251: a collaboration must
+// not walk past the window). `neighbourRoots` (queue.neighbourArtistRoots) adds
+// the queued-and-unaired tracks, which have no play row yet but will air before
+// this pick does.
+export function artistWindowRoots(recentArtists: Iterable<string>, neighbourRoots: Set<string>): Set<string> {
+  const out = new Set(neighbourRoots);
+  for (const artist of recentArtists) {
+    const key = artistRootKey(artist);
+    if (key) out.add(key);
+  }
+  return out;
 }
 
 export interface AlternativePool<T> {
@@ -114,6 +129,14 @@ export interface ArtistGuardDeps<T> {
   poolRescue: (avoidArtist: string) => Promise<'queued' | 'empty' | 'collision'>;
   log: (line: string) => void;
   logEvent: (name: string, payload: Record<string, unknown>) => void;
+  // Fork: the library-scaled artist window (recencyWindowsForLibrary — the hours
+  // the pool picker honours, 3 h at 3k+ tracks) as lead-artist keys, see
+  // artistWindowRoots. Unlike slot spacing it is a HARD rule: a pick inside it is
+  // re-picked away from, and when the run offers no artist outside it the pool
+  // rescue takes the slot — the pool applies the same window itself. Absent →
+  // upstream behaviour exactly.
+  windowRoots?: Set<string>;
+  windowHours?: number;
 }
 
 export async function runArtistGuard<T extends CandidateLike>(
@@ -122,14 +145,33 @@ export async function runArtistGuard<T extends CandidateLike>(
   const { song, pickAnchor, seen, recentRoots, window, repick, poolRescue, log, logEvent } = deps;
 
   const pickRoot = artistRootKey(song);
-  const cause = artistGuardCause(pickRoot, artistRootKey(pickAnchor || {}), recentRoots);
+  const anchorRoot = artistRootKey(pickAnchor || {});
+  let cause = artistGuardCause(pickRoot, anchorRoot, recentRoots);
+  // Fork: the hours window outranks soft spacing — inside it the pick must go.
+  const windowRoots = deps.windowRoots ?? null;
+  if (cause !== 'onair' && pickRoot && windowRoots?.has(pickRoot)) cause = 'window';
   if (!cause) return { kind: 'none' };
 
-  const { alt, dropped, starved } = alternativeCandidates<T>(seen, pickRoot, recentRoots);
+  let pool: AlternativePool<T>;
+  if (cause === 'window') {
+    // The re-pick steps around the whole window AND the anchor act. Starved, the
+    // bare set alternativeCandidates hands back could hold the anchor artist — a
+    // back-to-back repeat bought to avoid one hours later — so it offers nothing,
+    // and the pool rescue below decides instead.
+    const avoid = new Set([...recentRoots, ...windowRoots!]);
+    if (anchorRoot) avoid.add(anchorRoot);
+    pool = alternativeCandidates<T>(seen, pickRoot, avoid);
+    if (pool.starved) pool = { alt: new Map(), dropped: 0, starved: true };
+  } else {
+    pool = alternativeCandidates<T>(seen, pickRoot, recentRoots);
+  }
+  const { alt, dropped, starved } = pool;
   const label = cause === 'onair' ? 'pick-anchor artist' : 'recently-played artist';
+  // Named after the artist, so a window line still reads `… artist "X" …`.
+  const where = cause === 'window' ? ` (heard within ${deps.windowHours ?? '?'} h)` : '';
   const telemetry = {
     cause,
-    basis: cause === 'onair' ? 'pick-anchor' : 'recent-window',
+    basis: cause === 'onair' ? 'pick-anchor' : cause === 'window' ? 'artist-hours' : 'recent-window',
   };
 
   // Spacing yields to the run: no fresher artist exists to re-pick, so don't
@@ -149,14 +191,16 @@ export async function runArtistGuard<T extends CandidateLike>(
       alt,
       cause === 'onair'
         ? `The track you chose is by ${song.artist}, the artist on the track this pick cycle is anchored to. Avoid repeating that anchor artist; choose a DIFFERENT artist from the candidates above.`
-        : `The track you chose is by ${song.artist}, who has already played in the last few slots — space artists out across the show. Choose a DIFFERENT artist from the candidates above.`,
+        : cause === 'window'
+          ? `The track you chose is by ${song.artist}, who already played within the last ${deps.windowHours ?? 'few'} hours — not a new artist. Choose a DIFFERENT artist from the candidates above.`
+          : `The track you chose is by ${song.artist}, who has already played in the last few slots — space artists out across the show. Choose a DIFFERENT artist from the candidates above.`,
     );
     // Resolved from `alt`, not the full `seen`, so the re-pick can only land on
     // something it was offered even if the schema ever loosens.
     const altSong = repicked?.id ? alt.get(repicked.id) : null;
     if (altSong && repicked) {
       logEvent('pick.artistGuard', { ...telemetry, relaxed: false, from: song.artist, to: altSong.artist, candidates: alt.size, recencySkipped: dropped, recencyStarved: starved, window });
-      log(`${label} "${song.artist}" avoided — re-picked "${altSong.title}" by ${altSong.artist} from ${alt.size} other-artist candidate(s)${dropped ? `, ${dropped} more skipped as recently-played artists` : ''}${starved ? ' (every alternative was recently played — recency window waived)' : ''}`);
+      log(`${label} "${song.artist}"${where} avoided — re-picked "${altSong.title}" by ${altSong.artist} from ${alt.size} other-artist candidate(s)${dropped ? `, ${dropped} more skipped as recently-played artists` : ''}${starved ? ' (every alternative was recently played — recency window waived)' : ''}`);
       return { kind: 'repicked', object: repicked, song: altSong };
     }
   }
@@ -180,16 +224,18 @@ export async function runArtistGuard<T extends CandidateLike>(
   const rescued = await poolRescue(song.artist || '');
   const runWasThin = alt.size
     ? `re-pick from ${alt.size} other-artist candidate(s) didn't land`
-    : 'every agent candidate was that artist';
+    : starved
+      ? 'every other candidate was also heard within the window'
+      : 'every agent candidate was that artist';
   if (rescued === 'queued') {
     logEvent('pick.artistGuard', { ...telemetry, relaxed: false, reason: 'pool-rescue', artist: song.artist, candidates: alt.size });
-    log(`pick-anchor artist "${song.artist}" avoided — ${runWasThin}, so the pick came from the fallback pool instead`);
+    log(`${label} "${song.artist}"${where} avoided — ${runWasThin}, so the pick came from the fallback pool instead`);
     return { kind: 'rescued' };
   }
   // 'empty' (the pool holds no other artist) vs 'collision' (its pick deduped)
   // stay distinct so the log tells the two apart.
   const reason = alt.size ? 'repick-failed' : 'no-other-artist';
   logEvent('pick.artistGuard', { ...telemetry, relaxed: true, reason, artist: song.artist, candidates: alt.size, poolRescue: rescued });
-  log(`pick-anchor artist "${song.artist}" allowed — ${runWasThin} and the fallback pool ${rescued === 'collision' ? 'pick was already queued' : 'had none either'} (relaxed)`);
+  log(`${label} "${song.artist}"${where} allowed — ${runWasThin} and the fallback pool ${rescued === 'collision' ? 'pick was already queued' : 'had none either'} (relaxed)`);
   return { kind: 'kept' };
 }

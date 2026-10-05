@@ -37,7 +37,7 @@ import { withTrace, logEvent } from '../observability/events.js';
 import { recencyWindowsForLibrary } from '../music/recency.js';
 import { showNoRepeatGuard } from '../music/show-recency.js';
 import { EXPLORE_SEED_PROBABILITY } from '../music/airing.js';
-import { ARTIST_VARIETY_WINDOW, runArtistGuard } from './dj-agent/artist-guard.js';
+import { ARTIST_VARIETY_WINDOW, artistWindowRoots, runArtistGuard } from './dj-agent/artist-guard.js';
 import { runAlbumGuard } from './dj-agent/album-guard.js';
 import { albumKeyFor } from '../music/album-facts.js';
 import { hasEraBound, genreResolutionWarningOnce, type VocalMode } from '../music/show-filter.js';
@@ -405,12 +405,21 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, pickAn
   // Read once: the album guard below steps around the same neighbours, and two
   // reads of a live queue across two awaits could disagree.
   const neighbourRoots = queue.neighbourArtistRoots(varietyWindow);
+  // Fork: the library-scaled artist window the pool picker honours
+  // (windows.artistHours — 3 h at 3k+ tracks) holds on this path too, as a hard
+  // rule — see ArtistGuardDeps.windowRoots. The agent tools carry no artist
+  // filter (#618), so without it one band aired every 40–60 minutes on a
+  // catalogue with a few deep shelves. Requests take runRequestViaAgent and stay
+  // outside the window.
+  const windowRoots = artistWindowRoots(queue.recentArtistsSince(windows.artistHours), neighbourRoots);
   const guarded = await runArtistGuard<any>({
     song, object, pickAnchor,
     seen: extras.seen,
     // Every queue read stays here; the policy module is handed values only.
     recentRoots: neighbourRoots,
     window: varietyWindow,
+    windowRoots,
+    windowHours: windows.artistHours,
     repick: (alt, reason) => repickFromSeen({
       seen: alt, badId: null, showAt,
       playlistResolved: !!playlistTracks?.length,
