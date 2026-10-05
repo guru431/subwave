@@ -126,7 +126,9 @@ test('the stateless request-intro seam pins its writer across echo-guard regener
 
 test('both stateless route cascades use the shared request provenance seam', () => {
   const route = readFileSync(join(process.cwd(), 'src/routes/request.ts'), 'utf8');
-  assert.equal(route.match(/generateQueuedRequestIntro\(/g)?.length, 2);
+  // Fork: the exact request (branch 0a, `songId`) is a third cascade through
+  // the same seam — more-like-this, the exact request and the main cascade.
+  assert.equal(route.match(/generateQueuedRequestIntro\(/g)?.length, 3);
   assert.doesNotMatch(route, /dj\.generateIntro\(/);
 });
 

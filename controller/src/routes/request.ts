@@ -255,6 +255,77 @@ async function resolveRequest(entry) {
     queue.log('error', `Session update for request failed: ${err.message}`);
   }
 
+  // 0a. Точный заказ. Слушатель выбрал трек из подсказки, и его id сверен с
+  // коллекцией ещё до отправки — сопоставлять нечего, поэтому весь каскад
+  // (поиск, разбор намерения, выбор из кандидатов) пропускается. Подводка при
+  // этом остаётся: заказ, объявленный по имени, — то, ради чего станция и
+  // заводилась, и экономить надо на догадках, а не на голосе.
+  if (entry.songId) {
+    entry.path = 'song-id';
+    entry.pickSource = 'song-id';
+    const pick = await subsonic.getSong(entry.songId).catch(() => null);
+    if (!pick) {
+      // Id пришёл, а трека по нему нет: коллекция переиндексирована, или id
+      // чужой. Отвечаем тем же отказом, что и на ненайденный запрос, — не
+      // подсказывая, что именно не совпало.
+      queue.log('request', `song-id ${entry.songId} не найден в коллекции`);
+      return failed(sorryNoMatch(requester));
+    }
+    // Подводка — тем же путём, что у каскада: выключенный голос станции значит
+    // ни подводки, ни вызова модели, а ответ слушатель получает всё равно.
+    const generatedIntro = await generateQueuedRequestIntro({
+      track: pick,
+      context: ctx,
+      requestedBy: requester,
+      artistMiss: null,
+      recap: queue.getDjRecap(),
+      recentTracks: queue.getRecentTracks(),
+      recentOpeners: queue.getRecentOpeners(),
+    }, text);
+    if (generatedIntro.guard) {
+      flagGuard(entry, generatedIntro.guard);
+      queue.log('request-guard', `intro echoed request text — ${generatedIntro.guard}`);
+    }
+    const introScript = generatedIntro.introScript;
+    const pos = await queue.push({
+      track: pick,
+      requestedBy: requester,
+      intent: 'song',
+      introScript,
+      introKind: 'dj-speak',
+      introPersona: generatedIntro.introPersona,
+      introHostSpeech: generatedIntro.introHostSpeech,
+    });
+    entry.pick = pick;
+    if (pos === -2) {
+      entry.pickSource = 'song-id:blocked';
+      return failed(sorryNoMatch(requester));
+    }
+    if (pos === -1) {
+      const dupAck = queue.dedupAck(pick.id);
+      entry.pickSource = 'song-id:already-queued';
+      entry.refused = true;
+      session.appendTurn({ role: 'dj', kind: 'request', text: dupAck,
+                           meta: { trackId: pick.id, requester } });
+      return resolved({ ack: dupAck, track: { title: pick.title, artist: pick.artist },
+                        queuePosition: null });
+    }
+    session.appendTurn({
+      role: 'dj', kind: 'request',
+      text: introScript || `Queued "${pick.title}".`,
+      meta: { trackId: pick.id, requester },
+    });
+    entry.introScript = introScript || null;
+    // Позиция — из возврата push(), а не из длины очереди: после правки
+    // приоритета заказ встаёт ПЕРЕД несданными авто-пиками, и хвост очереди
+    // уже чужой.
+    return resolved({
+      ack: withWaitNotice(introScript || `В очереди: «${pick.title}» — ${pick.artist}.`, pick.id),
+      track: { title: pick.title, artist: pick.artist },
+      queuePosition: pos,
+    });
+  }
+
   // 0. "more like this" is a meta-instruction about the current track, not a
   // query, so it never goes through the generic search path.
   const isMoreLikeThis = /^more\s+like\s+this[.!?]?$/i.test(text);
@@ -686,7 +757,8 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
   // req.body is already the parsed shape. Only the cleaned text reaches the
   // session/prompts/air; the raw text is kept on the entry for the operator log.
   // Sanitize never grows its input, so no re-slice is needed.
-  const { text: rawText, name: rawName } = req.body as { text: string; name: string };
+  const { text: rawText, name: rawName, songId } = req.body as
+    { text: string; name: string; songId?: string };
   const stripped = stripScriptedOpener(sanitizeRequestText(rawText));
   const text = stripped.text;
   if (!text) {
@@ -763,6 +835,9 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
     id, status: 'pending', requester, text,
     rawText: sanitizeRequestText(rawText),
     injection: stripped.injection,
+    // Точный заказ из подсказки плеера: трек уже сверен с коллекцией,
+    // угадывать нечего. Пустая строка — это «не выбирали», а не «выбрали ничто».
+    songId: songId || null,
     ack: null, track: null, queuePosition: null, message: null,
     createdAt: Date.now(),
   };

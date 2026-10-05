@@ -32,4 +32,19 @@ export const listenerRequestSchema = z.object({
       .max(REQUEST_NAME_MAX, `Keep the name under ${REQUEST_NAME_MAX} characters.`)
       .default(''),
   ),
+  // Exact request: the listener picked the track from the player's suggestion,
+  // and its collection id was already checked against the library (the room's
+  // GET /resolve). Optional — a free-text request stays a first-class path;
+  // this one only removes the guesswork where there is nothing left to guess.
+  //
+  // Capped not because Navidrome ids are never longer, but because the value
+  // travels into a Subsonic query: without a ceiling anything fits here.
+  songId: z.preprocess(
+    requestNullToUndefined,
+    z
+      .string({ error: 'Track id must be plain text.' })
+      .trim()
+      .max(64, 'Track id is too long.')
+      .optional(),
+  ),
 });
