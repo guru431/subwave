@@ -30,7 +30,7 @@ import * as library from '../music/library.js';
 import * as subsonic from '../music/subsonic.js';
 import * as dj from '../llm/dj.js';
 import { energyForDaypart, getClockContext, getDateContext, getTimeContext, getFullContext } from '../context.js';
-import { linkClockAt, linkClockStampFor } from './queue/pure.js';
+import { linkClockAt, linkClockStampFor, seamLinkShowAt } from './queue/pure.js';
 import { djObject, nearestId, modelTolerant } from '../llm/sdk.js';
 import * as budget from './dj-budget.js';
 import { withTrace, logEvent } from '../observability/events.js';

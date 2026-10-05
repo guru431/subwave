@@ -1053,6 +1053,25 @@ class Queue {
       + (existing != null && existing < secs ? ' (ending canvas kept)' : ''));
   }
 
+  // Render an item's intro/link WAV ahead of its air time. The drain calls it as
+  // it hands an item over; djAgent.writeSeamLink calls it for a seam line that
+  // arrived after the hand-over, which the drain can no longer see.
+  async prerenderIntro(item: QueueItem) {
+    if (!item.introScript) return;
+    try {
+      item.introWav = await speak(item.introScript, {
+        kind: item.introKind || 'dj-speak',
+        // Voice it as whoever wrote it. Without this, speak() falls back
+        // to getEffectivePersona() at render time — minutes after the line
+        // was written, possibly the other side of a show boundary.
+        persona: item.introPersona || null,
+      });
+      this.persist();
+    } catch (err) {
+      this.log('error', `TTS failed: ${(err as Error).message}`);
+    }
+  }
+
   // Walk the upcoming queue and feed unsent items to Liquidsoap one at a time,
   // spaced out so the 1s file-poll doesn't miss any.
   //
@@ -1116,17 +1135,7 @@ class Queue {
         // if the switch comes back on before the track airs, airIntro renders
         // from the script itself.
         if (item.introScript && !item.introWav && autoVoiceAllowed()) {
-          try {
-            item.introWav = await speak(item.introScript, {
-              kind: item.introKind || 'dj-speak',
-              // Voice it as whoever wrote it. Without this, speak() falls back
-              // to getEffectivePersona() at DRAIN time — minutes after the line
-              // was written, possibly the other side of a show boundary.
-              persona: item.introPersona || null,
-            });
-          } catch (err) {
-            this.log('error', `TTS failed: ${(err as Error).message}`);
-          }
+          await this.prerenderIntro(item);
         }
 
         // An operator cancel (removeUpcoming) may have spliced this item out
