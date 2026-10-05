@@ -257,6 +257,76 @@ async function resolveRequest(entry) {
     queue.log('error', `Session update for request failed: ${err.message}`);
   }
 
+  // 0a. Точный заказ. Слушатель выбрал трек из подсказки, и его id сверен с
+  // коллекцией ещё до отправки — сопоставлять нечего, поэтому весь каскад
+  // (поиск, разбор намерения, выбор из кандидатов) пропускается. Подводка при
+  // этом остаётся: заказ, объявленный по имени, — то, ради чего станция и
+  // заводилась, и экономить надо на догадках, а не на голосе.
+  if (entry.songId) {
+    entry.path = 'song-id';
+    entry.pickSource = 'song-id';
+    const pick = await subsonic.getSong(entry.songId).catch(() => null);
+    if (!pick) {
+      // Id пришёл, а трека по нему нет: коллекция переиндексирована, или id
+      // чужой. Отвечаем тем же отказом, что и на ненайденный запрос, — не
+      // подсказывая, что именно не совпало.
+      queue.log('request', `song-id ${entry.songId} не найден в коллекции`);
+      return failed(sorryNoMatch(requester));
+    }
+    const writeIntro = () => dj.generateIntro({
+      track: pick,
+      context: ctx,
+      requestedBy: requester,
+      artistMiss: null,
+      recap: queue.getDjRecap(),
+      recentTracks: queue.getRecentTracks(),
+      recentOpeners: queue.getRecentOpeners(),
+    });
+    let introScript = await writeIntro().catch(() => null);
+    const guarded = await guardIntro(introScript, text, writeIntro);
+    if (guarded.guard) {
+      flagGuard(entry, guarded.guard);
+      queue.log('request-guard', `intro echoed request text — ${guarded.guard}`);
+    }
+    introScript = guarded.script;
+    const pos = await queue.push({
+      track: pick,
+      requestedBy: requester,
+      intent: 'song',
+      introScript,
+      introKind: 'dj-speak',
+      introPersona: session.onAirPersona(),
+    });
+    entry.pick = pick;
+    if (pos === -2) {
+      entry.pickSource = 'song-id:blocked';
+      return failed(sorryNoMatch(requester));
+    }
+    if (pos === -1) {
+      const dupAck = queue.dedupAck(pick.id);
+      entry.pickSource = 'song-id:already-queued';
+      entry.refused = true;
+      session.appendTurn({ role: 'dj', kind: 'request', text: dupAck,
+                           meta: { trackId: pick.id, requester } });
+      return resolved({ ack: dupAck, track: { title: pick.title, artist: pick.artist },
+                        queuePosition: null });
+    }
+    session.appendTurn({
+      role: 'dj', kind: 'request',
+      text: introScript || `Queued "${pick.title}".`,
+      meta: { trackId: pick.id, requester },
+    });
+    entry.introScript = introScript || null;
+    // Позиция — из возврата push(), а не из длины очереди: после правки
+    // приоритета заказ встаёт ПЕРЕД несданными авто-пиками, и хвост очереди
+    // уже чужой.
+    return resolved({
+      ack: introScript || `В очереди: «${pick.title}» — ${pick.artist}.`,
+      track: { title: pick.title, artist: pick.artist },
+      queuePosition: pos,
+    });
+  }
+
   // 0. "more like this" — never let it through the generic search path, it's a
   // meta-instruction about the current track, not a query. Pick another song
   // by the current/last artist and skip the LLM match.
@@ -773,7 +843,8 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
   // this on air" directive family — the cleaned text is all the
   // session/prompts/air see; the raw text is preserved on the entry for the
   // operator request log. Sanitize never grows its input, so no re-slice.
-  const { text: rawText, name: rawName } = req.body as { text: string; name: string };
+  const { text: rawText, name: rawName, songId } = req.body as
+    { text: string; name: string; songId?: string };
   const stripped = stripScriptedOpener(sanitizeRequestText(rawText));
   const text = stripped.text;
   if (!text) {
@@ -860,6 +931,9 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
     id, status: 'pending', requester, text,
     rawText: sanitizeRequestText(rawText),
     injection: stripped.injection,
+    // Точный заказ из подсказки плеера: трек уже сверен с коллекцией,
+    // угадывать нечего. Пустая строка — это «не выбирали», а не «выбрали ничто».
+    songId: songId || null,
     ack: null, track: null, queuePosition: null, message: null,
     createdAt: Date.now(),
   };
