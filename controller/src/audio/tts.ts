@@ -13,7 +13,7 @@ import * as gemini from './gemini.js';
 import { normalizeForSpeech } from './speech-text.js';
 import { scrubCjkForSpeech } from './spoken-script-policy.js';
 import {
-  configuredSlot, fallbackTextFor, orderedFallbacks, sameTtsTarget,
+  configuredSlot, fallbackTextFor, orderedFallbacks, rescueForbidden, sameTtsTarget,
   type RescueSlot, type TtsTarget,
 } from './tts-fallback.js';
 import { localizedPreviewText } from './preview-text.js';
@@ -128,6 +128,10 @@ function resolveEngine(kind: string, personaTts: any): RescueSlot {
   // can speak, else their saved default engine, else Piper. The default engine
   // branch is deliberately NOT probed; the runtime chain in speak() catches it.
   if (!engineUsable(chosen, personaCloudProvider(personaTts))) {
+    // Substitution banned: keep the persona's own engine and let the call
+    // throw. speak() then walks an empty chain and the segment is dropped —
+    // the pre-flight half of the rule the chain applies mid-render.
+    if (rescueForbidden(tts.fallback)) return plainSlot(chosen);
     // Probed with the fallback's own cloud provider, matching the credentials
     // the call would use.
     const configured = fallbackSlot();
@@ -159,6 +163,9 @@ function resolveEngine(kind: string, personaTts: any): RescueSlot {
 // GLOBAL cloud provider (null); the configured rung with its own.
 // Ordering is pure and pinned by scripts/tts-fallback.test.ts.
 function fallbackChain(primary: TtsTarget): RescueSlot[] {
+  // Substitution banned by the operator: no rescue at all, so a failed render
+  // drops the line instead of airing it in another engine's voice.
+  if (rescueForbidden(settings.get().tts?.fallback)) return [];
   return orderedFallbacks(
     primary,
     fallbackSlot(),
