@@ -49,6 +49,7 @@ import {
   likesPatchSchema,
   localeSchema,
   loudnessPatchSchema,
+  queuePatchSchema,
   moodScheduleSchema,
   moodsSchema,
   pickerPatchSchema,
@@ -159,6 +160,7 @@ export const SETTINGS_PATCH_KEYS = [
   'webhooksPolicy',
   'scrobble',
   'likes',
+  'queue',
 ] as const;
 
 export type SettingsPatchKey = (typeof SETTINGS_PATCH_KEYS)[number];
@@ -212,6 +214,7 @@ export const SETTINGS_PATCH_SCHEMAS: Readonly<Partial<Record<SettingsPatchKey, S
   backups: backupsPatchSchema,
   stream: streamPatchSchema,
   loudness: loudnessPatchSchema,
+  queue: queuePatchSchema,
   weather: weatherPatchSchema,
   picker: pickerPatchSchema,
   station: stationSchema,

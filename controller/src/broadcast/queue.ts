@@ -115,6 +115,7 @@ import {
   linkClockDrifted,
   nextTransitionLabel,
   pickLeadSec,
+  topUpDepth,
   pickLinkInterval,
   playAlreadyRecorded,
   shouldDropCrossSessionLink,
@@ -405,6 +406,10 @@ class Queue {
   pendingForceDrain = false;   // a forced drain arrived while senderBusy — re-run on release
   pickerBusy = false;          // prevent concurrent LLM picks
   autoPick = true;             // toggle: should we ask Ollama for next track when idle
+  // How many picked-but-unplayed tracks may sit in Liquidsoap's dj_queue.
+  // One is what the station held before queue depth existed: the on-air
+  // track plus its successor. Deeper is NOT free — see drainToLiquidsoap.
+  static readonly DRAIN_AHEAD = 1;
   autoLink = true;             // toggle: random DJ links between auto tracks
   tracksUntilLink = pickLinkInterval();
   _transitionsSinceSfx = 999;  // DJ-mode transition-FX spacing counter (see drainToLiquidsoap)
@@ -1737,6 +1742,29 @@ class Queue {
   // consumers of the hold (applyPairStamps, maybeRenderBlend) no-op without
   // djMode, so holding would cost dj_queue visibility (and a wider restart
   // window) for nothing. Non-DJ personas keep the eager drain byte-for-byte.
+  // How many more tracks the pick cycle should add right now. The show
+  // boundary is measured at the moment the topped-up track would AIR: the
+  // queue ahead of it plays in full, so its durations add to what is left of
+  // the on-air track.
+  topUpWanted(): number {
+    const lookahead = Number((settings.get() as any)?.queue?.lookahead) || 1;
+    if (lookahead <= 1) return 0;                 // upstream behaviour
+    const queuedSec = this.upcoming.reduce(
+      (sum, i) => sum + (knownDurationSec(i.track) || 0), 0);
+    const leadSec = pickLeadSec(this.remainingSecOnAir(), queuedSec || null);
+    let sameShow = true;
+    if (leadSec != null) {
+      const airsAt = new Date(Date.now() + (leadSec + PICK_SHOW_LOOKAHEAD_SEC) * 1000);
+      // resolveActiveShow is the same source the pick's own context uses.
+      // Two different ways of answering "which show is it" have disagreed
+      // here before (#1205), and one of them airing a changeover track is
+      // exactly the failure this look-ahead could reintroduce.
+      sameShow = (settings.resolveActiveShow(airsAt) as any)?.id
+        === (settings.resolveActiveShow(new Date()) as any)?.id;
+    }
+    return topUpDepth({ lookahead, queued: this.upcoming.length, sameShow });
+  }
+
   pairDrainActive(): boolean {
     return settings.get().transitions?.pairDrain !== false
       && !!settings.getEffectivePersona()?.djMode;
@@ -1815,6 +1843,14 @@ class Queue {
       while (true) {
         const item = this.upcoming.find(i => !i.sent);
         if (!item) break;
+
+        // Feeding Liquidsoap deeper than DRAIN_AHEAD would undo queue depth
+        // rather than use it: dj_queue is handed over, so a listener request
+        // can no longer jump the line (push() inserts before the first UNSENT
+        // auto-pick) and a cancel turns into a removal by rid. The queue stays
+        // deep on OUR side, where it can still be reordered and trimmed.
+        // `force` is the clip-as-track recovery path and never holds.
+        if (!force && this.upcoming.filter(i => i.sent).length >= Queue.DRAIN_AHEAD) break;
 
         const idx = this.upcoming.indexOf(item);
         const hasSuccessor = idx >= 0 && idx + 1 < this.upcoming.length;
@@ -3361,6 +3397,14 @@ class Queue {
     if (this.autoPick && this.upcoming.length === 0 && !this.pickerBusy && djCallsAllowed()) {
       this.runPickCycle({ isAutonomous });
     }
+    if (this.autoPick && !this.pickerBusy && djCallsAllowed()
+               && this.topUpWanted() > 0) {
+      // The queue is not empty but shallower than the configured depth — the
+      // usual case right after a track left it. This is the only place a
+      // top-up STARTS without a preceding pick; the rest chain from the cycle
+      // itself (see its finally block).
+      this.runPickCycle({ isAutonomous, topUp: true });
+    }
   }
 
   async runArmedBoundaryHandoff({
@@ -3396,16 +3440,29 @@ class Queue {
   // This is a captured pick-cycle anchor, not a promise that no request can
   // append behind the held item while the asynchronous selection is running.
   // Fire-and-forget; pickerBusy is the reentry guard.
-  runPickCycle({ isAutonomous, pickAnchorItem = null }: { isAutonomous: boolean; pickAnchorItem?: QueueItem | null }) {
+  runPickCycle({ isAutonomous, pickAnchorItem = null, topUp = false }:
+    { isAutonomous: boolean; pickAnchorItem?: QueueItem | null; topUp?: boolean }) {
     let wantLink = false;
-    if (this.autoLink && isAutonomous && this.history[0]) {
+    // A link is born at a SEAM and carries `linkPrev` ("that was X") and
+    // `linkClockAt` (the hour it was written for). For a track topped up
+    // four steps ahead both would be lies by the time it airs — so a
+    // top-up picks silently, and the line is written the usual way once
+    // that track becomes the head of the queue.
+    if (this.autoLink && isAutonomous && !topUp && this.history[0]) {
       this.tracksUntilLink--;
       if (this.tracksUntilLink <= 0) {
         this.tracksUntilLink = pickLinkInterval();
         wantLink = true;
       }
     }
+    // A topped-up track follows the LAST item in the queue — that is what it
+    // will actually air after, so it is the pick's anchor. Without this the
+    // pick's context would describe a seam that never happens.
+    if (topUp && !pickAnchorItem && this.upcoming.length) {
+      pickAnchorItem = this.upcoming[this.upcoming.length - 1];
+    }
     this.pickerBusy = true;
+    const queuedBefore = this.upcoming.length;
     (async () => {
       try {
         // The pick made now airs when the track it FOLLOWS ends, so near a show
@@ -3509,6 +3566,14 @@ class Queue {
         this.log('error', `DJ track event failed: ${(err as Error).message}`);
       } finally {
         this.pickerBusy = false;
+        // The top-up walks one track at a time: runPickCycle IS one agent call,
+        // and the station has no other way to choose a track. The repeat fires
+        // ONLY if the queue actually grew — a failed pick (LLM host down, pool
+        // empty) would otherwise turn into an endless chain of calls.
+        const grew = this.upcoming.length > queuedBefore;
+        if (grew && this.autoPick && djCallsAllowed() && this.topUpWanted() > 0) {
+          this.runPickCycle({ isAutonomous, topUp: true });
+        }
       }
     })();
   }

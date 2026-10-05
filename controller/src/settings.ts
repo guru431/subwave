@@ -570,6 +570,18 @@ export async function load() {
         ? (stored.loudness.source as LoudnessSource)
         : DEFAULTS.loudness.source,
     },
+    // Queue depth. Rounded rather than rejected on a fractional value: the
+    // patch schema already refuses anything that is not integer-like, so a
+    // fraction here can only come from a hand-edited state file, and half a
+    // track is not a reason to drop the whole setting.
+    queue: {
+      lookahead:
+        typeof stored.queue?.lookahead === 'number' &&
+        stored.queue.lookahead >= BOUNDS.queueLookahead.min &&
+        stored.queue.lookahead <= BOUNDS.queueLookahead.max
+          ? Math.round(stored.queue.lookahead)
+          : DEFAULTS.queue.lookahead,
+    },
     weather: {
       lat: stored.weather?.lat ?? DEFAULTS.weather.lat,
       lng: stored.weather?.lng ?? DEFAULTS.weather.lng,
@@ -1476,6 +1488,14 @@ export async function update(patch) {
     const lo = parseSettingsPatchKey<Record<string, unknown>>('loudness', patch.loudness);
     for (const k of ['targetLufs', 'maxBoostDb', 'source'] as const) {
       if (lo[k] !== undefined) (next.loudness as Record<string, unknown>)[k] = lo[k];
+    }
+  }
+  if ('queue' in patch) {
+    // Read live by the pick cycle (broadcast/queue.ts topUpWanted) — no
+    // Liquidsoap file, no restart. Applies from the next top-up.
+    const q = parseSettingsPatchKey<Record<string, unknown>>('queue', patch.queue);
+    for (const k of ['lookahead'] as const) {
+      if (q[k] !== undefined) (next.queue as Record<string, unknown>)[k] = q[k];
     }
   }
   if ('weather' in patch) {

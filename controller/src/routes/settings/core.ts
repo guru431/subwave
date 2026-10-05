@@ -105,6 +105,11 @@ router.get('/settings', requireAdmin, async (req, res) => {
         // cap at or below this disables the feature. Served, never restated in
         // the UI, so the hint uses the number the drain uses.
         boundaryFadeMinTrackSeconds: BOUNDARY_MIN_PLAY_SEC + BOUNDARY_TOLERANCE_SEC,
+        // Queue depth. Without this line the value is stored and honoured
+        // but invisible: a patch tool that reads settings back to verify
+        // what it wrote (station/onboard/onboard.py --patch) would call an
+        // applied setting unapplied.
+        queue: s.queue,
         station: s.station,
         stationDescription: s.stationDescription,
         timezone: s.timezone,
