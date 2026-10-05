@@ -12,6 +12,7 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   type Dispatch,
@@ -85,9 +86,14 @@ export function usePlayerActions(): PlayerActions {
 
 export function PlayerCoreProvider({ children }: { children: ReactNode }) {
   const client = useStationClient();
+  // A tuned-in player keeps the feed polling while the page is hidden, so the
+  // lock screen learns about a track change instead of freezing on whatever was
+  // playing when the screen went dark. A ref because the feed is created first
+  // (see below) and because tuning in must not re-subscribe its poll.
+  const tunedInRef = useRef(false);
   // Feed first: usePlayer's Opus upgrade is gated on the mount the station says
   // it actually serves (#1300).
-  const feed = useStationFeed();
+  const feed = useStationFeed({ keepAliveWhenHidden: tunedInRef });
   const {
     audioRef,
     attachAudio,
@@ -101,6 +107,8 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
     muted,
     idleStopped,
   } = usePlayer({ opusEnabled: feed.opusEnabled });
+
+  useEffect(() => { tunedInRef.current = tunedIn; }, [tunedIn]);
 
   // Only an explicit false is offline — see PlayerAudio.offline.
   const offline = feed.streamOnline === false;
@@ -162,6 +170,7 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
     tunedIn,
     nowPlaying: feed.nowPlaying,
     audioRef,
+    trackStartedAt: feed.trackStartedAt,
     onTune: actions.tune,
     boothFeed: feed.session.messages,
     personaAvatarUrl,

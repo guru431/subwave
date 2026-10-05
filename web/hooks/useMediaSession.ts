@@ -9,10 +9,20 @@ import type { NowPlayingTrack, SessionTurn } from '@/lib/types';
 // because each new turn resets the timer.
 const TALKING_LINGER_MS = 15_000;
 
+// How often the published position is re-stated. The OS extrapolates between
+// updates from playbackRate, so this only has to correct drift — and it has to
+// run behind a locked screen, where timers are throttled, so it stays coarse.
+const POSITION_REFRESH_MS = 5_000;
+
 export interface UseMediaSessionParams {
   tunedIn: boolean;
   nowPlaying: NowPlayingTrack | null;
   audioRef: RefObject<HTMLAudioElement | null>;
+  /** Epoch ms when the current track became audible to this listener (from
+   *  useStationFeed). Together with the track's duration it is the only source
+   *  of lock-screen progress: a live stream's own clock says nothing about
+   *  where inside the song the listener is. */
+  trackStartedAt?: number | null;
   onTune?: () => void;
   onSkip?: () => void;
   /** Booth-feed messages, most recent last; the tail decides whether the DJ is
@@ -71,14 +81,16 @@ function lastVoiceTurnTime(feed: SessionTurn[] | undefined): number | null {
 // usePlayer.tune() so the rest of the UI state stays consistent.
 //
 // "seekto"/"seekbackward"/"seekforward" are deliberately NOT wired — a live
-// stream can't be scrubbed, and leaving them unset removes the lock-screen
-// scrubber rather than showing a broken one. `nexttrack` IS wired (headphone
+// stream can't be scrubbed, so the bar the OS draws from the published position
+// (see the setPositionState effect) stays a read-only readout instead of a
+// control that swallows the drag. `nexttrack` IS wired (headphone
 // "next" means skip the song you're hearing) but gated on the skip callback so
 // consumers like a public listener page can opt out.
 export function useMediaSession({
   tunedIn,
   nowPlaying,
   audioRef,
+  trackStartedAt = null,
   onTune,
   onSkip,
   boothFeed,
@@ -174,6 +186,49 @@ export function useMediaSession({
     personaName,
     client,
   ]);
+
+  // Lock-screen progress. The <audio> element can't supply it: on a live
+  // Icecast mount its duration is Infinity and currentTime counts the
+  // CONNECTION, not the song, so iOS/Android draw either nothing or a bar that
+  // restarts on every reconnect. Publishing the position explicitly is the only
+  // way the OS learns where inside the current track the listener is — the
+  // length comes from /now-playing, the offset from the same listener-time
+  // stamp the on-screen clock uses.
+  //
+  // Seeking stays unwired on purpose (see the note above): the handlers are
+  // null, so the bar the OS draws from this is a read-only readout.
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+    const session = navigator.mediaSession;
+    if (typeof session.setPositionState !== 'function') return;
+
+    const duration = nowPlaying?.duration;
+    const known =
+      tunedIn &&
+      trackStartedAt != null &&
+      typeof duration === 'number' &&
+      Number.isFinite(duration) &&
+      duration > 0;
+    if (!known) {
+      // An untagged track (no duration) or nothing on air. Clearing matters:
+      // left alone, the PREVIOUS track's bar stays on the lock screen and keeps
+      // advancing past a song it no longer describes.
+      try { session.setPositionState(); } catch {}
+      return;
+    }
+    const publish = () => {
+      // Clamped both ways: the stamp carries the listener's buffer offset and
+      // can briefly sit in the future, and a track that overruns its tagged
+      // length would otherwise hand the OS a position past the end.
+      const position = Math.min(Math.max(0, (Date.now() - trackStartedAt) / 1000), duration);
+      try {
+        session.setPositionState({ duration, position, playbackRate: 1 });
+      } catch {}
+    };
+    publish();
+    const id = window.setInterval(publish, POSITION_REFRESH_MS);
+    return () => window.clearInterval(id);
+  }, [tunedIn, trackStartedAt, nowPlaying?.duration]);
 
   // Rebound on every dependency change so the handlers always close over the
   // latest tune / skip callbacks.
