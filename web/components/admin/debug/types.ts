@@ -221,3 +221,14 @@ export interface DebugData {
 }
 
 
+
+export interface PlaybackFailureHistory {
+  failures: Array<{
+    t: string; attemptId: string; sourceTrackId: string | null;
+    title: string | null; artist: string | null; album: string | null;
+    source: 'ai' | 'request' | 'operator'; stage: 'fetch'; reason: 'source-resolution-failed';
+  }>;
+  retentionDays: number;
+  truncated: boolean;
+  warnings: string[];
+}
