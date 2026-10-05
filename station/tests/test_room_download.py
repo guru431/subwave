@@ -580,46 +580,39 @@ def test_keep_alive_after_a_download_gets_the_short_timeout_back(tmp_path, monke
     Отдельный сервер с коротким read_timeout: с таймаутом загрузки (300 с)
     простаивающее keep-alive соединение сервер не закрыл бы за время теста.
 
-    Короткий таймаут включается только к концу тела: с 0.2 с с самого начала
-    сервер под нагрузкой рвал соединение раньше, чем клиент успевал отправить
-    первый запрос (ConnectionResetError, 2026-10-05). Обработчик берёт
-    `read_timeout` при создании класса (ожидание запроса) и заново в `finally`
-    отдачи — второе и проверяется.
+    Запрос уходит ДО того, как сервер начнёт принимать соединения: сокет уже
+    слушает, ядро держит соединение в очереди и запрос в буфере. Иначе под
+    нагрузкой сервер ждал первый запрос дольше 0.2 с и рвал соединение раньше,
+    чем клиент успевал его отправить (ConnectionResetError, 2026-10-05).
     """
     store = store_mod.Store(str(tmp_path / "room-timeout.db"))
     config = server_mod.Config(navidrome=("http://navidrome", "u", "p"),
                                controller_url="http://controller:7701",
-                               read_timeout=5)
+                               read_timeout=0.2)
     station = Station()
     real_urlopen = urllib.request.urlopen
-
-    class ShortensTimeoutAtEnd(FakeUpstream):
-        def read(self, size=-1):
-            chunk = super().read(size)
-            if not chunk:
-                config.read_timeout = 0.2
-            return chunk
 
     def fake_urlopen(req, timeout=None):
         url = req.full_url if hasattr(req, "full_url") else req
         if url.startswith("http://127.0.0.1:"):
             return real_urlopen(req, timeout=timeout)
-        return station.response() if "/state" in url else ShortensTimeoutAtEnd()
+        return station.response() if "/state" in url else FakeUpstream()
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     srv = _Server(("127.0.0.1", 0), server_mod.build_handler(store, config))
     thread = threading.Thread(target=lambda: srv.serve_forever(poll_interval=0.02),
                               daemon=True)
-    thread.start()
     conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=5)
     try:
         conn.request("GET", "/download?id=cur")
+        thread.start()
         assert conn.getresponse().read() == AUDIO
         # Соединение живо и простаивает: сервер обязан закрыть его по
         # read_timeout, а не держать поток пять минут
         assert srv.closed.acquire(timeout=5), "простаивающий keep-alive не закрыт"
     finally:
         conn.close()
-        srv.shutdown()
+        if thread.is_alive():          # shutdown() без serve_forever ждал бы вечно
+            srv.shutdown()
         srv.server_close()
         store.close()
