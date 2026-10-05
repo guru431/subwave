@@ -36,8 +36,10 @@ export function FolderTree({ root, query = '', keep, checked, onToggle, renderMe
     const hasKids = n.children.length > 0;
     const expanded = hasKids && (searching || open.has(n.path));
     const selectable = !!checked && !!onToggle && depth > 0;
+    const selected = selectable && (checked?.includes(n.path) ?? false);
     return (
-      <div key={n.path || '/'} role="treeitem" aria-expanded={hasKids ? expanded : undefined}>
+      <div key={n.path || '/'} role="treeitem" aria-selected={selected}
+        aria-expanded={hasKids ? expanded : undefined}>
         <div className="flex items-center gap-1.5 py-0.5 text-[12px]">
           {hasKids ? (
             <button
@@ -55,7 +57,7 @@ export function FolderTree({ root, query = '', keep, checked, onToggle, renderMe
           {selectable && (
             <input
               type="checkbox"
-              checked={checked?.includes(n.path) ?? false}
+              checked={selected}
               onChange={() => onToggle?.(n.path)}
               aria-label={`select ${n.name}`}
             />
