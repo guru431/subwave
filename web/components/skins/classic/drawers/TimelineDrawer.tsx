@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import { ArrowDownToLine } from 'lucide-react';
 import { relTime } from '@/lib/format';
+import { ruAgo } from '@/lib/ru';
 import { cn } from '@/lib/cn';
 import { downloadUrl } from '@/lib/download';
 import DislikeMenu from '../DislikeMenu';
@@ -28,7 +29,8 @@ export default function TimelineDrawer({ upcoming, history }: TimelineDrawerProp
   if (!hasUpcoming && !hasHistory) {
     return (
       <div className="text-[13px] leading-relaxed text-muted">
-        Nothing played yet. The DJ is on autopilot — request a track to jump the line.
+        Пока ничего не прозвучало. Ведущий подбирает музыку сам — закажите трек, и он
+        встанет первым в очередь.
       </div>
     );
   }
@@ -51,7 +53,7 @@ export default function TimelineDrawer({ upcoming, history }: TimelineDrawerProp
                 <div className="mt-0.5 text-xs text-muted">{t.artist}</div>
                 {t.requestedBy && (
                   <div className="mt-1 text-[9px] tracking-[0.3em] text-vermilion uppercase">
-                    ↳ requested by {t.requestedBy}
+                    ↳ заказ: {t.requestedBy}
                   </div>
                 )}
               </div>
@@ -74,7 +76,7 @@ export default function TimelineDrawer({ upcoming, history }: TimelineDrawerProp
               </div>
               {t.t && (
                 <span className="v3-tab-num shrink-0 text-[10px] tracking-eyebrow text-muted uppercase">
-                  {relTime(t.t)} ago
+                  {ruAgo(relTime(t.t))}
                 </span>
               )}
               {t.subsonic_id && (

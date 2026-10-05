@@ -348,7 +348,7 @@ export default memo(function CenterStage({ nowPlaying, trackStartedAt, llmTokens
             exit={{ opacity: 0 }}
             className="v3-caption v3-focus mt-[10px] max-w-full cursor-pointer truncate border-0 bg-transparent p-0 text-left text-muted"
           >
-            <span className="text-accent-2">↦ up next</span>
+            <span className="text-accent-2">↦ дальше</span>
             {' · '}
             <span className="text-ink">{upNext.title}</span>
             {upNext.artist ? ` — ${upNext.artist}` : ''}

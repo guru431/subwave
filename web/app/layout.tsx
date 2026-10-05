@@ -120,7 +120,7 @@ const overpassMono = Overpass_Mono({
 });
 
 const DESCRIPTION =
-  'A real internet radio station. Single Icecast stream — every listener hears the same broadcast at the same time, picked and announced by an LLM-driven DJ.';
+  'Настоящая интернет-радиостанция: один поток на всех — каждый слушатель слышит один и тот же эфир в одно и то же время, а треки подбирает и объявляет ИИ-ведущий.';
 
 const SOCIAL_TITLE = 'AI радио — радиостанция с ИИ-ведущим';
 const OG_IMAGE_ALT = 'AI радио — радиостанция с ИИ-ведущим';

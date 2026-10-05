@@ -4,6 +4,7 @@ import { memo, useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } fro
 import { animate as motionAnimate, m, useAnimate } from 'motion/react';
 import { cn } from '@/lib/cn';
 import { useIsIOS } from '@/lib/hooks';
+import { ruListeners } from '@/lib/ru';
 import { SCALE_MAX, type SignalQuality } from '@/hooks/useSignal';
 import type { PlayerStatus } from '@/hooks/usePlayer';
 
@@ -197,8 +198,8 @@ export default memo(function TransportBar({
               </span>
               <span
                 className="v3-tab-num text-[10px] whitespace-nowrap text-muted lg:text-[12px] lg:tracking-[0.08em]"
-                title={listeners != null ? `${listeners} listening · ${latencyText}` : latencyText}
-                aria-label={listeners != null ? `${listeners} listening, ${latencyText}` : latencyText}
+                title={listeners != null ? `${ruListeners(listeners)} · ${latencyText}` : latencyText}
+                aria-label={listeners != null ? `${ruListeners(listeners)}, ${latencyText}` : latencyText}
               >
                 {listeners != null ? `${listeners} ♪ · ${latencyText}` : latencyText}
               </span>

@@ -74,6 +74,30 @@ export const ruWeather = (v?: string | null) => pick(WEATHER, v);
 export const ruMood = (v?: string | null) => pick(MOOD, v);
 export const ruEnergy = (v?: string | null) => pick(ENERGY, v);
 
+// Форма слова при числе: 1 слушатель, 2 слушателя, 5 слушателей, 11 слушателей,
+// 21 слушатель. Число берётся целым по модулю: дробных слушателей не бывает.
+export function ruPlural(n: number, one: string, few: string, many: string): string {
+  const a = Math.abs(Math.trunc(n));
+  const d = a % 10;
+  const dd = a % 100;
+  if (dd >= 11 && dd <= 14) return many;
+  if (d === 1) return one;
+  if (d >= 2 && d <= 4) return few;
+  return many;
+}
+
+export const ruListeners = (n: number): string =>
+  `${n} ${ruPlural(n, 'слушатель', 'слушателя', 'слушателей')}`;
+
+// «5m» из relTime (lib/format.ts — общий для всех скинов, его не трогаем) →
+// «5 мин назад». Незнакомый вид отдаётся с «назад», без потери числа.
+const REL_UNIT: Record<string, string> = { s: 'с', m: 'мин', h: 'ч', d: 'дн' };
+export function ruAgo(rel: string): string {
+  const m = /^(\d+)([smhd])$/.exec(rel);
+  const unit = m?.[2] ? REL_UNIT[m[2]] : undefined;
+  return m && unit ? `${m[1]} ${unit} назад` : `${rel} назад`;
+}
+
 // Navidrome подставляет «[Unknown Album]» вместо пустого тега; это не название
 // альбома, а заглушка, поэтому в эфирной карточке она не показывается вовсе.
 const ALBUM_PLACEHOLDERS = new Set(['[unknown album]', 'unknown album', '[unknown]']);

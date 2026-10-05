@@ -448,7 +448,7 @@ function SuccessCard({ result }: SuccessCardProps) {
               {pending ? (
                 <>
                   <div className="sw-pulse [font-family:var(--font-display),Georgia,'Times_New_Roman',serif] text-base leading-snug text-ink italic">
-                    finding your track…
+                    ищем ваш трек…
                   </div>
                   {requestText && (
                     <div className="mt-1 text-[13px] text-muted">
@@ -473,7 +473,7 @@ function SuccessCard({ result }: SuccessCardProps) {
 
       {!pending && typeof queuePosition === 'number' && queuePosition > 0 && (
         <div className="v3-tab-num mt-[14px] text-[11px] tracking-[0.15em] text-muted uppercase">
-          Position #{queuePosition} in queue
+          В очереди: №{queuePosition}
         </div>
       )}
 
