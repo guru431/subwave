@@ -739,6 +739,14 @@ export async function writeSeamLink(queue, item, previous): Promise<boolean> {
   });
   const trimmed = dropEchoedLink(trimLinkToIntro(generated.link, item.track, generated.introPersona), queue);
   if (!trimmed) return false;
+  // Fork: the model call can outlast the item's wait. By now it may have aired,
+  // been cancelled, or got a line of its own (a pick's link, a request intro) —
+  // writing into it then stamps a dead object or replaces a line unheard. Drop
+  // the line before any field, persist or render.
+  if (!queue.upcoming.includes(item) || item.introScript) {
+    queue.log('link-skip', `Seam link dropped —"${item.track?.title}" ${queue.upcoming.includes(item) ? 'got its own line' : 'left the queue'} while the line was being written`);
+    return false;
+  }
   item.introScript = trimmed;
   item.introLabelChecked = true;
   item.introKind = 'link';
