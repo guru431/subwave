@@ -15,9 +15,9 @@ interface Filter {
 }
 
 const FILTERS: readonly Filter[] = [
-  { id: 'all', label: 'All' },
+  { id: 'all', label: 'Всё' },
   { id: 'dj', label: 'DJ' },
-  { id: 'tracks', label: 'Tracks' },
+  { id: 'tracks', label: 'Треки' },
 ];
 
 const CLASS_COLOR: Record<TurnDisplayClass, string> = {
@@ -79,7 +79,7 @@ export default function BoothDrawer({ items, timezone, locale }: BoothDrawerProp
 
       {filtered.length === 0 && (
         <div className="py-[18px] text-[13px] leading-relaxed text-muted italic">
-          {items?.length ? 'Nothing in this view.' : 'Booth is quiet. Awaiting transmission…'}
+          {items?.length ? 'В этом разделе пусто.' : 'В студии тихо. Ждём эфира…'}
         </div>
       )}
 
@@ -138,8 +138,8 @@ function MetaLine({ cls, meta }: MetaLineProps) {
   const requester =
     (typeof meta.requester === 'string' ? meta.requester : undefined) ??
     (typeof meta.requestedBy === 'string' ? meta.requestedBy : undefined);
-  if (requester) bits.push(`req by ${requester}`);
-  if (cls === 'track' && typeof meta.source === 'string') bits.push(`source: ${meta.source}`);
+  if (requester) bits.push(`заказ: ${requester}`);
+  if (cls === 'track' && typeof meta.source === 'string') bits.push(`источник: ${meta.source}`);
   const title = typeof meta.title === 'string' ? meta.title : '';
   const artist = typeof meta.artist === 'string' ? meta.artist : '';
   if (artist || title) {

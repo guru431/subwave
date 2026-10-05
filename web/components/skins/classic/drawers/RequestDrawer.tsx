@@ -23,8 +23,8 @@ const RULED_PAPER =
 function templatedAck(name: string): string {
   const n = name.trim();
   return n
-    ? `Got it, ${n} — taking it to the booth.`
-    : `Got it — taking it to the booth.`;
+    ? `Принято, ${n} — передаём в студию.`
+    : 'Принято — передаём в студию.';
 }
 
 interface Suggestion {
@@ -150,7 +150,7 @@ export default function RequestDrawer({
         return;
       }
       if (data?.status === 'failed') {
-        setResult({ success: false, message: data.message || 'No match — try different words.' });
+        setResult({ success: false, message: data.message || 'Ничего не нашлось — попробуйте другие слова.' });
         return;
       }
       if (data?.status === 'unknown') { scheduleClose(); return; }
@@ -222,18 +222,18 @@ export default function RequestDrawer({
                     <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-vermilion" />
                   </span>
                   <span className="v3-tab-num text-[9px] tracking-[0.34em] text-ink uppercase">
-                    Line open
+                    Линия открыта
                   </span>
                 </span>
                 <span className="v3-tab-num inline-flex items-center gap-1.5 text-[9px] tracking-[0.34em] text-muted uppercase">
                   <Radio size={11} strokeWidth={1.75} />
-                  Request slip
+                  Бланк заказа
                 </span>
               </div>
 
               <div className="px-3.5 pt-3 pb-3.5">
                 <label className="mb-2 block text-[9px] tracking-[0.3em] text-muted uppercase">
-                  Dear DJ —
+                  Дорогой ведущий —
                 </label>
                 {/* The textarea is borderless and transparent so only the
                     ruled paper below shows through. */}
@@ -243,7 +243,7 @@ export default function RequestDrawer({
                     value={requestText}
                     onChange={e => { setRequestText(e.target.value); if (result) setResult(null); }}
                     onKeyDown={onKeyDown}
-                    placeholder={'play me something for\nlate-night driving…'}
+                    placeholder={'поставьте что-нибудь для\nночной дороги…'}
                     rows={3}
                     /* 16px avoids iOS zoom-on-focus. 30px line-height matches the
                        ruled-paper stripe so text sits on the lines. */
@@ -259,7 +259,7 @@ export default function RequestDrawer({
                     type="text"
                     value={requesterName}
                     onChange={e => setRequesterName(e.target.value)}
-                    placeholder="signed, your name (optional)"
+                    placeholder="подпись: ваше имя (необязательно)"
                     maxLength={REQUEST_NAME_MAX}
                     className="v3-tab-num min-w-0 flex-1 border-0 bg-transparent p-0 text-[12px] tracking-[0.04em] text-ink placeholder:text-muted/70 focus:outline-none"
                   />
@@ -268,8 +268,8 @@ export default function RequestDrawer({
             </div>
 
             <p className="mt-3 text-[11px] leading-relaxed text-muted">
-              Describe a mood, a memory, an artist. Agentic AI DJ reads your note,
-              digs the library, and answers you on-air.
+              Опишите настроение, воспоминание, артиста. Ведущий прочтёт записку,
+              поищет в коллекции и ответит вам в эфире.
             </p>
 
             <SuggestionChips
@@ -280,7 +280,7 @@ export default function RequestDrawer({
 
             {result && !result.success && (
               <div className="mt-3 border border-[#c0392b] bg-[rgba(192,57,43,0.06)] px-3 py-2.5 text-xs leading-normal text-[#7a2218]">
-                {result.message || 'No match — try different words.'}
+                {result.message || 'Ничего не нашлось — попробуйте другие слова.'}
               </div>
             )}
 
@@ -294,7 +294,7 @@ export default function RequestDrawer({
                 'disabled:cursor-not-allowed disabled:opacity-50',
               )}
             >
-              {isSubmitting ? 'Transmitting…' : 'Send to the booth'}
+              {isSubmitting ? 'Отправляем…' : 'Отправить в студию'}
               <ArrowUpRight
                 size={16}
                 strokeWidth={2.25}
@@ -303,8 +303,8 @@ export default function RequestDrawer({
             </m.button>
 
             <div className="mt-2 text-center text-[9px] tracking-[0.28em] text-muted uppercase">
-              <span className="v3-tab-num">Enter</span> to send ·{' '}
-              <span className="v3-tab-num">Shift + Enter</span> for a new line
+              <span className="v3-tab-num">Enter</span> — отправить ·{' '}
+              <span className="v3-tab-num">Shift + Enter</span> — новая строка
             </div>
           </m.div>
         )}
@@ -328,7 +328,7 @@ function SuccessCard({ result }: SuccessCardProps) {
           )}
           <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-vermilion" />
         </span>
-        {pending ? 'On the wire' : track ? 'Queued' : 'Answered'}
+        {pending ? 'На линии' : track ? 'В очереди' : 'Отвечено'}
       </div>
 
       {ack && (
@@ -343,7 +343,7 @@ function SuccessCard({ result }: SuccessCardProps) {
       {(pending || track) && (
         <m.div layout className="border-y border-soft-border py-4">
           <div className="mb-1.5 text-[9px] tracking-[0.3em] text-muted uppercase">
-            {pending ? 'The DJ is digging' : 'Now in the booth'}
+            {pending ? 'Ведущий ищет' : 'Сейчас в студии'}
           </div>
           <AnimatePresence mode="wait" initial={false}>
             <m.div
@@ -386,7 +386,7 @@ function SuccessCard({ result }: SuccessCardProps) {
       )}
 
       <div className="mt-[26px] text-[10px] tracking-[0.3em] text-muted uppercase">
-        {pending ? 'You can close this — your request is locked in' : 'Closing…'}
+        {pending ? 'Можно закрыть — заказ принят' : 'Закрываем…'}
       </div>
     </div>
   );
@@ -414,7 +414,7 @@ function SuggestionChips({ nowPlaying, context, onPick }: SuggestionChipsProps) 
     <div className="mt-3.5">
       <div className="mb-2 flex items-center gap-2">
         <span className="text-[9px] tracking-[0.3em] text-muted uppercase">
-          On the wire
+          На линии
         </span>
         <span className="h-px flex-1 bg-soft-border" />
       </div>
@@ -438,7 +438,7 @@ function SuggestionChips({ nowPlaying, context, onPick }: SuggestionChipsProps) 
             }}
             whileTap={{ scale: 0.96 }}
             className="v3-focus group cursor-pointer border border-ink bg-transparent px-3 py-1.5 text-left font-[inherit] leading-tight text-ink transition-colors hover:bg-ink hover:text-bg"
-            title={`Suggested via ${chip.attribution}`}
+            title={`Подсказано через ${chip.attribution}`}
           >
             <span className="block text-[11px] tracking-[0.08em]">
               {chip.text}

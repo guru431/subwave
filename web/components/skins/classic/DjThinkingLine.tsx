@@ -135,7 +135,7 @@ export default function DjThinkingLine({ feed, enabled, currentTrackId = null, b
           open();
         }
       }}
-      title="Open booth feed"
+      title="Открыть эфир студии"
       // Full width on phones; the 82% cap is a desktop line-length limit.
       className="v3-focus mt-[22px] mb-[10px] flex w-full max-w-full cursor-pointer items-start gap-2 font-mono text-[14px] leading-[1.6] text-muted sm:max-w-[82%] sm:text-[15px]"
     >

@@ -36,10 +36,10 @@ import type { SkinProps } from '@/components/skins/types';
 import type { QueueEntry, RequestResult } from '@/lib/types';
 
 const DRAWER_TITLES: Record<PlayerDrawer, string> = {
-  timeline: 'Timeline',
-  booth: 'Booth feed',
-  request: 'Make a request',
-  schedule: 'Schedule',
+  timeline: 'Лента',
+  booth: 'Эфир студии',
+  request: 'Заказать трек',
+  schedule: 'Расписание',
 };
 
 // Hoisted so the DotRail counts memo below keeps stable element references —
@@ -165,8 +165,8 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
       if (data.success) setRequestText('');
       return data;
     } catch {
-      toast.error('Request failed. Is the controller up?');
-      return { success: false, message: 'Network error.' };
+      toast.error('Заказ не прошёл. Контроллер запущен?');
+      return { success: false, message: 'Ошибка сети.' };
     } finally {
       setIsSubmitting(false);
     }

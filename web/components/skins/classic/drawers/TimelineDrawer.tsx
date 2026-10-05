@@ -34,7 +34,7 @@ export default function TimelineDrawer({ upcoming, history }: TimelineDrawerProp
     <div>
       {hasUpcoming && (
         <div className={cn(hasHistory && 'mb-6')}>
-          <SectionLabel>Up next</SectionLabel>
+          <SectionLabel>Дальше в эфире</SectionLabel>
           {upcoming?.map((t, i) => (
             <div
               key={`q-${i}`}
@@ -59,7 +59,7 @@ export default function TimelineDrawer({ upcoming, history }: TimelineDrawerProp
 
       {hasHistory && (
         <div>
-          <SectionLabel>Played</SectionLabel>
+          <SectionLabel>Уже прозвучало</SectionLabel>
           {history?.map((t, i) => (
             <div
               key={`h-${i}`}
