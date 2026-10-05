@@ -212,6 +212,30 @@ export function linkClockStampFor(
 // Unknown clock (no start stamp, no duration) or a held track of unknown
 // length → null, i.e. no look-ahead at all, the pre-look-ahead behaviour.
 // Clamped at 0 so a track past its cue-out can't pull `showAt` backwards.
+// How many more tracks the pick cycle should add so `upcoming` reaches the
+// configured depth. Pure and exported so the rule can be pinned without a live
+// session, a persona or Liquidsoap — queue.ts is 2500 lines and this rule is
+// unreadable in the middle of it.
+//
+// Three rules, each of them paid for by a failure that would otherwise have to
+// be caught on air:
+//  - a queue DEEPER than the target (a listener request jumped in) tops up by
+//    nothing; it is never a reason to remove anything, so the result floors at 0;
+//  - past a show boundary the top-up stops: a track chosen under this hour's
+//    rules would air inside the next show, under rules nobody applied to it;
+//  - the FIRST track is always picked, boundary or not — an empty queue is a
+//    fall-through to the auto playlist, not a pause until the show changes.
+export function topUpDepth(opts: { lookahead: number; queued: number; sameShow: boolean }): number {
+  const depth = Number.isFinite(opts.lookahead) && opts.lookahead >= 1
+    ? Math.floor(opts.lookahead)
+    : 1;
+  const queued = Math.max(0, opts.queued);
+  const missing = depth - queued;
+  if (missing <= 0) return 0;
+  if (!opts.sameShow) return queued === 0 ? 1 : 0;
+  return missing;
+}
+
 export function pickLeadSec(remainingSec: number | null, heldSec: number | null = null): number | null {
   if (typeof remainingSec !== 'number' || !Number.isFinite(remainingSec)) return null;
   const rem = Math.max(0, remainingSec);

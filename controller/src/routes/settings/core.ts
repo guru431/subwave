@@ -105,6 +105,11 @@ router.get('/settings', requireAdmin, async (req, res) => {
         archive: s.archive,
         stream: s.stream,
         loudness: s.loudness,
+        // Queue depth. Without this line the value is stored and honoured
+        // but invisible: a patch tool that reads settings back to verify
+        // what it wrote (deploy/subwave/onboard.py --patch) would call an
+        // applied setting unapplied.
+        queue: s.queue,
         station: s.station,
         stationDescription: s.stationDescription,
         timezone: s.timezone,

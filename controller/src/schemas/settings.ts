@@ -329,6 +329,13 @@ export const CROSSFADE_DURATION_BOUNDS: SettingsNumericBound = { min: 0, max: 30
 export const LOUDNESS_TARGET_LUFS_BOUNDS: SettingsNumericBound = { min: -23, max: -9 };
 // 0 disables boosting entirely (cut-only levelling); 12 dB is plenty.
 export const LOUDNESS_MAX_BOOST_DB_BOUNDS: SettingsNumericBound = { min: 0, max: 12 };
+
+// Queue look-ahead: how many tracks the controller picks in advance. 1 is
+// upstream behaviour (the pick happens in the last moment). The ceiling of 10
+// is not a technical limit but an honest one: every extra track costs its own
+// agent call, and it is chosen under the CURRENT hour — by the tenth step
+// that hour is somebody else.
+export const QUEUE_LOOKAHEAD_BOUNDS: SettingsNumericBound = { min: 1, max: 10 };
 // 0 disables burst-on-connect; past 60 a listener is a full minute behind the
 // live edge and <queue-size> (which must exceed the burst) gets unreasonable.
 // Named rather than inline because settings.load() bounds the stored value
@@ -416,6 +423,13 @@ export const loudnessPatchSchema = settingsBlockOf({
   source: settingsStrictOneOf(
     SETTINGS_LOUDNESS_SOURCES,
     `loudness.source must be one of: ${SETTINGS_LOUDNESS_SOURCES.join(', ')}`,
+  ),
+});
+
+export const queuePatchSchema = settingsBlockOf({
+  lookahead: settingsIntLike(
+    QUEUE_LOOKAHEAD_BOUNDS,
+    `queue.lookahead must be integer in [${QUEUE_LOOKAHEAD_BOUNDS.min}, ${QUEUE_LOOKAHEAD_BOUNDS.max}]`,
   ),
 });
 

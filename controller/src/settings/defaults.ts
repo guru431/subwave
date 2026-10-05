@@ -8,6 +8,7 @@ import {
   CROSSFADE_DURATION_BOUNDS,
   JINGLE_RATIO_BOUNDS,
   LOUDNESS_MAX_BOOST_DB_BOUNDS,
+  QUEUE_LOOKAHEAD_BOUNDS,
   LOUDNESS_TARGET_LUFS_BOUNDS,
 } from '../schemas/settings.js';
 import { SHOW_MAX_TRACK_SECONDS } from '../schemas/show.js';
@@ -77,6 +78,14 @@ export const DEFAULTS = {
     targetLufs: -14,
     maxBoostDb: 6,
     source: 'replaygain-then-measured' as LoudnessSource,
+  },
+  // Queue depth. 1 is upstream behaviour: the next track is picked when the
+  // current one ends, so `upcoming` is almost always a single item. Above 1
+  // the pick cycle tops the queue up (broadcast/queue.ts topUpWanted), which
+  // costs one agent call per track — see the bounds comment in
+  // schemas/settings.ts for why the ceiling is what it is.
+  queue: {
+    lookahead: 1,
   },
   weather: {
     // The ONLY location data Open-Meteo sees, and the only kind that never
@@ -561,6 +570,7 @@ export const BOUNDS = {
   maxTrackSeconds: { min: 0, max: SHOW_MAX_TRACK_SECONDS, type: 'int' },
   loudnessTargetLufs: { ...LOUDNESS_TARGET_LUFS_BOUNDS, type: 'float' },
   loudnessMaxBoostDb: { ...LOUDNESS_MAX_BOOST_DB_BOUNDS, type: 'float' },
+  queueLookahead: { ...QUEUE_LOOKAHEAD_BOUNDS, type: 'int' },
 };
 
 export const MP3_BITRATE_SET = new Set<number>(MP3_BITRATES);
