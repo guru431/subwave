@@ -206,8 +206,11 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
       timeline: upcomingCount || TIMELINE_ICON,
       booth: BOOTH_ICON,
       schedule: SCHEDULE_ICON,
+      // Без этой строки на точке «Чат» висел бы вечный 0: DotRail подставляет
+      // `counts?.[k] ?? 0`, а пятую точку добавил наш патч.
+      chat: room.unread || CHAT_ICON,
     }),
-    [upcomingCount],
+    [upcomingCount, room.unread],
   );
   // Queue head for CenterStage's "up next" tease, reduced to the two fields it
   // renders so the fresh array each /state poll doesn't re-render the stage.

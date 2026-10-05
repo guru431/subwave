@@ -99,3 +99,51 @@ async function networkFirst(request) {
     return cached || Response.error();
   }
 }
+
+// Web Push комнаты (deploy/room/push.py): важное в чате при закрытой вкладке.
+// Открытая и видимая вкладка скажет сама — тостом, и вторая карточка об одном
+// была бы шумом. Тег `subwave-chat` — тот же, что у уведомления страницы
+// (lib/roomNotify.ts): живая скрытая вкладка и push-сервис не выстроят в
+// шторке двух карточек об одном сообщении, вторая заменит первую.
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    /* не JSON — покажем заголовок по умолчанию */
+  }
+  event.waitUntil(
+    (async () => {
+      const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      if (wins.some((w) => w.visibilityState === 'visible')) return;
+      await self.registration.showNotification(data.title || 'AI радио', {
+        body: data.body || '',
+        tag: data.tag || 'subwave-chat',
+        icon: '/icons/192',
+        badge: '/icons/192',
+        data: { url: data.url || '/?chat=1' },
+      });
+    })()
+  );
+});
+
+// Нажатие на уведомление: открытая вкладка станции поднимается и открывает чат,
+// иначе открывается новая — с `?chat=1`, по которому плеер откроет его сам.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = new URL((event.notification.data && event.notification.data.url) || '/?chat=1',
+    self.location.origin).href;
+  event.waitUntil(
+    (async () => {
+      const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      for (const w of wins) {
+        if (new URL(w.url).origin === self.location.origin && 'focus' in w) {
+          await w.focus();
+          w.postMessage({ type: 'room:open-chat' });
+          return;
+        }
+      }
+      await self.clients.openWindow(url);
+    })()
+  );
+});
