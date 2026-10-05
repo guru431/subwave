@@ -5,6 +5,7 @@ import { ArrowDownToLine } from 'lucide-react';
 import { relTime } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import { downloadUrl } from '@/lib/download';
+import DislikeMenu from '../DislikeMenu';
 import type { QueueEntry } from '@/lib/types';
 
 export interface TimelineDrawerProps {
@@ -78,6 +79,7 @@ export default function TimelineDrawer({ upcoming, history }: TimelineDrawerProp
               )}
               {t.subsonic_id && (
                 <span className="flex shrink-0 items-center gap-[10px]">
+                  <DislikeMenu songId={t.subsonic_id} title={t.title} artist={t.artist} size={14} />
                   <a
                     href={downloadUrl(t.subsonic_id)}
                     download

@@ -7,6 +7,7 @@ import { cn } from '@/lib/cn';
 import { ruMood, ruEnergy, ruAlbum } from '@/lib/ru';
 import { downloadUrl } from '@/lib/download';
 import { useTrackLike } from '@/components/skins/sharedHooks';
+import DislikeMenu from './DislikeMenu';
 import { fmtTime } from '@/lib/format';
 import { useDynamicStyle } from '@/hooks/useDynamicStyle';
 import { useElapsed } from '@/hooks/useElapsed';
@@ -305,6 +306,7 @@ export default memo(function CenterStage({ nowPlaying, trackStartedAt, llmTokens
                     {ruAlbum(nowPlaying?.album) && <span> · {ruAlbum(nowPlaying?.album)}</span>}
                     {nowPlaying?.year && <span> · {nowPlaying.year}</span>}
                     <LikeHeart />
+                    <DislikeMenu songId={subsonicId} title={nowPlaying?.title} artist={nowPlaying?.artist} className="ml-[10px] align-middle" />
                     <DownloadTrack subsonicId={subsonicId} />
                   </div>
                   {hasMeta && (
