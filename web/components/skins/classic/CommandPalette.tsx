@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/command';
 import { Kbd } from '@/components/ui/kbd';
 
-export type PlayerDrawer = 'timeline' | 'booth' | 'request' | 'schedule';
+export type PlayerDrawer = 'timeline' | 'booth' | 'request' | 'schedule' | 'chat';
 
 export interface CommandPaletteProps {
   open: boolean;
@@ -53,6 +53,7 @@ export default function CommandPalette({
     { label: 'Открыть эфир студии', hint: '2', onSelect: run(() => onOpenDrawer('booth')) },
     { label: 'Заказать трек', hint: '3', onSelect: run(() => onOpenDrawer('request')) },
     { label: 'Открыть расписание', hint: '4', onSelect: run(() => onOpenDrawer('schedule')) },
+    { label: 'Открыть чат', hint: '5', onSelect: run(() => onOpenDrawer('chat')) },
     { label: muted ? 'Включить звук' : 'Выключить звук', hint: 'M', onSelect: run(onToggleMute) },
     { label: 'Сочетания клавиш', hint: '?', onSelect: run(onShowShortcuts) },
   ];

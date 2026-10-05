@@ -18,6 +18,7 @@ const SHORTCUTS: readonly Shortcut[] = [
   { keys: ['2'], label: 'Открыть эфир студии' },
   { keys: ['3', 'R'], label: 'Заказать трек' },
   { keys: ['4'], label: 'Открыть расписание' },
+  { keys: ['5'], label: 'Открыть чат' },
   { keys: ['S'], label: 'Следующий вид плеера' },
   { keys: ['T'], label: 'Следующая тема' },
   { keys: ['?'], label: 'Этот список сочетаний' },
