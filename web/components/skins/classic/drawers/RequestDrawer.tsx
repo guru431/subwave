@@ -6,6 +6,7 @@ import { ArrowUpRight, Radio } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import type { NowPlayingTrack, RequestResult, StationContext } from '@/lib/types';
 import { REQUEST_NAME_MAX } from '@/lib/schemas.generated';
+import { bindPick, pickedSongId, type RequestPick } from '@/lib/requestPick';
 
 const SUCCESS_HOLD_MS = 2800;
 const POLL_INTERVAL_MS = 1500;
@@ -133,14 +134,16 @@ export default function RequestDrawer({
   // templated ack; polling fills in the real track + on-air ack.
   const [result, setResult] = useState<RequestResult | null>(null);
   const [resolved, setResolved] = useState<ResolveResult | null>(null);
-  const [songId, setSongId] = useState<string | null>(null);
+  // songId привязан к тексту, при котором выбран (lib/requestPick.ts): правка
+  // человеком его отвязывает, подстановка альтернативы в поле — нет.
+  const [pick, setPick] = useState<RequestPick | null>(null);
+  const songId = pickedSongId(pick, requestText);
 
   // Сверка набранного с коллекцией. Ответ комнаты — «этот трек есть», «есть
   // похожие» или «нет ничего»; последнее НЕ запрещает отправку: ведущий умеет
   // разбирать настроение и намёк, а не только «артист — название».
   useEffect(() => {
     const query = requestText.trim();
-    setSongId(null);
     if (query.length < RESOLVE_MIN_CHARS) {
       setResolved(null);
       return;
@@ -153,7 +156,7 @@ export default function RequestDrawer({
         const body = (await r.json()) as ResolveResult;
         if (cancelled) return;
         setResolved(body);
-        if (body.exact) setSongId(body.exact.id);
+        if (body.exact) setPick(bindPick(body.exact.id, query));
       } catch {
         // Комната недоступна — заказ всё равно уйдёт текстом, и каскад станции
         // его разберёт. Подсказка не обязательна для отправки.
@@ -217,7 +220,7 @@ export default function RequestDrawer({
     // Capture before the await — onSubmit clears requestText on accept.
     const askedText = requestText.trim();
     const askedName = requesterName.trim();
-    const data = await onSubmit(songId ?? undefined);
+    const data = await onSubmit(songId);
     if (!data) return;
     // 429 / 503 / network error — surface the miss banner, no polling.
     if (!data.success) {
@@ -336,8 +339,9 @@ export default function RequestDrawer({
                     key={c.id}
                     type="button"
                     onClick={() => {
-                      setSongId(c.id);
-                      setRequestText(`${c.artist} — ${c.title}`);
+                      const text = `${c.artist} — ${c.title}`;
+                      setPick(bindPick(c.id, text));
+                      setRequestText(text);
                       taRef.current?.focus();
                     }}
                     className={cn(
