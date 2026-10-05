@@ -162,11 +162,18 @@ export interface TrackLike {
 
 /** The heart button's state machine (#991): refresh liked-state when the
  *  on-air track changes, optimistic fill on tap, settle on the controller's
- *  answer. Wording and iconography stay with each skin. */
-export function useTrackLike(): TrackLike {
+ *  answer. Wording and iconography stay with each skin.
+ *
+ *  `songIdFor` — трек, для которого нарисовано сердечко. Нужен сердечку под
+ *  AnimatePresence: копия, уходящая анимацией выхода, держит свой трек. В
+ *  скрытой вкладке кадров нет, выход не завершается, и копии копятся сутками;
+ *  с общим songId каждая спрашивала /api/like на каждой смене трека — 28.09
+ *  это было ~940 запросов разом раз в четыре минуты. */
+export function useTrackLike(songIdFor?: string | null): TrackLike {
   const { likeCurrent, likeStatus } = usePlayerActions();
   const feed = usePlayerFeed();
-  const songId = feed.nowPlaying?.subsonic_id || null;
+  const feedSongId = feed.nowPlaying?.subsonic_id || null;
+  const songId = songIdFor === undefined ? feedSongId : songIdFor || null;
 
   // enabled starts false ("unknown") so stations with likes off never flash a
   // heart; the first status fetch flips it on.
