@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { useInterval } from 'usehooks-ts';
-import { isIOSDevice } from './platform';
+import { isAndroidDevice, isIOSDevice } from './platform';
 
 // SSR-safe iOS flag: false on the server and first client render, real value
 // after mount. For branching UI that can't work on iOS (issue #298).
@@ -78,8 +78,11 @@ function getOrCreateElementGraph(audioEl: HTMLMediaElement): ElementAudioGraph |
 
 // Wires an AnalyserNode to the <audio> ref the first time `active` flips true.
 // On failure `ready` stays false and `read()` returns null, so the Waveform
-// falls back to its pseudo-random walk. iOS opts out entirely: the graph only
-// yields zeros and routing through Web Audio breaks background playback (#298).
+// falls back to its pseudo-random walk. Phones opt out entirely: on iOS the
+// graph only yields zeros, and on BOTH platforms routing through Web Audio
+// breaks background playback (#298). Upstream opts out iOS only; Android
+// shows the same damage (Firefox for Android, 2026-09-21: sound died minutes
+// after backgrounding, no lock-screen player).
 export function useAnalyser(
   audioRef: RefObject<HTMLAudioElement | null> | null | undefined,
   active: boolean,
@@ -98,8 +101,8 @@ export function useAnalyser(
 
   useEffect(() => {
     if (!active || !audioRef?.current) return;
-    // iOS: never touch Web Audio (see hook header). Stay not-ready → fallback.
-    if (isIOSDevice()) { setReady(false); return; }
+    // Phones: never touch Web Audio (see hook header). Stay not-ready → fallback.
+    if (isIOSDevice() || isAndroidDevice()) { setReady(false); return; }
     let cancelled = false;
     const audioEl = audioRef.current;
     let probeInterval: ReturnType<typeof setInterval> | null = null;
