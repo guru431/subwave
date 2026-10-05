@@ -1294,7 +1294,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
           <Input
             type="number"
             min={0}
-            max={1000}
+            max={2000}
             step={10}
             value={form.llm.noRepeatWindow}
             onChange={(e: ChangeEvent<HTMLInputElement>) =>

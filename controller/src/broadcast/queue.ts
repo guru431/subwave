@@ -640,13 +640,12 @@ class Queue {
       try {
         const arr = JSON.parse(readFileSync(config.queue.recentPlaysFile, 'utf8'));
         if (Array.isArray(arr)) {
-          // Drop anything older than 96h on boot — keeps the file from
-          // ballooning if the cap was raised between restarts, while holding
-          // enough history to supply a maxed count-based no-repeat window
-          // (clampNoRepeatWindow: up to 1000 distinct ≈ 2-3 days of air).
-          const cutoff = Date.now() - 96 * 3_600_000;
+          // Fork: bounded by COUNT (recentPlaysMax), not by age. The count
+          // guard reaches up to 2000 distinct tracks (clampNoRepeatWindow) —
+          // ≈5.5 days of air — and the former 96h cut dropped its oldest part
+          // on every restart. The slice still keeps the file from ballooning.
           this._recentPlays = arr
-            .filter((p: RecentPlay) => p && p.endedAt && new Date(p.endedAt).getTime() > cutoff)
+            .filter((p: RecentPlay) => p && p.endedAt)
             .slice(0, config.queue.recentPlaysMax);
         }
       } catch (err) {
