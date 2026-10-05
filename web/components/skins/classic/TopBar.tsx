@@ -52,7 +52,7 @@ export default memo(function TopBar({
                 type="button"
                 onClick={onOpenSchedule}
                 className="v3-caption v3-focus min-w-0 cursor-pointer truncate border-0 bg-transparent p-0 text-left text-ink hover:underline"
-                title={`${showName} — open schedule`}
+                title={`${showName} — открыть расписание`}
               >
                 ▸ {showName}
               </button>
@@ -68,13 +68,13 @@ export default memo(function TopBar({
                 type="button"
                 onClick={onOpenSchedule}
                 className="v3-caption v3-focus cursor-pointer truncate border-0 bg-transparent p-0 text-left text-vermilion hover:underline"
-                title="Open schedule"
+                title="Открыть расписание"
               >
-                with {onAirName}
+                с {onAirName}
               </button>
             ) : (
               <span className="v3-caption truncate text-vermilion">
-                with {onAirName}
+                с {onAirName}
               </span>
             )
           )}

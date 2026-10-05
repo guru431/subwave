@@ -15,9 +15,9 @@ interface Filter {
 }
 
 const FILTERS: readonly Filter[] = [
-  { id: 'all', label: 'All' },
+  { id: 'all', label: 'Всё' },
   { id: 'dj', label: 'DJ' },
-  { id: 'tracks', label: 'Tracks' },
+  { id: 'tracks', label: 'Треки' },
 ];
 
 const CLASS_COLOR: Record<TurnDisplayClass, string> = {
@@ -79,7 +79,7 @@ export default function BoothDrawer({ items, timezone, locale }: BoothDrawerProp
 
       {filtered.length === 0 && (
         <div className="py-[18px] text-[13px] leading-relaxed text-muted italic">
-          {items?.length ? 'Nothing in this view.' : 'Booth is quiet. Awaiting transmission…'}
+          {items?.length ? 'В этом разделе пусто.' : 'В студии тихо. Ждём эфира…'}
         </div>
       )}
 

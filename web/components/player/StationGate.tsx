@@ -99,7 +99,7 @@ export function StationPasswordGate({
     setError('');
     const ok = await unlock(pass);
     setBusy(false);
-    if (!ok) setError('That password was not accepted.');
+    if (!ok) setError('Пароль не принят.');
   };
 
   return (
@@ -109,19 +109,19 @@ export function StationPasswordGate({
       }`}
     >
       <form onSubmit={submit} className="w-full max-w-sm border border-ink bg-bg p-6 text-ink">
-        <div className="text-[11px] tracking-[0.2em] text-muted uppercase">members only</div>
+        <div className="text-[11px] tracking-[0.2em] text-muted uppercase">только для своих</div>
         <div className="mt-2 text-xl font-extrabold tracking-[-0.02em]">
-          This station is private.
+          Станция закрыта.
         </div>
         <p className="mt-3 text-sm text-muted">
-          Ask the operator for the station password to tune in.
+          Чтобы слушать, спросите пароль станции у владельца.
         </p>
         <input
           type="password"
-          aria-label="Station password"
+          aria-label="Пароль станции"
           value={input}
           onChange={e => setInput(e.target.value)}
-          placeholder="station password"
+          placeholder="пароль станции"
           autoComplete="current-password"
           className="mt-4 w-full border border-ink bg-bg px-3 py-2 text-sm text-ink outline-none placeholder:text-muted focus:border-vermilion"
         />
@@ -131,7 +131,7 @@ export function StationPasswordGate({
           disabled={busy || !input.trim()}
           className="mt-4 w-full border border-ink px-4 py-2 text-sm font-bold hover:bg-ink hover:text-bg disabled:opacity-50"
         >
-          {busy ? 'Checking…' : 'Tune in'}
+          {busy ? 'Проверяем…' : 'Включить'}
         </button>
       </form>
     </div>

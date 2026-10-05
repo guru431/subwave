@@ -48,13 +48,13 @@ export default function CommandPalette({
   };
 
   const items: PaletteItem[] = [
-    { label: tunedIn ? 'Tune out' : 'Tune in', hint: 'Space', onSelect: run(onTune) },
-    { label: 'Open Timeline', hint: '1', onSelect: run(() => onOpenDrawer('timeline')) },
-    { label: 'Open Booth feed', hint: '2', onSelect: run(() => onOpenDrawer('booth')) },
-    { label: 'Make a request', hint: '3', onSelect: run(() => onOpenDrawer('request')) },
-    { label: 'Open Schedule', hint: '4', onSelect: run(() => onOpenDrawer('schedule')) },
-    { label: muted ? 'Unmute' : 'Mute', hint: 'M', onSelect: run(onToggleMute) },
-    { label: 'Keyboard shortcuts', hint: '?', onSelect: run(onShowShortcuts) },
+    { label: tunedIn ? 'Выключить' : 'Включить', hint: 'Space', onSelect: run(onTune) },
+    { label: 'Открыть ленту', hint: '1', onSelect: run(() => onOpenDrawer('timeline')) },
+    { label: 'Открыть эфир студии', hint: '2', onSelect: run(() => onOpenDrawer('booth')) },
+    { label: 'Заказать трек', hint: '3', onSelect: run(() => onOpenDrawer('request')) },
+    { label: 'Открыть расписание', hint: '4', onSelect: run(() => onOpenDrawer('schedule')) },
+    { label: muted ? 'Включить звук' : 'Выключить звук', hint: 'M', onSelect: run(onToggleMute) },
+    { label: 'Сочетания клавиш', hint: '?', onSelect: run(onShowShortcuts) },
   ];
 
   return (
@@ -62,12 +62,12 @@ export default function CommandPalette({
       open={open}
       onOpenChange={onOpenChange}
       container={container}
-      label="Command palette"
+      label="Палитра команд"
     >
-      <CommandInput placeholder="Type a command…" />
+      <CommandInput placeholder="Введите команду…" />
       <CommandList>
-        <CommandEmpty>No commands found.</CommandEmpty>
-        <CommandGroup heading="Player">
+        <CommandEmpty>Команд не найдено.</CommandEmpty>
+        <CommandGroup heading="Плеер">
           {items.map((it) => (
             <CommandItem key={it.label} value={it.label} onSelect={it.onSelect}>
               <span>{it.label}</span>

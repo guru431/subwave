@@ -4,6 +4,7 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, m } from 'motion/react';
 import { Coins, Heart } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { ruMood, ruEnergy, ruAlbum } from '@/lib/ru';
 import { useTrackLike } from '@/components/skins/sharedHooks';
 import { fmtTime } from '@/lib/format';
 import { useDynamicStyle } from '@/hooks/useDynamicStyle';
@@ -40,8 +41,8 @@ function buildMetaTokens(t: NowPlayingTrack | null): string[] {
 function buildMoodPhrase(t: NowPlayingTrack | null): string {
   if (!t) return '';
   const parts: string[] = [];
-  if (Array.isArray(t.moods)) parts.push(...t.moods.slice(0, 2));
-  if (t.energy) parts.push(`${t.energy} energy`);
+  if (Array.isArray(t.moods)) parts.push(...t.moods.slice(0, 2).map(ruMood));
+  if (t.energy) parts.push(ruEnergy(t.energy));
   return parts.join(SEP);
 }
 
@@ -56,8 +57,8 @@ function LikeHeart() {
       onClick={like}
       disabled={pending || liked}
       aria-pressed={liked}
-      aria-label={liked ? 'Liked' : 'Like this track'}
-      title={liked ? 'Liked — saved to the station favourites' : 'Like this track'}
+      aria-label={liked ? 'В избранном' : 'В избранное'}
+      title={liked ? 'В избранном — сохранено в избранном станции' : 'В избранное'}
       className={cn(
         'v3-focus ml-[10px] inline-flex cursor-pointer items-center gap-[4px] border-0 bg-transparent p-0 align-middle transition-colors',
         liked ? 'text-vermilion' : 'text-muted hover:text-ink',
@@ -178,7 +179,7 @@ export default memo(function CenterStage({ nowPlaying, trackStartedAt, llmTokens
           ref={coverRef}
           type="button"
           onClick={onOpenTimeline}
-          aria-label="Open the timeline"
+          aria-label="Открыть ленту"
           className={cn(
             // Sized to width but capped by viewport height (20vh) so a
             // short/wide window doesn't spend a third of its height on the
@@ -224,18 +225,18 @@ export default memo(function CenterStage({ nowPlaying, trackStartedAt, llmTokens
         <div className="min-w-0">
           <div className="v3-caption mb-[14px] text-muted">
             {offline ? (
-              'Off air'
+              'Не в эфире'
             ) : (
               <>
-                Now playing
+                Сейчас играет
                 {live && duration > 0 ? (
                   <>
                     {' — '}
                     <button
                       type="button"
                       onClick={toggleClock}
-                      title={showRemaining ? 'Show elapsed time' : 'Show time remaining'}
-                      aria-label={showRemaining ? 'Time remaining — switch to elapsed' : 'Elapsed time — switch to remaining'}
+                      title={showRemaining ? 'Показать прошедшее время' : 'Показать оставшееся время'}
+                      aria-label={showRemaining ? 'Оставшееся время — переключить на прошедшее' : 'Прошедшее время — переключить на оставшееся'}
                       className="v3-focus v3-tab-num cursor-pointer border-0 bg-transparent p-0 font-[inherit] text-inherit uppercase"
                     >
                       {showRemaining
@@ -249,8 +250,8 @@ export default memo(function CenterStage({ nowPlaying, trackStartedAt, llmTokens
                     {' · '}
                     <span
                       className="inline-flex items-center gap-1 align-middle text-ink-faint"
-                      title="LLM tokens generated since the station booted"
-                      aria-label={`${llmTokens.toLocaleString('en-US')} AI tokens generated`}
+                      title="Токенов LLM с момента запуска станции"
+                      aria-label={`${llmTokens.toLocaleString('ru-RU')} токенов ИИ сгенерировано`}
                     >
                       <Coins size={12} strokeWidth={1.75} aria-hidden="true" />
                       <CountUp value={llmTokens} className="v3-tab-num" />
@@ -276,8 +277,8 @@ export default memo(function CenterStage({ nowPlaying, trackStartedAt, llmTokens
                     {nowPlaying?.title}
                   </h1>
                   <div className="mt-[4px] text-[clamp(13px,1.4vw,18px)] leading-snug font-medium text-muted">
-                    <span className="text-ink">{nowPlaying?.artist || 'Unknown artist'}</span>
-                    {nowPlaying?.album && <span> · {nowPlaying.album}</span>}
+                    <span className="text-ink">{nowPlaying?.artist || 'Исполнитель неизвестен'}</span>
+                    {ruAlbum(nowPlaying?.album) && <span> · {ruAlbum(nowPlaying?.album)}</span>}
                     {nowPlaying?.year && <span> · {nowPlaying.year}</span>}
                     <LikeHeart />
                   </div>
@@ -294,7 +295,7 @@ export default memo(function CenterStage({ nowPlaying, trackStartedAt, llmTokens
                 </>
               ) : (
                 <h1 className="v3-title m-0 text-muted">
-                  {offline ? 'off air' : 'scanning the dial'}
+                  {offline ? 'нет эфира' : 'настраиваем частоту'}
                   <span className="v3-blink ml-[0.1em]">_</span>
                 </h1>
               )}
@@ -314,7 +315,7 @@ export default memo(function CenterStage({ nowPlaying, trackStartedAt, llmTokens
             key="up-next"
             type="button"
             onClick={onOpenTimeline}
-            title="Open the timeline"
+            title="Открыть ленту"
             initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}

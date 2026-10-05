@@ -10,19 +10,19 @@ interface Shortcut {
 }
 
 const SHORTCUTS: readonly Shortcut[] = [
-  { keys: ['Space', 'K'], label: 'Tune in / out' },
-  { keys: ['↑'], label: 'Volume up' },
-  { keys: ['↓'], label: 'Volume down' },
-  { keys: ['M'], label: 'Mute / unmute' },
-  { keys: ['1'], label: 'Open Timeline' },
-  { keys: ['2'], label: 'Open Booth feed' },
-  { keys: ['3', 'R'], label: 'Make a request' },
-  { keys: ['4'], label: 'Open Schedule' },
-  { keys: ['S'], label: 'Next player skin' },
-  { keys: ['T'], label: 'Next theme' },
-  { keys: ['?'], label: 'This shortcuts list' },
-  { keys: ['⌘K'], label: 'Command palette' },
-  { keys: ['Esc'], label: 'Close drawer / dialog' },
+  { keys: ['Space', 'K'], label: 'Включить / выключить' },
+  { keys: ['↑'], label: 'Громче' },
+  { keys: ['↓'], label: 'Тише' },
+  { keys: ['M'], label: 'Звук выкл. / вкл.' },
+  { keys: ['1'], label: 'Открыть ленту' },
+  { keys: ['2'], label: 'Открыть эфир студии' },
+  { keys: ['3', 'R'], label: 'Заказать трек' },
+  { keys: ['4'], label: 'Открыть расписание' },
+  { keys: ['S'], label: 'Следующий вид плеера' },
+  { keys: ['T'], label: 'Следующая тема' },
+  { keys: ['?'], label: 'Этот список сочетаний' },
+  { keys: ['⌘K'], label: 'Палитра команд' },
+  { keys: ['Esc'], label: 'Закрыть панель / окно' },
 ];
 
 export interface ShortcutsDialogProps {
@@ -53,11 +53,11 @@ export default function ShortcutsDialog({ open, onOpenChange, container }: Short
         >
           <div className="flex items-baseline justify-between gap-3 border-b border-ink px-6 py-4">
             <Dialog.Title className="v3-eyebrow m-0 text-[13px] tracking-[0.3em]">
-              Keyboard shortcuts
+              Сочетания клавиш
             </Dialog.Title>
             <Dialog.Close
               className="v3-focus cursor-pointer border-0 bg-transparent text-xl leading-none text-muted"
-              aria-label="Close"
+              aria-label="Закрыть"
             >
               ×
             </Dialog.Close>

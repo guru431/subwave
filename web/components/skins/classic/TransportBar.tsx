@@ -41,12 +41,12 @@ const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 const quantizeVolume = (n: number) => Math.round(clamp01(n) * 100) / 100;
 
 const QUALITY_LABEL: Record<SignalQuality, string> = {
-  offline: 'Offline',
-  idle: 'Standby',
-  acquiring: 'Acquiring',
-  good: 'Good',
-  fair: 'Fair',
-  poor: 'Poor',
+  offline: 'Нет эфира',
+  idle: 'Ожидание',
+  acquiring: 'Настройка',
+  good: 'Хороший',
+  fair: 'Средний',
+  poor: 'Слабый',
 };
 
 // Honour reduced-motion for the imperative motion pulses (the CSS transitions
@@ -211,15 +211,15 @@ export default memo(function TransportBar({
     >
       <div className="fz-deck relative grid grid-cols-[auto_1fr_auto] items-stretch bg-[var(--fz-panel)] pt-3 pr-[env(safe-area-inset-right)] pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)] pl-[env(safe-area-inset-left)] [border-top:1px_solid_var(--fz-edge)]">
         <div className="relative flex flex-col items-center justify-center gap-1.5 px-4 pt-1 pb-2 md:px-5 md:pt-1 md:pb-2.5 lg:gap-2 lg:px-6 lg:pt-1.5 lg:pb-3">
-          <span className="v3-caption hidden text-muted lg:block">Power</span>
+          <span className="v3-caption hidden text-muted lg:block">Питание</span>
           <m.button
             ref={tuneScope}
             onClick={offline ? undefined : handleTune}
             disabled={offline}
             aria-disabled={offline}
             aria-pressed={tunedIn}
-            aria-label={offline ? 'Stream offline' : tunedIn ? 'Tune out' : 'Tune in'}
-            title={offline ? 'The station is currently off air' : tunedIn ? 'Tune out' : 'Tune in'}
+            aria-label={offline ? 'Эфир выключен' : tunedIn ? 'Выключить' : 'Включить'}
+            title={offline ? 'Станция сейчас не в эфире' : tunedIn ? 'Выключить' : 'Включить'}
             data-tuned={tunedIn ? 'true' : 'false'}
             whileTap={offline ? undefined : { scale: 0.95 }}
             transition={{ duration: 0.09, ease: [0.2, 0.7, 0.2, 1] }}
@@ -233,7 +233,7 @@ export default memo(function TransportBar({
           <div className="flex w-full flex-col justify-center gap-1 font-mono lg:gap-1.5">
             <div className="flex items-baseline justify-between gap-2 lg:gap-4">
               <span className="text-[11px] font-semibold tracking-[0.04em] whitespace-nowrap text-ink lg:text-[12px]">
-                Signal · <b className={cn('font-bold', qualityTone)}>{qualityLabel}</b>
+                Сигнал · <b className={cn('font-bold', qualityTone)}>{qualityLabel}</b>
               </span>
               <span
                 className="v3-tab-num text-[11px] tracking-[0.06em] whitespace-nowrap text-muted lg:text-[12px] lg:tracking-[0.08em]"
@@ -261,7 +261,7 @@ export default memo(function TransportBar({
         </div>
 
         <div className="relative flex flex-col items-center justify-center gap-1.5 px-4 pt-1 pb-2 [border-left:1px_solid_var(--fz-line)] md:px-5 md:pt-1 md:pb-2.5 lg:gap-2 lg:px-6 lg:pt-1.5 lg:pb-3">
-          <span className="v3-caption hidden text-muted lg:block">Volume</span>
+          <span className="v3-caption hidden text-muted lg:block">Громкость</span>
           {iosVolumeLocked ? (
             // iOS: volume is hardware-only (see iosVolumeLocked above), so
             // echo a volume rocker rather than ship a dead knob.

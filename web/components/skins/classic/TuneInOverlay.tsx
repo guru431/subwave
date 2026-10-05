@@ -21,7 +21,7 @@ export default function TuneInOverlay({ onTune, nowPlaying }: TuneInOverlayProps
     <m.button
       type="button"
       onClick={onTune}
-      aria-label="Tune in to the live stream"
+      aria-label="Включить прямой эфир"
       variants={{
         visible: { opacity: 1 },
         hidden:  { opacity: 0, transition: { duration: 0.18, delay: 0.08 } },
@@ -36,7 +36,7 @@ export default function TuneInOverlay({ onTune, nowPlaying }: TuneInOverlayProps
     >
       <span className="v3-eyebrow flex items-center gap-2 text-vermilion">
         <span className="bs-live-dot" />
-        on air now
+        сейчас в эфире
       </span>
 
       <m.span
@@ -50,13 +50,13 @@ export default function TuneInOverlay({ onTune, nowPlaying }: TuneInOverlayProps
       </m.span>
 
       <span className="flex max-w-[34ch] flex-col items-center gap-2">
-        <span className="v3-title">Tap to tune in</span>
+        <span className="v3-title">Нажмите, чтобы слушать</span>
         <span className="v3-caption text-muted">
-          audio is paused — tap anywhere to start listening
+          звук на паузе — нажмите в любом месте, чтобы включить
         </span>
         {track && (
           <span className="mt-1 text-[13px] text-muted">
-            now playing · <span className="text-ink">{track}</span>
+            сейчас играет · <span className="text-ink">{track}</span>
           </span>
         )}
       </span>

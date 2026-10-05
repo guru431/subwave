@@ -14,7 +14,7 @@ import type {
 } from '@/lib/types';
 import { useStationClient } from '@/lib/stationClient';
 
-const DAY_LABELS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+const DAY_LABELS = ['ВС', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ'];
 
 export interface ScheduleDrawerProps {
   /** What's on right now, fed from `useStationFeed` so the on-now card stays
@@ -190,11 +190,11 @@ export default function ScheduleDrawer({ activeShow, context }: ScheduleDrawerPr
 
       <section>
         <SectionLabel>
-          {viewDay === today ? 'Coming up today' : `${DAY_LABELS[viewDay]} schedule`}
+          {viewDay === today ? 'Сегодня в эфире' : `Расписание: ${DAY_LABELS[viewDay]}`}
         </SectionLabel>
         {upcomingSlots.length === 0 ? (
           <div className="text-[13px] text-muted">
-            Nothing more scheduled today.
+            На сегодня больше ничего не запланировано.
           </div>
         ) : (
           <ul className="grid">
@@ -238,14 +238,14 @@ function StationHeader({
   return (
     <section className="flex items-end justify-between gap-4 border-b border-separator-soft pb-3">
       <div>
-        <div className="text-[9px] tracking-[0.3em] text-muted uppercase">Station time</div>
+        <div className="text-[9px] tracking-[0.3em] text-muted uppercase">Время станции</div>
         <div className="v3-tab-num mt-1 text-2xl leading-none font-semibold text-ink">
           {time}
         </div>
       </div>
       {location && (
         <div className="text-right">
-          <div className="text-[9px] tracking-[0.3em] text-muted uppercase">Location</div>
+          <div className="text-[9px] tracking-[0.3em] text-muted uppercase">Город</div>
           <div className="mt-1 text-sm text-ink">{location}</div>
         </div>
       )}
@@ -313,9 +313,9 @@ function OnNowCard(props: {
   if (!onNow) {
     return (
       <section>
-        <SectionLabel>On now</SectionLabel>
+        <SectionLabel>Сейчас</SectionLabel>
         <div className="border border-separator-strong p-4">
-          <div className="text-[15px] leading-tight font-semibold">Autonomous</div>
+          <div className="text-[15px] leading-tight font-semibold">Без ведущего</div>
           <div className="mt-1 text-xs leading-relaxed text-muted">
             No host scheduled for this hour — the station is picking tracks on
             its own based on the time of day and the weather.
@@ -324,7 +324,7 @@ function OnNowCard(props: {
       </section>
     );
   }
-  const personaName = onNow.persona?.name || activeShow?.persona?.name || 'Host';
+  const personaName = onNow.persona?.name || activeShow?.persona?.name || 'Ведущий';
   // The controller emits avatar paths without the `/api` prefix so each
   // surface prepends its own origin; empty input stays empty so <img> falls
   // back to the initials placeholder.
@@ -360,7 +360,7 @@ function OnNowCard(props: {
 
 function ScheduleRow({ slot, isNow, locale }: { slot: Slot; isNow: boolean; locale: StationLocale }) {
   const client = useStationClient();
-  const personaName = slot.persona?.name || (slot.show ? 'Host' : null);
+  const personaName = slot.persona?.name || (slot.show ? 'Ведущий' : null);
   const avatar = client.resolve(slot.persona?.avatar || '');
   const time = slot.hour === slot.endHour ? fmtHour(slot.hour, locale) : fmtHourRange(slot.hour, slot.endHour, locale);
   return (
@@ -396,7 +396,7 @@ function ScheduleRow({ slot, isNow, locale }: { slot: Slot; isNow: boolean; loca
 
 function DayTabs({ value, today, onChange }: { value: number; today: number; onChange: (d: number) => void }) {
   return (
-    <nav aria-label="Schedule day" className="grid grid-cols-7 gap-1 border-t border-ink pt-3">
+    <nav aria-label="День расписания" className="grid grid-cols-7 gap-1 border-t border-ink pt-3">
       {DAY_LABELS.map((label, i) => {
         const isActive = i === value;
         const isToday = i === today;
