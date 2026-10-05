@@ -14,7 +14,7 @@
 #   run-tests.sh --image subwave-controller:1.17.0   другой тег
 #
 # Падения из KNOWN ниже — среда образа и апстрим, к нашим коммитам отношения не
-# имеют (эталон KNOWN — Task 13 плана выделения radio). Код 1 — есть падения вне
+# имеют (эталон KNOWN — сверено с чистым клоном v1.17.0 2026-10-05). Код 1 — есть падения вне
 # этого списка. Итог печатается строкой TESTS_RESULT для ClaudeTestSweep.
 set -u
 
@@ -48,21 +48,39 @@ done
 # Падение — «файл» (тест-скрипт упал целиком) или «файл :: тест» (node:test);
 # шаблоны сопоставляются как в `case`.
 KNOWN=(
-  # Среда живого образа: в нём нет каталогов репозитория (web/, docker/).
-  # С --src эти тесты проходят.
+  # Эталон снят на чистом v1.17.0 2026-10-05: объединение падений прогона в
+  # образе апстрима и прогона с --src. С --src падают только два последних
+  # пункта, остальное — среда образа.
+  #
+  # Среда образа: в нём нет каталогов репозитория (web/, docker/, liquidsoap/,
+  # scripts/*.sh, docker-compose*.yml), а тесты читают их или импортируют
+  # модули web/. С --src эти тесты проходят.
   "aio-analyzer-heavy.test.ts"
+  "aio-analyzer-replicas.test.ts"
   "aio-log-link.test.ts"
+  "analyzer-replicas-compose.test.ts :: *"
+  "dissolve-wash-shape.test.ts :: *"
+  "gemini-tts-settings.test.ts :: *"
+  "gemini-tts.test.ts :: *"
+  "jingle-play.test.ts"
+  "max-listeners.test.ts"
+  "observatory-genres.test.ts"
   "playlists-cap.test.ts"
+  "settings-talk-placement-route.test.ts :: *"
+  "show-boundary-drain.test.ts :: *"
+  "show-candidate-display.test.ts :: *"
   "show-filter-cap.test.ts"
-  "state-bootstrap.test.ts"
   "skill-schema.test.ts :: the mirror carries the skill schema to the browser"
+  "state-bootstrap.test.ts"
+  "station-clock-format.test.ts"
+  "stream-buffer-renderers.test.ts :: *"
+  "transition-effects.test.ts :: *"
+  "trusted-proxies.test.ts"
   # Нужен typescript — devDependency, в образ (`--omit=dev`) не входит.
   "gen-schemas.test.ts"
   # vocal_gate_test.py требует python-зависимостей анализатора, которых в образе
   # контроллера нет.
   "analyzer-python.test.ts"
-  # Падает и на чистом клоне v1.8.0: ожидание, которое в этой среде не разрешается.
-  "voice-air-events.test.ts :: *"
 )
 # Не запускаются вовсе: нагрузочный тест сеет 200 тыс. треков в базу на 820 МБ
 # и идёт дольше двух минут — хосту станции такой прогон не по карману.
