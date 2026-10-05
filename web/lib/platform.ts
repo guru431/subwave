@@ -9,6 +9,16 @@
 //
 // iPadOS 13+ reports a desktop "Macintosh" UA, so a Mac-UA device reporting
 // touch points counts as iOS — no real Mac has a touchscreen.
+// Android carries the same hazard as iOS: routing the element through Web Audio
+// costs lock-screen controls and background playback. Upstream's own note on
+// issue #298 names both, but opts out iOS only. Measured here 2026-09-21 on
+// Firefox for Android: sound died a few minutes after the tab went background
+// and no lock-screen player ever appeared.
+export function isAndroidDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /Android/.test(navigator.userAgent);
+}
+
 export function isIOSDevice(): boolean {
   if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent;

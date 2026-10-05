@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { useInterval } from 'usehooks-ts';
-import { isIOSDevice } from './platform';
+import { isAndroidDevice, isIOSDevice } from './platform';
 
 // SSR-safe iOS flag: false on the server and the first client render (so the
 // markup agrees and hydration stays clean), then the real value after mount.
@@ -88,9 +88,14 @@ function getOrCreateElementGraph(audioEl: HTMLMediaElement): ElementAudioGraph |
 // If CORS or anything else blocks attachment, `ready` stays false and `read()`
 // returns null, and the Waveform falls back to its pseudo-random walk.
 //
-// iOS is opted out entirely: createMediaElementSource on a live MP3 stream only
-// ever yields zeros there, and routing the element through Web Audio
-// jeopardises lock-screen / background playback (issue #298).
+// Phones are opted out entirely: createMediaElementSource on a live MP3 stream
+// only ever yields zeros on iOS, and on BOTH mobile platforms routing the
+// element through Web Audio jeopardises lock-screen / background playback
+// (issue #298). Upstream opted out iOS only; Android shows the same damage —
+// measured 2026-09-21 on Firefox for Android, sound died a few minutes after
+// backgrounding and the lock screen never showed a player at all. The cost is
+// the visualiser falling back to its pseudo-random walk on phones, where it is
+// a thumbnail anyway; the gain is a radio that keeps playing in a pocket.
 export function useAnalyser(
   audioRef: RefObject<HTMLAudioElement | null> | null | undefined,
   active: boolean,
@@ -110,8 +115,8 @@ export function useAnalyser(
 
   useEffect(() => {
     if (!active || !audioRef?.current) return;
-    // iOS: never touch Web Audio (see hook header). Stay not-ready → fallback.
-    if (isIOSDevice()) { setReady(false); return; }
+    // Phones: never touch Web Audio (see hook header). Stay not-ready → fallback.
+    if (isIOSDevice() || isAndroidDevice()) { setReady(false); return; }
     let cancelled = false;
     const audioEl = audioRef.current;
     let probeInterval: ReturnType<typeof setInterval> | null = null;
