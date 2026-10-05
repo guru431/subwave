@@ -243,12 +243,12 @@ export const config = {
     recentPlaysFile: `${STATE_DIR}/recent-plays.json`,
     // Rolling play log cap. With a 3-min max-track cap the station can burn
     // ~550 plays/day, so 300 entries barely spanned the 12h anti-repeat window
-    // (issue #874). 2500 keeps FOUR days populated at that churn — sized so the
+    // (issue #874). 6000 keeps ELEVEN days populated at that churn — sized so the
     // large-library recency boost (recencyWindowsForLibrary, up to 36h) and a
-    // maxed no-repeat window (clampNoRepeatWindow, up to 1000 distinct) are
-    // both honestly suppliable from the sidecar, with margin. ~300KB of JSON,
+    // maxed no-repeat window (clampNoRepeatWindow, up to 2000 distinct) are
+    // both honestly suppliable from the sidecar, with margin. ~700KB of JSON,
     // rewritten once per play — negligible either way.
-    recentPlaysMax: 2500,
+    recentPlaysMax: 6000,
     // Count-based hard no-repeat guard: neither pick path re-airs any of the
     // last N DISTINCT plays. Unlike the time-window guard this is non-relaxable
     // — it survives the filterPickerCandidates starvation cascade, closing the
