@@ -56,6 +56,10 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
   if (url.pathname === '/stream.mp3' || url.pathname === '/stream.opus') return;
   if (url.pathname.startsWith('/api/')) return;
+  // The room — live data and files of 8–14 MB. networkFirst would put every
+  // downloaded track into Cache Storage a second time, and serving would go
+  // through respondWith — a layer where standalone iOS behaves unpredictably.
+  if (url.pathname.startsWith('/room/')) return;
 
   // Content-hashed, immutable build assets — a cache hit is always correct.
   if (url.pathname.startsWith('/_next/static/')) {

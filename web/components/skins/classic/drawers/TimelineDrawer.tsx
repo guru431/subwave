@@ -1,8 +1,10 @@
 'use client';
 
 import type { ReactNode } from 'react';
+import { ArrowDownToLine } from 'lucide-react';
 import { relTime } from '@/lib/format';
 import { cn } from '@/lib/cn';
+import { downloadUrl } from '@/lib/download';
 import type { QueueEntry } from '@/lib/types';
 
 export interface TimelineDrawerProps {
@@ -72,6 +74,19 @@ export default function TimelineDrawer({ upcoming, history }: TimelineDrawerProp
               {t.t && (
                 <span className="v3-tab-num shrink-0 text-[10px] tracking-eyebrow text-muted uppercase">
                   {relTime(t.t)} ago
+                </span>
+              )}
+              {t.subsonic_id && (
+                <span className="flex shrink-0 items-center gap-[10px]">
+                  <a
+                    href={downloadUrl(t.subsonic_id)}
+                    download
+                    aria-label={`Скачать: ${t.artist} — ${t.title}`}
+                    title="Скачать"
+                    className="v3-focus inline-flex shrink-0 cursor-pointer items-center border-0 bg-transparent p-0 text-muted transition-colors hover:text-ink"
+                  >
+                    <ArrowDownToLine size={14} strokeWidth={1.75} aria-hidden="true" />
+                  </a>
                 </span>
               )}
             </div>

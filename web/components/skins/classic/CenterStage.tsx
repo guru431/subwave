@@ -2,9 +2,10 @@
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, m } from 'motion/react';
-import { Coins, Heart } from 'lucide-react';
+import { ArrowDownToLine, Coins, Heart } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { ruMood, ruEnergy, ruAlbum } from '@/lib/ru';
+import { downloadUrl } from '@/lib/download';
 import { useTrackLike } from '@/components/skins/sharedHooks';
 import { fmtTime } from '@/lib/format';
 import { useDynamicStyle } from '@/hooks/useDynamicStyle';
@@ -68,6 +69,29 @@ function LikeHeart() {
       <Heart size={15} strokeWidth={1.75} fill={liked ? 'currentColor' : 'none'} aria-hidden="true" />
       {count > 0 && <span className="v3-tab-num text-[11px]">{count}</span>}
     </button>
+  );
+}
+
+// Download what's currently playing. A link, not a stateful button:
+// CenterStage is wrapped in memo, and a hook carrying network state would
+// break that. The `download` attribute is bare, with no value: the filename
+// comes from the server's response header, and a value here would create a
+// second source of truth that loses anyway. Icon is ArrowDownToLine, not
+// Download: the latter is already the install button in the header, and one
+// icon for two meanings would read as one action.
+function DownloadTrack({ subsonicId }: { subsonicId: string | null }) {
+  if (!subsonicId) return null;
+  const label = 'Скачать эту песню';
+  return (
+    <a
+      href={downloadUrl(subsonicId)}
+      download
+      aria-label={label}
+      title={label}
+      className="v3-focus ml-[10px] inline-flex cursor-pointer items-center border-0 bg-transparent p-0 align-middle text-muted transition-colors hover:text-ink"
+    >
+      <ArrowDownToLine size={15} strokeWidth={1.75} aria-hidden="true" />
+    </a>
   );
 }
 
@@ -281,6 +305,7 @@ export default memo(function CenterStage({ nowPlaying, trackStartedAt, llmTokens
                     {ruAlbum(nowPlaying?.album) && <span> · {ruAlbum(nowPlaying?.album)}</span>}
                     {nowPlaying?.year && <span> · {nowPlaying.year}</span>}
                     <LikeHeart />
+                    <DownloadTrack subsonicId={subsonicId} />
                   </div>
                   {hasMeta && (
                     <div className="v3-caption mt-[10px] text-muted">
