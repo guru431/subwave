@@ -149,8 +149,8 @@ export function isNamedRequester(name: string | null | undefined): boolean {
  */
 export function sorryNoMatch(requester: string | null | undefined): string {
   return isNamedRequester(requester)
-    ? `Sorry ${String(requester).trim()}, nothing in the crates matched that.`
-    : 'Sorry, nothing in the crates matched that.';
+    ? `${String(requester).trim()}, простите — в коллекции такого не нашлось.`
+    : 'Простите — в коллекции такого не нашлось.';
 }
 
 export function cleanRequesterName(raw: string | null | undefined, reserved: string[] = []): string {

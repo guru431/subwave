@@ -337,7 +337,7 @@ async function resolveRequest(entry) {
     const reference = queue.current || queue.history[0];
     const refArtist = reference?.track?.artist;
     if (!refArtist) {
-      return failed(`Nothing's playing yet — tell me what you're after instead.`);
+      return failed('Пока ничего не играет — лучше напишите, что поставить.');
     }
     // Requests stay near-unfiltered — 2h is enough to skip the song still
     // ringing in their ears without blocking a re-request from earlier today.
@@ -354,12 +354,12 @@ async function resolveRequest(entry) {
       if (pick) entry.pickSource = 'more-like-this:similar';
     }
     if (!pick) {
-      return failed(`Couldn't find anything close to "${reference?.track?.title || refArtist}" in the crates.`);
+      return failed(`В коллекции не нашлось ничего похожего на «${reference?.track?.title || refArtist}».`);
     }
     // The fallback can land on a different artist, so phrase the ack from the
     // actual pick, not the seed.
     const sameArtist = !!pick.artist && pick.artist === refArtist;
-    const ackLine = sameArtist ? `More from ${refArtist}, coming up.` : `More like that, coming up.`;
+    const ackLine = sameArtist ? `Ещё ${refArtist} — уже скоро.` : 'Ещё в том же духе — уже скоро.';
     // Station voice off (settings.tts.enabled) → the request is still honoured
     // and the listener still gets their text ack; there's just no spoken intro,
     // and no model call to write one.
@@ -402,7 +402,7 @@ async function resolveRequest(entry) {
       // can slip past the subsonic filter). Decline with the standard
       // not-found copy — no leak that the track exists but is blocked.
       entry.pickSource = `${entry.pickSource}:blocked`;
-      return failed(`Couldn't find anything close to "${reference?.track?.title || refArtist}" in the crates.`);
+      return failed(`В коллекции не нашлось ничего похожего на «${reference?.track?.title || refArtist}».`);
     }
     if (pos === -1) {
       // A concurrent request already queued this exact track — acknowledge
@@ -500,7 +500,7 @@ async function resolveRequest(entry) {
     queue.log('request', `cascade chat-answered (no track)`);
     entry.path = 'chat';
     entry.pickSource = 'chat';
-    const screened = screenAck(matched.ack, text, 'Heard you loud and clear.');
+    const screened = screenAck(matched.ack, text, 'Принято.');
     if (screened.guard) {
       flagGuard(entry, screened.guard);
       queue.log('request-guard', `cascade chat ack echoed request text — replaced`);
@@ -720,9 +720,9 @@ async function resolveRequest(entry) {
   // over a Daft Punk track. Replace it with an honest stand-in line.
   let ack: string;
   if (entry.artistMiss) {
-    ack = `No ${entry.artistMiss} in the crates — here's something that fits the moment instead.`;
+    ack = `${entry.artistMiss} в коллекции нет — вот что-то подходящее взамен.`;
   } else {
-    const screened = screenAck(matched.ack, text, 'Coming right up.');
+    const screened = screenAck(matched.ack, text, 'Уже скоро в эфире.');
     if (screened.guard) {
       flagGuard(entry, screened.guard);
       queue.log('request-guard', `cascade ack echoed request text — replaced`);
@@ -825,7 +825,7 @@ async function resolveRequest(entry) {
 router.post('/request', validatePublicBody(listenerRequestSchema), async (req, res) => {
   const cfg = (settings.get() as any)?.requests || {};
   if (REQUESTS_DISABLED || cfg.enabled === false) {
-    return res.status(503).json({ success: false, message: 'Requests are temporarily closed.' });
+    return res.status(503).json({ success: false, message: 'Заказы временно закрыты.' });
   }
 
   // Zero-listener pause (unchanged — see original comment).
@@ -833,7 +833,7 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
   if (!listeners.djCallsAllowed()) {
     return res.status(503).json({
       success: false,
-      message: "The DJ's on autopilot — requests reopen when someone's tuned in.",
+      message: 'Эфир на автопилоте — заказы откроются, когда кто-нибудь начнёт слушать.',
     });
   }
 
@@ -855,8 +855,8 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
     // bug. Never echo the text back in the error.
     return res.status(400).json({
       error: stripped.injection
-        ? "Couldn't read a song request in that — try just the artist, title, or a vibe."
-        : 'Empty request',
+        ? 'Не получилось разобрать заказ — напишите просто исполнителя, название или настроение.'
+        : 'Пустой заказ',
     });
   }
   const s = settings.get() as any;
@@ -879,7 +879,7 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
     res.setHeader('Retry-After', String(gate.retryAfter));
     return res.status(429).json({
       success: false,
-      message: `Easy there — try again in ${gate.retryAfter}s.`,
+      message: `Не так быстро — попробуйте через ${gate.retryAfter} с.`,
       retryAfter: gate.retryAfter,
     });
   }
@@ -888,7 +888,7 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
     res.setHeader('Retry-After', String(globalGate.retryAfter));
     return res.status(429).json({
       success: false,
-      message: 'The request line is busy — try again in a few minutes.',
+      message: 'Линия заказов занята — попробуйте через несколько минут.',
       retryAfter: globalGate.retryAfter,
     });
   }
@@ -902,7 +902,7 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
     res.setHeader('Retry-After', String(retryAfter));
     return res.status(429).json({
       success: false,
-      message: 'Your last request is still queued — it airs first.',
+      message: 'Ваш прошлый заказ ещё в очереди — сначала прозвучит он.',
       retryAfter,
     });
   }
@@ -911,7 +911,7 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
     res.setHeader('Retry-After', String(retryAfter));
     return res.status(429).json({
       success: false,
-      message: "The request queue's full — try again in a few minutes.",
+      message: 'Очередь заказов заполнена — попробуйте через несколько минут.',
       retryAfter,
     });
   }
@@ -949,7 +949,7 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
   resolveRequest(entry).catch(err => {
     queue.log('error', `Request resolution crashed: ${err.message}`);
     entry.status = 'failed';
-    entry.message = 'Something went wrong in the booth — try again.';
+    entry.message = 'В студии что-то пошло не так — попробуйте ещё раз.';
     recordOutcome(entry);
   });
 });

@@ -2363,8 +2363,8 @@ class Queue {
   dedupAck(trackId: string | null | undefined): string {
     const onAir = !!trackId && this.current?.track?.id === trackId;
     return onAir
-      ? `That one's spinning right now — stay tuned.`
-      : `That track's already queued — it's on the way.`;
+      ? 'Эта песня как раз сейчас в эфире.'
+      : 'Этот трек уже в очереди — скоро прозвучит.';
   }
 
   // Honest acknowledgement for a request refused by the repeat cooldown (B6).
@@ -2374,8 +2374,8 @@ class Queue {
   cooldownAck(trackId: string | null | undefined, title: string): string {
     const onAir = !!trackId && this.current?.track?.id === trackId;
     return onAir
-      ? `That one's spinning right now — give it a bit before you ask again.`
-      : `"${title}" just spun — give it a rest for a bit.`;
+      ? 'Эта песня как раз сейчас в эфире — дайте ей доиграть, прежде чем заказывать снова.'
+      : `«${title}» только что звучала — дадим ей немного отдохнуть.`;
   }
 
   // The LEAD-artist keys (artistRootKey — collaborations collapse onto the
