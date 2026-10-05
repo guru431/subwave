@@ -1,10 +1,12 @@
 'use client';
 
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { notify, errorMessage } from '../../../../lib/notify';
 import { adminJson } from '../../../../lib/admin-query';
 import { BlockedTab } from '../BlockedTab';
 import { BlockRulesCard } from '../BlockRulesCard';
+import { FolderGenresCard } from '../FolderGenresCard';
 import { useLibrary } from '../LibraryContext';
 import { libraryKeys } from '../queries';
 import { useAdminMutation, useAdminQuery } from '../useAdminQuery';
@@ -13,6 +15,7 @@ import type { BlockEntry } from '../types';
 export default function BlockedTabContainer() {
   const { restampBlockMarks, removeBlockEntry } = useLibrary();
   const [unblocking, setUnblocking] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   const blocked = useAdminQuery<BlockEntry[]>({
     key: libraryKeys.blocked(),
@@ -58,6 +61,16 @@ export default function BlockedTabContainer() {
           surface, two kinds of block. Self-contained; after a rule change only
           the row marks on the other tabs need re-stamping. */}
       <BlockRulesCard onChanged={() => { void restampBlockMarks(); }} />
+      {/* Folder genres change what Genre rules match, so a save re-stamps the
+          row marks exactly as a rule change does, and refetches the rules card's
+          rules (their match counts move) and folder vocab in place. */}
+      <FolderGenresCard
+        onChanged={() => {
+          void queryClient.invalidateQueries({ queryKey: libraryKeys.blockRules(), exact: true });
+          void queryClient.invalidateQueries({ queryKey: libraryKeys.folders(), exact: true });
+          void restampBlockMarks();
+        }}
+      />
       <BlockedTab
         entries={blocked.data ?? null}
         loading={blocked.isFetching}

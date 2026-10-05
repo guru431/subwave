@@ -41,6 +41,8 @@ export const libraryKeys = {
     ['library', 'scene-references', [...from].sort().join('\u0000'), to] as const,
   playlists: () => ['library', 'playlists'] as const,
   rulePlaylists: () => ['library', 'rule-playlists'] as const,
+  // Fork: the folder tree behind Folder rules and folder genres.
+  folders: () => ['library', 'folders'] as const,
 };
 
 // Row lists cache in three shapes and all three must be handled here: a bare

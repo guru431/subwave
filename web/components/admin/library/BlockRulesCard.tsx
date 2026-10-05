@@ -4,7 +4,7 @@
 // optional seasonal allow-window and show scope. Self-contained: owns its
 // fetching and CRUD against /library/blocklist/rules.
 
-import { useId, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { CalendarRange, Plus, ShieldBan, Snowflake } from 'lucide-react';
 import {
   Controller, useWatch, type Control, type DefaultValues,
@@ -33,6 +33,8 @@ import { useAdminMutation, useAdminQuery } from './useAdminQuery';
 import { settingsKeys } from '../settings/queries';
 import { showKeys } from '../shows/queries';
 import type { SettingsResponse as ShowSettingsResponse } from '../shows/types';
+import { FolderTree } from './FolderTree';
+import { buildFolderTree, displayPath, type FolderStat } from '@/lib/folderTree';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -54,6 +56,7 @@ const FIELD_OPTIONS: Array<{ value: RuleField; label: string; hint: string }> = 
   { value: 'album', label: 'Album name', hint: 'exact name match' },
   { value: 'title', label: 'Track title', hint: 'exact title match' },
   { value: 'playlist', label: 'Playlist', hint: 'blocks every member of the selected Navidrome playlists' },
+  { value: 'folder', label: 'Folder', hint: 'blocks every track inside the chosen folders, subfolders included' },
 ];
 
 // The RHF-bound shape of one rule form: blockRuleSchema's OUTPUT, which also
@@ -82,7 +85,7 @@ const fmtSeason = (s: SeasonWindow) =>
   `${MONTH_SHORT[s.from.month - 1]} ${s.from.day} – ${MONTH_SHORT[s.to.month - 1]} ${s.to.day}`;
 
 // Chip-style multi-value input: type, Enter/comma commits.
-function ValuesInput({ id, values, onChange, placeholder, suggestions }: {
+export function ValuesInput({ id, values, onChange, placeholder, suggestions }: {
   id: string;
   values: string[];
   onChange: (v: string[]) => void;
@@ -144,6 +147,7 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
   const [formOpen, setFormOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [folderQuery, setFolderQuery] = useState('');
   // Picker vocab, loaded with the rules. Failures degrade to free text
   // (genres) or an empty list with a hint (shows, playlists).
   const fieldId = useId();
@@ -178,8 +182,28 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
     parse: raw => (raw as { results?: Array<{ id: string; name: string; songCount: number | null }> })
       .results || [],
   });
+  // Folder picker vocab — the library's folder tree and how many tracks
+  // Navidrome gave no real path, so the picker can say why a folder is missing.
+  // A folder-genre save invalidates this key (BlockedTabContainer).
+  const foldersQuery = useAdminQuery<{ list: FolderStat[]; withoutPath: number }>({
+    key: libraryKeys.folders(),
+    path: '/library/folders',
+    parse: raw => {
+      const j = raw as { folders?: FolderStat[]; withoutPath?: number };
+      return { list: j.folders || [], withoutPath: j.withoutPath || 0 };
+    },
+  });
   const rules = rulesQuery.data ?? (rulesQuery.error ? [] : null);
-  const genres = genresQuery.data ?? [];
+  const folderData = foldersQuery.data;
+  const folderRoot = useMemo(() => buildFolderTree(folderData?.list ?? []), [folderData]);
+  const withoutPath = folderData?.withoutPath ?? 0;
+  // Genres assigned to folders are genres too — offer them beside the tags.
+  const genreData = genresQuery.data;
+  const genres = useMemo(() => {
+    const assigned = (folderData?.list ?? []).flatMap(f => f.genres || []);
+    const base = genreData ?? [];
+    return assigned.length ? [...new Set([...base, ...assigned])] : base;
+  }, [genreData, folderData]);
   const shows = (showsQuery.data?.values?.shows || []).flatMap(show => (
     show.id && show.name ? [{ id: show.id, name: show.name }] : []
   ));
@@ -332,7 +356,11 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
                 <span className="lib-artist block truncate">
                   {FIELD_OPTIONS.find(f => f.value === rule.field)?.label || rule.field}
                   {': '}
-                  {rule.field === 'playlist' ? rule.values.map(playlistNameOf).join(', ') : rule.values.join(', ')}
+                  {rule.field === 'playlist'
+                    ? rule.values.map(playlistNameOf).join(', ')
+                    : rule.field === 'folder'
+                      ? rule.values.map(v => (folderRoot ? displayPath(folderRoot, v) : v)).join(', ')
+                      : rule.values.join(', ')}
                 </span>
               </span>
               <span className="hidden items-center gap-2.5 text-[11px] text-muted sm:flex">
@@ -438,6 +466,41 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
               render={({ field, fieldState }) => {
                 const baseId = `${fieldId}-values`;
                 const aria = fieldAria(baseId, fieldState.error);
+                if (fieldWatch === 'folder') {
+                  const selected = field.value;
+                  return (
+                    <div className="field">
+                      <Label {...aria.labelledByProps}>Folders</Label>
+                      {folderRoot === null ? (
+                        <div className="field-hint">No folders yet — they appear after Reconcile with Navidrome, once Navidrome reports real paths to the station.</div>
+                      ) : (
+                        <div {...aria.groupProps} className="grid gap-2">
+                          <Input
+                            value={folderQuery}
+                            onChange={e => setFolderQuery(e.target.value)}
+                            placeholder="find a folder…"
+                            aria-label="find a folder"
+                          />
+                          <FolderTree
+                            root={folderRoot}
+                            query={folderQuery}
+                            checked={selected}
+                            onToggle={path => field.onChange(
+                              selected.includes(path) ? selected.filter(v => v !== path) : [...selected, path],
+                            )}
+                            renderMeta={n => <span className="mono-num text-[10px] text-muted">{n.total}</span>}
+                          />
+                        </div>
+                      )}
+                      {withoutPath > 0 && (
+                        <div className="field-hint mt-1">
+                          {withoutPath === 1 ? '1 track has' : `${withoutPath} tracks have`} no real path — folder rules and folder genres cannot see them.
+                        </div>
+                      )}
+                      {fieldState.error && <FieldError {...aria.errorProps} errors={[fieldState.error]} />}
+                    </div>
+                  );
+                }
                 if (fieldWatch === 'playlist') {
                   return (
                     <div className="field">
