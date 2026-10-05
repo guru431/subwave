@@ -207,25 +207,6 @@ export function linkClockStampFor(
   return airAt && clockOffered ? airAt : null;
 }
 
-// Seconds from NOW until the pick being made will start airing — the lead the
-// show look-ahead adds to the wall clock (see runPickCycle).
-//
-// Measured from the on-air track's REMAINING time, never its full duration. The
-// pick cycle doesn't only run at a track start — the pair-drain deadline
-// backstop fires it ~2 min from the end, and boot recovery fires it part-way
-// through a track. Full duration there overstates the lead by everything already
-// elapsed, walking `showAt` across the next schedule boundary while the real
-// next track still starts inside the current show: that aired a handoff
-// five-plus minutes early, over the middle of a song, with the session flipped
-// to a show `/now-playing` still reported as the old one (#1205).
-//
-//  - `heldSec` null → the pick follows the ON-AIR track: lead = its remaining.
-//  - `heldSec` set  → the deadline path, where the pick follows a HELD track
-//                     queued behind the on-air one: lead = remaining + held.
-//
-// Unknown clock (no start stamp, no duration) or a held track of unknown
-// length → null, i.e. no look-ahead at all, the pre-look-ahead behaviour.
-// Clamped at 0 so a track past its cue-out can't pull `showAt` backwards.
 // How many more tracks the pick cycle should add so `upcoming` reaches the
 // configured depth. Pure and exported so the rule can be pinned without a live
 // session, a persona or Liquidsoap — queue.ts is 2500 lines and this rule is
@@ -250,6 +231,25 @@ export function topUpDepth(opts: { lookahead: number; queued: number; sameShow: 
   return missing;
 }
 
+// Seconds from NOW until the pick being made will start airing — the lead the
+// show look-ahead adds to the wall clock (see runPickCycle).
+//
+// Measured from the on-air track's REMAINING time, never its full duration. The
+// pick cycle doesn't only run at a track start — the pair-drain deadline
+// backstop fires it ~2 min from the end, and boot recovery fires it part-way
+// through a track. Full duration there overstates the lead by everything already
+// elapsed, walking `showAt` across the next schedule boundary while the real
+// next track still starts inside the current show: that aired a handoff
+// five-plus minutes early, over the middle of a song, with the session flipped
+// to a show `/now-playing` still reported as the old one (#1205).
+//
+//  - `heldSec` null → the pick follows the ON-AIR track: lead = its remaining.
+//  - `heldSec` set  → the deadline path, where the pick follows a HELD track
+//                     queued behind the on-air one: lead = remaining + held.
+//
+// Unknown clock (no start stamp, no duration) or a held track of unknown
+// length → null, i.e. no look-ahead at all, the pre-look-ahead behaviour.
+// Clamped at 0 so a track past its cue-out can't pull `showAt` backwards.
 export function pickLeadSec(remainingSec: number | null, heldSec: number | null = null): number | null {
   if (typeof remainingSec !== 'number' || !Number.isFinite(remainingSec)) return null;
   const rem = Math.max(0, remainingSec);
