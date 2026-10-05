@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { notify, errorMessage } from '../../../../lib/notify';
 import { BlockedTab } from '../BlockedTab';
 import { BlockRulesCard } from '../BlockRulesCard';
+import { FolderGenresCard } from '../FolderGenresCard';
 import { useLibrary } from '../LibraryContext';
 import { libraryKeys } from '../queries';
 import { useAdminMutation, useAdminQuery } from '../useAdminQuery';
@@ -12,6 +13,9 @@ import type { BlockEntry } from '../types';
 export default function BlockedTabContainer() {
   const { restampBlockMarks, removeBlockEntry } = useLibrary();
   const [unblocking, setUnblocking] = useState<string | null>(null);
+  // Bumped by a folder-genre save, so the rules card re-reads its rules (their
+  // match counts move with folder genres) and its folder vocab in place.
+  const [folderGenresTick, setFolderGenresTick] = useState(0);
 
   const blocked = useAdminQuery<BlockEntry[]>({
     key: libraryKeys.blocked(),
@@ -58,7 +62,10 @@ export default function BlockedTabContainer() {
       {/* Attribute rules above the id entries — one "why won't this air"
           surface, two kinds of block. Self-contained; after a rule change only
           the row marks on the other tabs need re-stamping. */}
-      <BlockRulesCard onChanged={() => { void restampBlockMarks(); }} />
+      <BlockRulesCard reloadTick={folderGenresTick} onChanged={() => { void restampBlockMarks(); }} />
+      {/* Folder genres change what Genre rules match, so a save re-stamps the
+          row marks exactly as a rule change does, and reloads the rules card. */}
+      <FolderGenresCard onChanged={() => { setFolderGenresTick(t => t + 1); void restampBlockMarks(); }} />
       <BlockedTab
         entries={blocked.data ?? null}
         loading={blocked.isFetching}

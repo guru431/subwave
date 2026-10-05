@@ -40,6 +40,9 @@ export const RULE_FIELDS = [
   'album',
   'title',
   'playlist',
+  // An absolute folder path (Navidrome's real path with Report Real Path on):
+  // blocks every track under it, subfolders included.
+  'folder',
 ] as const;
 
 export type RuleField = (typeof RULE_FIELDS)[number];
@@ -47,6 +50,9 @@ export type RuleField = (typeof RULE_FIELDS)[number];
 export const RULES_MAX = 50;
 export const RULE_VALUES_MAX = 12;
 export const RULE_TEXT_MAX = 64;
+// A folder rule's value is a path, not a name — real library paths run well
+// past RULE_TEXT_MAX (".../Sorted (mp3_320)/<genre>/<artist>/<year> - <album>").
+export const RULE_PATH_MAX = 512;
 
 /** Id-entry granularity — a blocked track, its album, or its artist. */
 export const BLOCK_TYPES = ['track', 'album', 'artist'] as const;
@@ -140,16 +146,24 @@ export const blockRuleSchema = z.object({
           ctx.addIssue({ code: 'custom', message: 'rule.values entries must be strings' });
           return z.NEVER;
         }
-        const t = v.trim();
+        // A path (a Folder rule value) is kept exactly, trailing whitespace
+        // included: a real folder name may end in a space, and trimming it would
+        // aim the rule at a different folder. Names are trimmed and deduped
+        // loosely as before; their matching goes through normText/normGenre.
+        const lead = v.trimStart();
+        const isPath = lead.startsWith('/');
+        const t = isPath ? lead : lead.trimEnd();
         if (!t) continue;
-        if (t.length > RULE_TEXT_MAX) {
+        // The outer cap is the path one; names get RULE_TEXT_MAX back in the
+        // object-level check below, the only place that knows the field.
+        if (t.length > RULE_PATH_MAX) {
           ctx.addIssue({
             code: 'custom',
-            message: `rule.values entries must be at most ${RULE_TEXT_MAX} chars`,
+            message: `rule.values entries must be at most ${RULE_PATH_MAX} chars`,
           });
           return z.NEVER;
         }
-        const key = normText(t);
+        const key = isPath ? t : normText(t);
         if (seen.has(key)) continue;
         seen.add(key);
         out.push(t);
@@ -183,6 +197,15 @@ export const blockRuleSchema = z.object({
       ])
       .default([]),
   ),
+}).superRefine((rule, ctx) => {
+  if (rule.field === 'folder') return;
+  if (rule.values.some((v) => v.length > RULE_TEXT_MAX)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['values'],
+      message: `rule.values entries must be at most ${RULE_TEXT_MAX} chars`,
+    });
+  }
 });
 
 export type BlockRulePatch = z.output<typeof blockRuleSchema>;
@@ -2191,6 +2214,13 @@ export const CROSSFADE_DURATION_BOUNDS: SettingsNumericBound = { min: 0, max: 30
 export const LOUDNESS_TARGET_LUFS_BOUNDS: SettingsNumericBound = { min: -23, max: -9 };
 // 0 disables boosting entirely (cut-only levelling); 12 dB is plenty.
 export const LOUDNESS_MAX_BOOST_DB_BOUNDS: SettingsNumericBound = { min: 0, max: 12 };
+
+// Queue look-ahead: how many tracks the controller picks in advance. 1 is
+// upstream behaviour (the pick happens in the last moment). The ceiling of 10
+// is not a technical limit but an honest one: every extra track costs its own
+// agent call, and it is chosen under the CURRENT hour — by the tenth step
+// that hour is somebody else.
+export const QUEUE_LOOKAHEAD_BOUNDS: SettingsNumericBound = { min: 1, max: 10 };
 // 0 disables burst-on-connect; past 60 a listener is a full minute behind the
 // live edge and <queue-size> (which must exceed the burst) gets unreasonable.
 // Named rather than inline because settings.load() bounds the stored value
@@ -2278,6 +2308,13 @@ export const loudnessPatchSchema = settingsBlockOf({
   source: settingsStrictOneOf(
     SETTINGS_LOUDNESS_SOURCES,
     `loudness.source must be one of: ${SETTINGS_LOUDNESS_SOURCES.join(', ')}`,
+  ),
+});
+
+export const queuePatchSchema = settingsBlockOf({
+  lookahead: settingsIntLike(
+    QUEUE_LOOKAHEAD_BOUNDS,
+    `queue.lookahead must be integer in [${QUEUE_LOOKAHEAD_BOUNDS.min}, ${QUEUE_LOOKAHEAD_BOUNDS.max}]`,
   ),
 });
 
