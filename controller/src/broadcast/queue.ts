@@ -3396,6 +3396,10 @@ class Queue {
     const isAutonomous = this.current.source === 'auto' || this.current.source === 'ai';
     if (this.autoPick && this.upcoming.length === 0 && !this.pickerBusy && djCallsAllowed()) {
       this.runPickCycle({ isAutonomous });
+    } else if (this.upcoming.length > 0) {
+      // The queue is not empty, so no ordinary pick fires on this seam — and
+      // with it no link. Write one here instead, on the same cadence.
+      this.maybeWriteSeamLink(isAutonomous);
     }
     if (this.autoPick && !this.pickerBusy && djCallsAllowed()
                && this.topUpWanted() > 0) {
@@ -3405,6 +3409,34 @@ class Queue {
       // itself (see its finally block).
       this.runPickCycle({ isAutonomous, topUp: true });
     }
+  }
+
+  // The link cadence on a seam where no pick happens (queue depth > 1). Counts
+  // down the same `tracksUntilLink` the pick path uses, so the DJ speaks just
+  // as often as before the queue got deep — the line is simply written for a
+  // track that is already chosen.
+  maybeWriteSeamLink(isAutonomous: boolean) {
+    if (!this.autoLink || !isAutonomous || !this.history[0]) return;
+    if (!djCallsAllowed() || !autoVoiceAllowed()) return;
+    // A show handoff waiting to air owns the next seam, the same rule the pick
+    // path follows (`wantLink && !finalTrackHandoff`): the outgoing host's link
+    // cannot follow the mic-pass.
+    if (session.pendingHandoff()) return;
+    this.tracksUntilLink--;
+    if (this.tracksUntilLink > 0) return;
+    this.tracksUntilLink = pickLinkInterval();
+    const idx = this.upcoming.findIndex(i => !i.sent);
+    if (idx < 0) return;                       // everything is already handed over
+    const item = this.upcoming[idx];
+    // A request brings its own line, and a track that already has one is not
+    // written over — a second line would simply replace the first unheard.
+    if (item.introScript || item.requestedBy) return;
+    const previous = idx > 0 ? this.upcoming[idx - 1].track : this.current?.track;
+    if (!previous) return;
+    // Fire-and-forget, like the pick cycle: the seam must not wait on the LLM.
+    djAgent.writeSeamLink(this, item, previous).catch(err => {
+      this.log('error', `Seam link failed: ${(err as Error).message}`);
+    });
   }
 
   async runArmedBoundaryHandoff({

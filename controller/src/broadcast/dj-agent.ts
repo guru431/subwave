@@ -29,7 +29,7 @@ import { resolveShowPlaylistPool, resolveExcludedPlaylistIds } from '../music/sh
 import * as library from '../music/library.js';
 import * as subsonic from '../music/subsonic.js';
 import * as dj from '../llm/dj.js';
-import { energyForDaypart, getClockContext, getDateContext, getTimeContext } from '../context.js';
+import { energyForDaypart, getClockContext, getDateContext, getTimeContext, getFullContext } from '../context.js';
 import { linkClockAt, linkClockStampFor } from './queue/pure.js';
 import { djObject, nearestId, modelTolerant } from '../llm/sdk.js';
 import * as budget from './dj-budget.js';
@@ -694,6 +694,66 @@ async function pickViaPool(queue, ctx, { wantLink, pickAnchor, showAt = null }: 
     meta: { trackId: result.song.id, title: result.song.title, artist: result.song.artist },
   });
   return 'queued';
+}
+
+// Write a link for a track that is ALREADY queued — the seam path.
+//
+// The ordinary link rides a pick (runTrackEvent → enqueuePick), which is fine
+// while `upcoming` holds a single track: every seam brings a pick. With queue
+// depth the pick happens on the top-up, several tracks before the seam, and a
+// line written there would carry a `linkPrev` that is not what will actually
+// play before it. So the seam writes its own line, for the first UNSENT item:
+// unsent means Liquidsoap has not been handed it yet, so the render still
+// lands, and the item ahead of it in the queue is exactly what it follows.
+//
+// The line goes through the same seam as a pick's link (generatePickLink): the
+// author is captured at the model call and the line is voided if the host
+// epoch moved while it was in flight; the item gets the same fields push()
+// stamps on a link (author, host-speech stamp, session key, back-announce).
+export async function writeSeamLink(queue, item, previous): Promise<boolean> {
+  const ctx = await getFullContext();
+  // The line airs when THIS item starts — after the on-air track AND any item
+  // already handed to Liquidsoap ahead of it — with the same honesty about an
+  // unknown clock as the pick path. seamLinkShowAt adds the show padding that
+  // linkClockAt takes back off; without it the forecast ran two minutes early.
+  const now = Date.now();
+  const airAt = linkClockAt(seamLinkShowAt(queue.remainingUntilItemAirs(item), now), now);
+  const generated = await generatePickLink({
+    previous, current: item.track, context: speechClockContext(ctx, airAt),
+    clockIsAirTime: !!airAt,
+    recap: queue.getDjRecap(), recentTracks: queue.getRecentTracks(),
+    recentOpeners: queue.getRecentOpeners(),
+    lastLink: queue.getLastLinkText(),
+  });
+  const trimmed = dropEchoedLink(trimLinkToIntro(generated.link, item.track, generated.introPersona), queue);
+  if (!trimmed) return false;
+  item.introScript = trimmed;
+  item.introLabelChecked = true;
+  item.introKind = 'link';
+  item.introPersona = generated.introPersona;
+  item.introHostSpeech = generated.hostSpeech;
+  item.introSessionKey = generated.hostSpeech?.showKey ?? session.getSession()?.key ?? null;
+  // The same shape push() stores: airIntro's stale-link guard compares it with
+  // what actually played before this item.
+  item.linkPrev = previous
+    ? { id: previous.id ?? null, title: previous.title ?? null, artist: previous.artist ?? null }
+    : null;
+  // Stamped only when a clock was OFFERED, exactly as the pick paths do: a
+  // line written under the station clock ban names no time, and the drift
+  // guard must not drop it for naming the wrong one.
+  item.linkClockAt = linkClockStampFor(airAt, speakClockAllowed())?.getTime() ?? null;
+  queue.persist();
+  queue.log('link', trimmed);
+  // The drain renders a WAV when it hands an item over, but the seam item is
+  // handed over in the very tick the seam fires — long before the model
+  // returns this line — so the drain found no script, and airIntro rendered it
+  // at AIR time: the host spoke 20s into the song, or a busy TTS answered 503
+  // and the line never aired. The line is known minutes ahead of its seam, so
+  // render it now. An unsent item is still the drain's to render.
+  if (item.sent && queue.upcoming.includes(item) && !item.introWav && autoVoiceAllowed()) {
+    await queue.prerenderIntro(item);
+  }
+  return true;
 }
 
 // Called by the queue watcher when an autonomous track starts and the queue is
