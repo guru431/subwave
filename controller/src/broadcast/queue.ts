@@ -1005,9 +1005,7 @@ class Queue {
     // pick it was written for (see the push() header and #189). Studio pushes
     // share the behaviour — queueing a track by hand means wanting it soon.
     const jumpsAhead = !aiPicked && !!requestedBy;
-    const insertAt = jumpsAhead
-      ? this.upcoming.findIndex(i => !i.sent && i.aiPicked)
-      : -1;
+    const insertAt = jumpsAhead ? this.requestInsertIndex() : -1;
     if (insertAt >= 0) this.upcoming.splice(insertAt, 0, item);
     else this.upcoming.push(item);
     // Position of THIS item, not the tail: callers report it to the listener
@@ -1025,6 +1023,22 @@ class Queue {
     this.persist();
     this.drainToLiquidsoap();  // fire-and-forget
     return position;
+  }
+
+  // Fork: where a jumping request goes — before the first unsent auto-pick,
+  // unless that pick is already PAIRED with what plays before it: a stem seam
+  // (its head is mixed into the clip ahead of it), or, under the pair-aware
+  // drain, the successor the sent item (or the on-air track, for the head of
+  // the queue) was stamped against. Splitting such a pair airs that track's
+  // transition into the wrong song, so the request waits one slot more.
+  // -1 = append.
+  requestInsertIndex(): number {
+    const first = this.upcoming.findIndex(i => !i.sent && i.aiPicked);
+    if (first < 0) return -1;
+    const before = first > 0 ? this.upcoming[first - 1].sent : !!this.current;
+    const paired = !!this.upcoming[first].stemSeam || (this.pairDrainActive() && before);
+    if (!paired) return first;
+    return this.upcoming.findIndex((i, k) => k > first && !i.sent && i.aiPicked);
   }
 
   // A request the MIXER will silently eat (#1594). Log only — nothing is
@@ -3416,6 +3430,10 @@ class Queue {
   // track that is already chosen.
   maybeWriteSeamLink(isAutonomous: boolean) {
     if (!this.autoLink || !isAutonomous || !this.history[0]) return;
+    // Depth 1 is upstream's behaviour: an item waiting at track start is a
+    // pair-held pick or a request, and the pick path counts the cadence down
+    // itself — counting here too would halve how often the DJ speaks.
+    if ((Number((settings.get() as any)?.queue?.lookahead) || 1) <= 1) return;
     if (!djCallsAllowed() || !autoVoiceAllowed()) return;
     // A show handoff waiting to air owns the next seam, the same rule the pick
     // path follows (`wantLink && !finalTrackHandoff`): the outgoing host's link
