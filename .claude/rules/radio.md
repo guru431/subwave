@@ -1,7 +1,10 @@
 # radio — форк SUB/WAVE: наша часть
 
 Репозиторий — форк апстрима (`upstream` = perminder-klair/subwave). `CLAUDE.md`,
-`AGENTS.md`, `.claude/skills/` в корне — апстрима, их не правим. Наше — `station/`,
+`AGENTS.md`, `.claude/skills/` в корне — апстрима, их не правим. Исключение — настоящая
+ошибка, на которой встаёт CI-гейт публикации: `.claude/skills/subwave-llm-bench/scripts/assess-models.sh`
+(SC2259 — heredoc перебивал pipe, раздел failure reasons был всегда пуст; 2026-10-06).
+При слиянии апстрима: исправил сам — берём его версию. Наше — `station/`,
 этот файл и блок в конце `.gitignore`. Конкретика установки (хосты, SSH, пути,
 голоса) — `CLAUDE.local.md` (вне git); хуки обезличивания — в `.git/hooks`.
 
