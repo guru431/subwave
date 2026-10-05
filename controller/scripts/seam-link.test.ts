@@ -4,10 +4,11 @@
 //    take tens of seconds. By the time the line comes back the item may have
 //    aired, been cancelled, or got a line of its own (a request intro, a pick's
 //    link). The line is then dropped — no fields, no persist, no render.
-//  * maybeWriteSeamLink spends the shared `tracksUntilLink` cadence only when
-//    it actually writes. A seam with nothing to write for (everything handed
-//    over, a request or a scripted item at the head) leaves the counter due,
-//    so the next eligible seam speaks instead of waiting a whole interval.
+//  * maybeWriteSeamLink resets the shared `tracksUntilLink` cadence on the
+//    write ATTEMPT (a failed model call still spends it — no retry on every
+//    seam). It is not spent only when there is nothing to write for
+//    (everything handed over, a request or a scripted item at the head, no
+//    predecessor): the counter stays due and the next eligible seam speaks.
 // Only the model and the weather are faked.
 // Run: npm test -- seam-link
 

@@ -3468,8 +3468,13 @@ class Queue {
     this.tracksUntilLink--;
     if (this.tracksUntilLink > 0) return;
     // Every return below leaves the counter DUE (≤ 0): a seam with nothing to
-    // write for must not spend the interval, or the next eligible seam would
-    // wait a whole one more. It resets only when a line is actually written.
+    // write for (all handed over, a request or a scripted item at the head, no
+    // predecessor) must not spend the interval, or the next eligible seam
+    // would wait a whole one more. The interval IS spent on the write ATTEMPT,
+    // even if writeSeamLink then comes back empty (model failure, host epoch,
+    // echo, stale item, trimmed to nothing): retrying on every seam would hit
+    // a failing LLM once per track, and the default provider must not be
+    // retried aggressively.
     const idx = this.upcoming.findIndex(i => !i.sent);
     if (idx < 0) return;                       // everything is already handed over
     const item = this.upcoming[idx];
