@@ -265,13 +265,15 @@ test('the forecast counts a bed queued ahead, which is not an upcoming entry', a
     startedAt: new Date().toISOString(),
   } as any;
   await queue.push({ track: { id: 'link', title: 'Linked', duration: 200 }, requestedBy: null, aiPicked: true });
+  // The bed is decided at the item's own drain, so mark it sent the way
+  // drainToLiquidsoap does. Fork: BEFORE the request arrives — a request jumps
+  // an UNSENT auto-pick (C01), and only a handed-over one stays ahead of it.
+  queue.upcoming[0].sent = true;
   await queue.push({ track: { id: 'req', title: 'Req', duration: 200 }, requestedBy: 'alice' });
   const request = queue.upcoming[1];
+  assert.equal(request.track.id, 'req');
 
   const bare = queue.airForecastSec(request)!;
-  // The bed is decided at the item's own drain, so mark it sent and bedded the
-  // way drainToLiquidsoap does.
-  queue.upcoming[0].sent = true;
   queue.upcoming[0].bedDelaySec = 24;
   assert.equal(queue.airForecastSec(request), bare + 24, 'the link\'s bed pushes the request back');
 });
@@ -331,9 +333,12 @@ test('an unsent item ahead contributes no bed, because it has none yet', async (
     track: { id: 'onair', title: 'On air', duration: 100 },
     startedAt: new Date().toISOString(),
   } as any;
-  await queue.push({ track: { id: 'link', title: 'Linked', duration: 200 }, requestedBy: null, aiPicked: true });
+  // Fork: the unsent item ahead is an earlier request — a request jumps an
+  // unsent AUTO-pick (C01), so only another request can stay unsent ahead of it.
+  await queue.push({ track: { id: 'earlier', title: 'Earlier', duration: 200 }, requestedBy: 'bob' });
   await queue.push({ track: { id: 'req', title: 'Req', duration: 200 }, requestedBy: 'alice' });
   const request = queue.upcoming[1];
+  assert.equal(request.track.id, 'req');
   const bare = queue.airForecastSec(request)!;
   // Stamped but never drained: nothing is in next.txt for it.
   queue.upcoming[0].sent = false;
