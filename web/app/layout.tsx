@@ -6,6 +6,7 @@ import { GoogleAnalytics } from '@next/third-parties/google';
 import { THEME_INIT_SCRIPT } from '@/lib/theme';
 import { LITE_INIT_SCRIPT } from '@/lib/lite';
 import { SKIN_INIT_SCRIPT } from '@/lib/skin';
+import { INSTALL_INIT_SCRIPT } from '@/lib/install';
 import { SITE_URL } from '@/lib/site';
 import { GA_ID } from '@/lib/ga';
 import ServiceWorkerRegister from '@/components/ServiceWorkerRegister';
@@ -201,6 +202,25 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         {/* Hide the player shell before paint when this browser resolves to a
             non-default skin. Static constant from lib/skin. */}
         <script dangerouslySetInnerHTML={{ __html: SKIN_INIT_SCRIPT }} />
+
+        {/* Catch the browser's install event before hydration — on a repeat
+            visit it can fire while React is still booting, and a missed one
+            means no install offer at all. Static constant from lib/install —
+            no untrusted input. */}
+        <script dangerouslySetInnerHTML={{ __html: INSTALL_INIT_SCRIPT }} />
+
+        {/* Chromium resolves the web manifest ONLY from a <link> inside <head>.
+            The Metadata API emits one, but on this force-dynamic page Next
+            streams its whole metadata block into the BODY — measured on the live
+            station: </head> ends at byte 7186, Next's manifest link lands at
+            41881. So the browser saw no manifest at all, the page was never
+            installable, `beforeinstallprompt` never fired, and no install offer
+            could appear anywhere in Chrome or Edge. (Safari is lenient and reads
+            the apple-* metas from the body, which is why iOS installed fine and
+            hid the problem.) Same class of defect as the share-card tags below,
+            fixed the same way: hand-written here, in the head. Next's duplicate
+            further down the document is ignored — the first link in head wins. */}
+        <link rel="manifest" href="/manifest.webmanifest" />
 
         <JsonLd data={SITE_JSONLD} />
 
