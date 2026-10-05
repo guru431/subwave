@@ -1,0 +1,9 @@
+{
+  "entries": [
+    { "folder": "<music-mount>/Unsorted/!Помойка русская", "genres": ["Поп"] },
+    { "folder": "<music-mount>/Unsorted/!Помойка Русский Рок", "genres": ["Рок"] },
+    { "folder": "<music-mount>/Unsorted/!Помойка зарубежная", "genres": ["Pop", "Rock"] },
+    { "folder": "<music-mount>/Unsorted/Classic", "genres": ["Classical"] },
+    { "folder": "<music-mount>/Unsorted/СЛОТ - ОркестрА", "genres": ["Рок"] }
+  ]
+}

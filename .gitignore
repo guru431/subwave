@@ -69,5 +69,7 @@ __pycache__/
 /station/.env
 /station/tts-f5/voices/
 /station/tts-bridge/refs/
+# апстрим игнорирует любой docker-compose.override.yml — наш шаблон в git нужен
+!/station/deploy/docker-compose.override.yml
 __pycache__/
 .pytest_cache/

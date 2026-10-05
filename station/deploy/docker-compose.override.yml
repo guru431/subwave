@@ -1,0 +1,96 @@
+# Локальные правки к апстримному docker-compose.yml subwave.
+# Отдельным файлом, а не правкой оригинала: обновление чекаута затрёт правки,
+# а override compose подхватывает сам (`docker compose up -d` без явного -f).
+#
+# Зачем: в образе контроллера лежит один голос Piper — `en_GB-alan-medium`,
+# в Kokoro русского нет вовсе. При недоступности Chatterbox на gpu-host (а он
+# недоступен by design до логона на машине) ведущий читал русский текст
+# английским голосом. Каталог с голосами вынесен на хост, в него доложен
+# `ru_RU-dmitri-medium` с HuggingFace (rhasspy/piper-voices).
+#
+# Каталог собирается один раз:
+#   mkdir -p <deploy-dir>/subwave/piper-voices
+#   docker cp sub-wave-controller:/opt/piper/voices/en_GB-alan-medium.onnx      <тот каталог>/
+#   docker cp sub-wave-controller:/opt/piper/voices/en_GB-alan-medium.onnx.json <тот каталог>/
+#   B=https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU/dmitri/medium
+#   curl -fsSL -O "$B/ru_RU-dmitri-medium.onnx" -O "$B/ru_RU-dmitri-medium.onnx.json"
+#
+# Английский голос копируется обязательно: монтирование подменяет весь каталог
+# `/opt/piper/voices`, и без копии персона с англоязычным голосом потеряет файл.
+
+# Второе: интерфейс плеера по-русски. У subwave нет i18n вовсе — ни каталога
+# переводов, ни языковой настройки (`locale` принимает только `en-GB`/`en-US` и
+# управляет форматом времени, не языком). Строки лежат прямо в компонентах,
+# поэтому перевод — это свой образ web, собранный из форка: апстримный тег и
+# наши коммиты поверх него. Что изменено и порядок обновления —
+# station/docs/web-changes.md.
+#
+# Образ собирается на хосте станции из клона ~/radio и живёт только локально
+# (в реестр не публикуется):
+#   docker build -f web/Dockerfile -t subwave-web:1.17.0-ru \
+#     --build-arg SUBWAVE_BUILD_VERSION=1.17.0-ru .
+# Тег обязан совпадать с версией апстрима, из которой собран: иначе после
+# `compose pull` окажется, что контроллер уехал вперёд, а интерфейс остался
+# старым, и понять это будет не по чему.
+
+# Третье: свой образ контроллера. Заказ слушателя у апстрима уходит в хвост
+# очереди и ждёт всю пачку авто-пиков; заказчику нужно, чтобы он играл сразу
+# после текущего трека. Снаружи это не настраивается — очередь ведёт сам
+# контроллер. Что изменено и порядок обновления — station/docs/controller-changes.md.
+#
+#   docker build -f docker/Dockerfile.controller -t subwave-controller:1.17.0-ru .
+#
+# Тег точно так же обязан совпадать с версией апстрима.
+
+services:
+  controller:
+    image: subwave-controller:1.17.0-ru
+    # Свой образ собран локально — не тянуть из реестра.
+    pull_policy: never
+    volumes:
+      - ./piper-voices:/opt/piper/voices:ro
+
+  web:
+    image: subwave-web:1.17.0-ru
+    # Свой образ собран локально — не пытаться тянуть его из реестра.
+    pull_policy: never
+
+  # Четвёртое: комната. Чат станции — отдельный контейнер, а не часть
+  # контроллера: у апстрима такого понятия нет вовсе, а слушателю нужен путь,
+  # открытый без админского пароля. Образ собирается из station/room
+  # (docker build -t subwave-room:2 station/room), база — SQLite на томе
+  # хоста: на CIFS она повреждается.
+  #
+  # Учётка Navidrome та же, что у контроллера, и берётся из `.env` — комната
+  # ходит в Subsonic только на чтение, ради сверки заказа с коллекцией.
+  room:
+    image: subwave-room:2
+    pull_policy: never
+    container_name: sub-wave-room
+    restart: unless-stopped
+    environment:
+      ROOM_DB: /data/room.db
+      RETENTION_DAYS: "14"
+      RATE_SECONDS: "60"
+      RATE_MAX: "10"
+      NAVIDROME_URL: ${NAVIDROME_URL}
+      NAVIDROME_USER: ${NAVIDROME_USER}
+      NAVIDROME_PASS: ${NAVIDROME_PASS}
+      # Адрес станции в подписи Web Push (https://<домен> или mailto:) — обязателен:
+      # умолчания в коде комнаты нет, без него комната не стартует.
+      PUSH_SUBJECT: ${PUSH_SUBJECT}
+      # Адрес контроллера внутри сети стека. Литералом, а не ${...}: у room нет
+      # `env_file`, поэтому запись только в .env до контейнера не доедет вовсе,
+      # а `${CONTROLLER_URL}` без дефолта при незаданной переменной даёт пустую
+      # строку и одно предупреждение compose. Путь без /api — его снимает Caddy.
+      CONTROLLER_URL: http://controller:7701
+    volumes:
+      - ./room:/data
+
+  # Caddy подменяется ФАЙЛОМ, а не образом: Dockerfile.caddy апстрима состоит
+  # из одной строки COPY с комментарием «mount your own file over
+  # /etc/caddy/Caddyfile». Свой файл — копия апстримного с одним маршрутом
+  # /room/*; обновлять его надо вместе с тегом апстрима (см. caddy/Caddyfile).
+  caddy:
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro

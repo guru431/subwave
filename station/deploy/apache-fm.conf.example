@@ -1,0 +1,136 @@
+# Шаблон: <station-domain>, <https-port> и т.п. подставить значениями своей установки
+# Станция наружу — https://<station-domain>
+#
+# Подключается ОДНОЙ строкой в самый конец <apache-dir>/apache2.conf:
+#
+#     IncludeOptional <deploy-dir>/deploy/apache-fm.conf
+#
+# Здесь целые vhost'ы, а не <Location>, поэтому строка идёт на верхнем уровне
+# файла, а не внутрь чужого <VirtualHost> (как у соседнего navidrome).
+#
+# ВНИМАНИЕ: живой конфиг Apache здесь — <apache-dir>/apache2.conf, а
+# /etc/apache2/apache2.conf это однострочник с Include. Каталоги
+# /etc/apache2/sites-enabled и /etc/apache2/ports.conf НЕ читаются: a2ensite
+# и правка ports.conf там — no-op (configtest при этом бодро говорит «Syntax OK»).
+#
+# ПОЧЕМУ ВООБЩЕ ПРАВИМ ОБЩИЙ КОНФИГ. station/docs/deploy.md фиксировал
+# обратное решение: внутренний роутер стека — Caddy на :7700, чужой рабочий
+# Apache не трогаем. Оно отменено ровно по записанному там условию — появился
+# внешний вход по имени. Caddy при этом остаётся на месте: Apache отдаёт ему
+# запрос целиком и в маршрутизацию (/api/*, /stream.*, Next.js) не лезет.
+# Поверхностей от этого не прибавилось: :7700 как был открыт в LAN, так и остаётся.
+#
+# ЗАЧЕМ ЭТО НУЖНО. Плеер subwave — готовое PWA: апстрим отдаёт
+# /manifest.webmanifest (display standalone, иконки, в том числе maskable) и
+# свой /sw.js. Не устанавливался он по одной причине — service worker требует
+# защищённого контекста, а станция жила на http:// по адресу в LAN. Этот файл
+# и есть включатель: домен + TLS.
+#
+# Сертификат — общий wildcard: /etc/letsencrypt/live/<domain-2>/ содержит SAN
+# *.<domain>, отдельный выпуск для <station-domain> не нужен и продления не требует.
+# Порт <https-port> — HTTPS этого хоста, 443 приходит на него через NAT.
+
+
+# <station-domain> :80 — только редирект на https.
+# Нужен отдельным vhost'ом: у общего редиректа с `ServerName <domain>` алиаса
+# *.<domain> нет, и без этого блока http://<station-domain> попадает в первый vhost
+# *:80 — adblock-заглушку, которая уводит запрос в гифку.
+<VirtualHost *:80>
+    ServerName <station-domain>
+    CustomLog "/var/log/apache2/<station-domain>(80)-access.log" combined env=!loopback
+    ErrorLog  "/var/log/apache2/<station-domain>(80)-errors.log"
+
+    RewriteEngine On
+    RewriteRule ^/(.*)$ https://<station-domain>/$1 [R=301,L]
+</VirtualHost>
+
+
+<VirtualHost *:<https-port>>
+    ServerName <station-domain>
+    CustomLog "/var/log/apache2/<station-domain>(<https-port>)-access.log" combined env=!loopback
+    ErrorLog  "/var/log/apache2/<station-domain>(<https-port>)-errors.log"
+
+    SSLEngine on
+    SSLCertificateFile    /etc/letsencrypt/live/<domain-2>/cert.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/<domain-2>/privkey.pem
+    SSLCertificateChainFile  /etc/letsencrypt/live/<domain-2>/chain.pem
+
+    ProxyPreserveHost On
+    # mod_proxy_http сам X-Forwarded-Proto не ставит, а Next.js по нему решает,
+    # какой схемой строить абсолютные адреса. Без этого заголовка метаданные
+    # уезжают на http, и установка PWA ловит смешанный контент.
+    #
+    # До контроллера заголовок не доходит: Caddy стека перезаписывает
+    # X-Forwarded-* для пиров вне своего trusted_proxies (там только сети
+    # Cloudflare), а Apache туда не входит. Следствие — все внешние слушатели
+    # приходят в Icecast и в таблицу Listeners одним адресом, адресом docker-шлюза,
+    # и per-IP лимиты контроллера считаются на всех сразу. Лечится доверием к
+    # адресу Apache в Caddyfile, но у этого свой риск: :7700 открыт в LAN, и
+    # оттуда заголовок можно подделать. Оставлено как есть осознанно.
+    RequestHeader set X-Forwarded-Proto "https"
+
+    # ─── Роботы ───────────────────────────────────────────────────────────────
+    # Свой robots.txt вместо апстримного (тот отдаёт `Allow: /`). Станция открыта
+    # всем, кто знает адрес, но в поисковом индексе ей делать нечего: краулер
+    # засчитывается Icecast как слушатель, снимает гейт llm.pauseWhenEmpty и жжёт
+    # окно подписки впустую — круглосуточно и без единого живого слушателя.
+    #
+    # Исключение из прокси ОБЯЗАНО стоять выше общего `ProxyPass /`: правила
+    # разбираются по порядку, выигрывает первое совпавшее.
+    ProxyPass /robots.txt !
+    Alias /robots.txt <deploy-dir>/deploy/robots-fm.txt
+    <Directory "<deploy-dir>/deploy">
+        Require all granted
+        Options -Indexes
+    </Directory>
+
+    # Второй рубеж — для страниц, на которые кто-то сошлётся в обход robots.txt.
+    # Строго говоря, эти два средства друг другу мешают: краулер, уважающий
+    # Disallow, страницу не запросит и заголовка не увидит, поэтому ссылку на неё
+    # поисковик может показать и без содержимого. Нам важнее первое — не пустить
+    # краулер на станцию вообще, поэтому Disallow основной, заголовок в довесок.
+    Header always set X-Robots-Tag "noindex, nofollow, noarchive"
+
+    # ─── Что правит станцию — только из приватных сетей ───────────────────────
+    # У контроллера свой barrier (requireAdmin + ADMIN_USER/ADMIN_PASS), это
+    # второй рубеж поверх него: пароль один, лежит в .env, и через /api/settings
+    # им меняются ключ шлюза LLM и адрес Navidrome.
+    #
+    # Проверено по логам соседнего vhost: NAT отдаёт Apache реальный адрес
+    # клиента из интернета, а запрос из дома по этому же имени приходит с
+    # <router> (петля на роутере) — то есть попадает в 192.168.0.0/16 и
+    # проходит. Прямой вход http://<station-host>:7700/admin от этого правила не
+    # зависит вовсе и остаётся рабочим.
+    #
+    # /api/onboarding здесь намеренно НЕТ: /api/onboarding/status отвечает 200
+    # без пароля, по нему web решает, показывать ли мастер, — закрыв префикс,
+    # сломали бы публичную страницу. Запись в него и так под requireAdmin.
+    #
+    # /room/admin — предложения блокировки по дизлайкам слушателей (station/room).
+    # Пароль там проверяет контроллер; это правило — второй рубеж, как у /admin.
+    #
+    # (?i) обязателен: Caddy (path, handle_path) и Express сравнивают путь без
+    # учёта регистра, а <LocationMatch> — с учётом. Без (?i) /Room/admin и
+    # /API/settings проходили это правило и упирались сразу в пароль — нашёл
+    # финальный ревью плана дизлайков, 2026-09-24.
+    #
+    # Частный адрес в X-Forwarded-For правило не обходит: mod_remoteip игнорирует
+    # его без списка доверенных прокси (RemoteIPInternalProxy/RemoteIPTrustedProxy).
+    <LocationMatch "(?i)^/(admin|room/admin|api/(settings|system|debug|doctor|backup|mcp))">
+        Require ip 127.0.0.1 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+    </LocationMatch>
+
+    # ─── Прокси на Caddy стека ────────────────────────────────────────────────
+    # Живой поток Icecast — тело бесконечное. Отдельными правилами, чтобы
+    # соединения слушателей не делили пул с короткими запросами API. Таймаут не
+    # задаём: глобальный ProxyTimeout 600 относится к ожиданию данных, а не к
+    # длине ответа, и поток их шлёт непрерывно. Сжимать нечем — mod_deflate тут
+    # настроен только на application/json.
+    ProxyPass /stream.mp3  http://127.0.0.1:7700/stream.mp3  retry=1
+    ProxyPass /stream.opus http://127.0.0.1:7700/stream.opus retry=1
+    ProxyPass /stream.flac http://127.0.0.1:7700/stream.flac retry=1
+    ProxyPass /stream.aac  http://127.0.0.1:7700/stream.aac  retry=1
+
+    ProxyPass        /  http://127.0.0.1:7700/ retry=1
+    ProxyPassReverse /  http://127.0.0.1:7700/
+</VirtualHost>

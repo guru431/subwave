@@ -1,0 +1,11 @@
+{
+  "tts": {
+    "gainDb": { "remote": 6, "piper": 6 }
+  },
+  "requests": {
+    "onePendingPerIp": false,
+    "perIpHourlyCap": 30,
+    "cooldownSec": 15,
+    "maxPending": 12
+  }
+}
