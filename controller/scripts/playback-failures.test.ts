@@ -53,3 +53,47 @@ test('retained history is bounded, deduplicated, safe and station-local', async 
     assert.equal((await readPlaybackFailures(options)).warnings.length, 1);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('display metadata is capped both on emission and historical reads', async () => {
+  let payload: Record<string, unknown> = {};
+  const input = { attemptId: 'cap-probe', source: 'operator' as const, title: 'T'.repeat(600), artist: 'A'.repeat(600), album: 'B'.repeat(600), streamUrl: 'https://secret.example/?token=secret' };
+  recordPlaybackFailure(input, (_type, data) => { payload = data; });
+  assert.deepEqual([payload.title, payload.artist, payload.album], ['T'.repeat(500), 'A'.repeat(500), 'B'.repeat(500)]);
+  assert.equal('streamUrl' in payload, false);
+  const dir = await mkdtemp(join(tmpdir(), 'failure-caps-'));
+  try {
+    await mkdir(join(dir, 'logs'));
+    await writeFile(join(dir, 'logs/events-2026-10-04.jsonl'), JSON.stringify({
+      ...input, type: 'track.failed', t: '2026-10-04T00:00:00Z', stage: 'fetch', reason: 'source-resolution-failed',
+    }) + '\n');
+    const history = await readPlaybackFailures({ stationDir: dir, now: new Date('2026-10-04T12:00:00Z') });
+    assert.deepEqual([history.failures[0].title, history.failures[0].artist, history.failures[0].album], ['T'.repeat(500), 'A'.repeat(500), 'B'.repeat(500)]);
+    assert.equal(JSON.stringify(history).includes('secret'), false);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('an unreadable retained event file warns while readable failure rows survive', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'failure-unreadable-'));
+  try {
+    await mkdir(join(dir, 'logs/events-2026-10-03.jsonl'), { recursive: true });
+    await writeFile(join(dir, 'logs/events-2026-10-04.jsonl'), JSON.stringify({
+      type: 'track.failed', t: '2026-10-04T00:00:00Z', attemptId: 'readable', source: 'ai', stage: 'fetch', reason: 'source-resolution-failed',
+    }) + '\n');
+    const history = await readPlaybackFailures({ stationDir: dir, now: new Date('2026-10-04T12:00:00Z') });
+    assert.deepEqual(history.failures.map(row => row.attemptId), ['readable']);
+    assert.deepEqual(history.warnings, ['A retained event file could not be read; results may be incomplete.']);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('oversized lines spanning stream chunks do not swallow the next valid line', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'failure-oversized-'));
+  try {
+    await mkdir(join(dir, 'logs'));
+    await writeFile(join(dir, 'logs/events-2026-10-04.jsonl'), 'x'.repeat(100000) + '\n' + JSON.stringify({
+      type: 'track.failed', t: '2026-10-04T00:00:00Z', attemptId: 'after-oversized', source: 'request', stage: 'fetch', reason: 'source-resolution-failed',
+    }) + '\n' + '{partial');
+    const history = await readPlaybackFailures({ stationDir: dir, now: new Date('2026-10-04T12:00:00Z') });
+    assert.deepEqual(history.failures.map(row => row.attemptId), ['after-oversized']);
+    assert.deepEqual(history.warnings, []);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
