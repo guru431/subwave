@@ -3,7 +3,7 @@
 // Запуск из корня клона:  npx tsx web/lib/requestPick.test.ts
 
 import assert from 'node:assert/strict';
-import { bindPick, pickedSongId } from './requestPick';
+import { bindExact, bindPick, pickedSongId } from './requestPick';
 
 let failures = 0;
 function test(name: string, fn: () => void) {
@@ -40,6 +40,20 @@ test('без привязки songId нет', () => {
 
 test('очищенное после отправки поле songId не несёт', () => {
   assert.equal(pickedSongId(bindPick('ex-1', 'кино кукушка'), ''), undefined);
+});
+
+console.log('bindExact');
+
+test('сверка подставленного текста не перебивает выбранную альтернативу', () => {
+  const chosen = bindPick('compilation-id', 'Кино — Кукушка');
+  const after = bindExact(chosen, 'album-id', 'Кино — Кукушка');
+  assert.equal(pickedSongId(after, 'Кино — Кукушка'), 'compilation-id');
+});
+
+test('без привязки к этому тексту точное совпадение привязывается', () => {
+  assert.equal(pickedSongId(bindExact(null, 'ex-1', 'кино кукушка'), 'кино кукушка'), 'ex-1');
+  const stale = bindPick('old', 'кино');
+  assert.equal(pickedSongId(bindExact(stale, 'ex-1', 'кино кукушка'), 'кино кукушка'), 'ex-1');
 });
 
 console.log(failures ? `\n${failures} failed` : '\nall passed');

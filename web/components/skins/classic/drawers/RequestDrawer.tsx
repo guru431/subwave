@@ -6,7 +6,7 @@ import { ArrowUpRight, Radio } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import type { NowPlayingTrack, RequestResult, StationContext } from '@/lib/types';
 import { REQUEST_NAME_MAX } from '@/lib/schemas.generated';
-import { bindPick, pickedSongId, type RequestPick } from '@/lib/requestPick';
+import { bindExact, bindPick, pickedSongId, type RequestPick } from '@/lib/requestPick';
 
 const SUCCESS_HOLD_MS = 2800;
 const POLL_INTERVAL_MS = 1500;
@@ -156,7 +156,8 @@ export default function RequestDrawer({
         const body = (await r.json()) as ResolveResult;
         if (cancelled) return;
         setResolved(body);
-        if (body.exact) setPick(bindPick(body.exact.id, query));
+        const exact = body.exact;
+        if (exact) setPick((prev) => bindExact(prev, exact.id, query));
       } catch {
         // Комната недоступна — заказ всё равно уйдёт текстом, и каскад станции
         // его разберёт. Подсказка не обязательна для отправки.
