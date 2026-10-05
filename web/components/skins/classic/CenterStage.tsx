@@ -49,9 +49,9 @@ function buildMoodPhrase(t: NowPlayingTrack | null): string {
 }
 
 /** The like heart (#991). Renders nothing when likes are disabled or nothing
- *  likeable is on air. */
-function LikeHeart() {
-  const { available, liked, pending, count, like } = useTrackLike();
+ *  likeable is on air. Трек — из пропсов, а не из ленты: см. useTrackLike. */
+function LikeHeart({ songId }: { songId: string | null }) {
+  const { available, liked, pending, count, like } = useTrackLike(songId);
   if (!available) return null;
   return (
     <button
@@ -305,7 +305,7 @@ export default memo(function CenterStage({ nowPlaying, trackStartedAt, llmTokens
                     <span className="text-ink">{nowPlaying?.artist || 'Исполнитель неизвестен'}</span>
                     {ruAlbum(nowPlaying?.album) && <span> · {ruAlbum(nowPlaying?.album)}</span>}
                     {nowPlaying?.year && <span> · {nowPlaying.year}</span>}
-                    <LikeHeart />
+                    <LikeHeart songId={subsonicId} />
                     <DislikeMenu songId={subsonicId} title={nowPlaying?.title} artist={nowPlaying?.artist} className="ml-[10px] align-middle" />
                     <DownloadTrack subsonicId={subsonicId} />
                   </div>
