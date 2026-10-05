@@ -5,7 +5,7 @@ import { config } from './config.js';
 import { fetchWithTimeout } from './util/fetch-timeout.js';
 import { resolveActiveShow, resolveOnAirLocation, get as getSettings, moodScheduleFor, weatherMoodFor } from './settings.js';
 import * as session from './broadcast/session.js';
-import { getListenerCount } from './broadcast/listeners.js';
+import { getListenerCount, singleFlight } from './broadcast/listeners.js';
 import { zonedParts, zonedISODate, clockDisplay, spokenHourPhrase, spokenTimePhrase } from './time.js';
 
 // The day-period → {vibe, show} table stays in code (these feed spoken-segment
@@ -59,11 +59,17 @@ export function getFestivalContext(date = new Date()) {
 // Weather via Open-Meteo (no API key required)
 let weatherCache: { data: any; fetchedAt: number } = { data: null, fetchedAt: 0 };
 const WEATHER_TTL_MS = 30 * 60 * 1000;
+// Неудача тоже помнится: getWeather() зовут /now-playing (плеер и админка —
+// каждые 5 с), заказ, пик и подводки, и без памяти о неудаче недоступный
+// Open-Meteo стоил каждому из них таймаут в 10 с (23.09 — «тормозит админка»).
+export const WEATHER_FAIL_TTL_MS = 10 * 60 * 1000;
+let weatherFailedAt = 0;
 
 // Force the next getWeather() call to re-fetch — used when the user changes
 // their location in /settings.
 export function invalidateWeatherCache() {
   weatherCache = { data: null, fetchedAt: 0 };
+  weatherFailedAt = 0;
 }
 
 // The place the weather readout is ATTRIBUTED to — the broad on-air location,
@@ -84,6 +90,19 @@ export async function getWeather() {
   if (weatherCache.data && Date.now() - weatherCache.fetchedAt < WEATHER_TTL_MS) {
     return weatherCache.data;
   }
+  if (Date.now() - weatherFailedAt < WEATHER_FAIL_TTL_MS) return unknownWeather();
+  return (await fetchWeatherOnce()) ?? unknownWeather();
+}
+
+function unknownWeather() {
+  const tempUnit = config.weather.units === 'imperial' ? 'F' : 'C';
+  return { condition: 'unknown', mood: null, temp: null, tempUnit, location: attributedLocation() };
+}
+
+// Параллельные вызовы ждут один запрос, а не шлют каждый свой.
+const fetchWeatherOnce = singleFlight(fetchWeather);
+
+async function fetchWeather() {
   const imperial = config.weather.units === 'imperial';
   const tempUnit = imperial ? 'F' : 'C';
   try {
@@ -104,7 +123,8 @@ export async function getWeather() {
     weatherCache = { data: result, fetchedAt: Date.now() };
     return result;
   } catch {
-    return { condition: 'unknown', mood: null, temp: null, tempUnit, location: attributedLocation() };
+    weatherFailedAt = Date.now();
+    return null;
   }
 }
 
