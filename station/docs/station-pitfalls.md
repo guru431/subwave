@@ -207,7 +207,8 @@
   Конфиг — `station/deploy/apache-fm.conf.example`, копия на хосте в `<deploy-dir>/deploy/`,
   подключён одной строкой в конец **общего** `<apache-dir>/apache2.conf` (там же
   `photoorg`, `zabbix`, десяток чужих доменов — перед правкой бэкап, после правки
-  `apache2ctl configtest`). `/admin`, `/room/admin` и правящие `/api/*` закрыты по адресу источника
+  `apache2ctl configtest` и `graceful`; проверил — бэкап удалить, иначе `.bak-*` копятся
+  рядом с живым конфигом). `/admin`, `/room/admin` и правящие `/api/*` закрыты по адресу источника
   (правило case-insensitive — `(?i)`: Caddy и Express сравнивают путь без учёта
   регистра, `<LocationMatch>` — с учётом).
 

@@ -369,7 +369,7 @@ HTML network-first. Писать ничего этого не пришлось.
 Конфиг: [`apache-fm.conf.example`](../deploy/apache-fm.conf.example) +
 [`robots-fm.txt`](../deploy/robots-fm.txt); подключается одной строкой
 `IncludeOptional` в конфиг Apache хоста (бэкап файла — перед правкой, после —
-`apache2ctl configtest`). Два виртуальных хоста: `*:80` редиректит на https,
+`apache2ctl configtest`, `graceful` и удаление бэкапа). Два виртуальных хоста: `*:80` редиректит на https,
 `*:<https-port>` терминирует TLS и проксирует всё на `127.0.0.1:7700`. Конкретика
 установки (DNS, сертификат, NAT) ведётся вне репозитория.
 

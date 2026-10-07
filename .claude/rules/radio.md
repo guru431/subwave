@@ -80,7 +80,7 @@
 - Пароль владельца проверяет контроллер; 401 — без `WWW-Authenticate` намеренно. Дизлайки — только сигнал.
 - `https://<station-domain>` → Apache на хосте станции → Caddy. Конфиг `station/deploy/apache-fm.conf.example`
   подключён в **общий** `<apache-dir>/apache2.conf`: перед правкой бэкап, после —
-  `apache2ctl configtest`. Правило по пути — только `(?i)`; проверять сужением сетей в правиле
+  `apache2ctl configtest`, `graceful` и удаление бэкапа. Правило по пути — только `(?i)`; проверять сужением сетей в правиле
   и вариантами регистра.
 - Погода и MusicBrainz ходят через VPN (правило роутера по имени); «тормозит админка» —
   `duration` в `docker logs sub-wave-caddy`. MusicBrainz чаще раза в секунду отвечает 503.
