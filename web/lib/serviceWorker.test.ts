@@ -147,6 +147,13 @@ async function main() {
     }
   });
 
+  await test('значок строки состояния — прозрачный, не иконка установки', async () => {
+    // Android красит badge по альфа-каналу; /icons/192 непрозрачна — квадрат
+    const sw = worker(UA.android, [win('/', 'hidden')]);
+    await sw.push(MSG);
+    assert.equal(sw.shown[0]?.options.badge, '/icons/badge');
+  });
+
   console.log('notificationclick');
 
   await test('поднимается вкладка плеера, а не первая вкладка сайта', async () => {

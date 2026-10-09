@@ -11,6 +11,7 @@
 const BG = '#100e0c'; // тёмная подложка (--bg), она же theme_color манифеста
 const INK = '#ece6dc'; // кремовый (--ink тёмной темы) — сами буквы
 const ACCENT = '#d94b2a'; // вермильон (--accent) — дуги эфира
+const MONO = '#ffffff'; // значок уведомления: цвет не важен, важна непрозрачность
 
 // Геометрия задана в долях от половины холста: (0,0) — центр, 1 — край.
 // Числа те же, что в утверждённом макете (вариант Б), пересчитанные из его
@@ -40,8 +41,15 @@ const ARCS = [
 //   подставляет белый фон — от знака осталась бы одна дуга.
 //
 // Масштаб 50 даёт по высоте те же ~52 % холста, что и в утверждённом макете.
-export function DiscMark({ size }) {
-  const s = 50;
+//
+// `mono` — значок push-уведомления для строки состояния Android (`badge` в
+// public/sw.js, маршрут app/icons/badge). Android берёт от значка только
+// альфа-канал и красит его сам: знак на непрозрачной подложке превращался в
+// залитый квадрат. Поэтому подложки нет, дуги и буквы — одним белым, а масштаб
+// 86 растягивает знак на ~90 % холста: значок в строке состояния — 24 dp, и
+// знак в половину холста стал бы там точкой.
+export function DiscMark({ size, mono = false }) {
+  const s = mono ? 86 : 50;
   const at = (u, v) => `${(50 + u * s).toFixed(3)} ${(50 + v * s).toFixed(3)}`;
   const px = (n) => +(n * s).toFixed(3);
 
@@ -59,17 +67,17 @@ export function DiscMark({ size }) {
         width: '100%',
         height: '100%',
         display: 'flex',
-        background: BG,
+        background: mono ? 'transparent' : BG,
       }}
     >
       <svg width={size} height={size} viewBox="0 0 100 100">
-        <rect x="0" y="0" width="100" height="100" fill={BG} />
+        {!mono && <rect x="0" y="0" width="100" height="100" fill={BG} />}
         {arcs.map((d, i) => (
           <path
             key={`arc-${i}`}
             d={d}
             fill="none"
-            stroke={ACCENT}
+            stroke={mono ? MONO : ACCENT}
             strokeWidth={px(ARC_STROKE)}
             strokeLinecap="round"
           />
@@ -79,7 +87,7 @@ export function DiscMark({ size }) {
             key={`letter-${i}`}
             d={d}
             fill="none"
-            stroke={INK}
+            stroke={mono ? MONO : INK}
             strokeWidth={px(LETTER_STROKE)}
             strokeLinecap="round"
             strokeLinejoin="round"

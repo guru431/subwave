@@ -141,7 +141,9 @@ self.addEventListener('push', (event) => {
         body: data.body || '',
         tag,
         icon: '/icons/192',
-        badge: '/icons/192',
+        // Android красит значок по альфа-каналу: у /icons/192 подложка
+        // непрозрачна, и в строке состояния вместо знака стоял квадрат.
+        badge: '/icons/badge',
         data: { url: data.url || '/?chat=1' },
       });
       if (!visible) return;
