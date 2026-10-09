@@ -44,6 +44,7 @@ import threading
 import time
 import urllib.parse
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import admin
@@ -349,12 +350,13 @@ def build_handler(store: Store, config: Config):
                 self._send(200, {"ok": True})
             elif path in ("/messages", "/unread"):
                 default = FEED_LIMIT if path == "/messages" else UNREAD_LIMIT
-                if path == "/unread":
-                    # Чистка не только при записи: в тихом чате ведущий иначе
-                    # получал бы сообщения старше срока хранения
-                    store.prune_on_read()
+                # Чистка не только при записи: в тихом чате база иначе хранила
+                # бы старое сколь угодно долго. Она троттлится, поэтому
+                # устаревшее ещё и отсекается в самом запросе (`now`)
+                store.prune_on_read()
                 since = _since(query.get("since", [None])[0])
-                items = store.since(since, _limit(query.get("limit", [None])[0], default))
+                items = store.since(since, _limit(query.get("limit", [None])[0], default),
+                                    now=datetime.now(timezone.utc))
                 self._send(200, {"messages": items,
                                  "last": items[-1]["id"] if items else since})
             elif path == "/resolve":

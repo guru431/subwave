@@ -184,6 +184,15 @@ def test_feed_is_kept_for_a_week_by_default(store):
     assert [m["id"] for m in store.since(0, 10)] == [kept["id"]]
 
 
+def test_since_with_a_moment_hides_what_is_past_retention(store):
+    # чистка на чтении идёт раз в десять минут, а отдавать устаревшее нельзя
+    # ни минуты: отсечка — в самом запросе
+    store.add("l1", "Аня", "восемь дней назад", now=T0 - timedelta(days=8))
+    kept = store.add("l1", "Аня", "шесть дней назад", now=T0 - timedelta(days=6))
+    assert [m["id"] for m in store.since(0, 10, now=T0)] == [kept["id"]]
+    assert len(store.since(0, 10)) == 2           # без момента — лента как в базе
+
+
 def test_prune_on_read_runs_at_most_once_per_interval(store):
     # путь чтения открыт наружу: DELETE с commit на каждый запрос — лишняя
     # работа, а при сроке хранения в неделю десять минут ничего не решают
