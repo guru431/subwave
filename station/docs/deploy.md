@@ -464,7 +464,9 @@ docker-шлюза (ниже). Десять анонимных запросов �
 собой, а белый список закрывает новую ручку сразу.
 
 Список — точные пути, а не префиксы: `/api/request` префиксом пропустил бы админский
-`/api/requests`. `/api/schedule` и `/api/themes` одним путём отдают открытое чтение и
+`/api/requests`. Повторные слэши правило не обходят ни при каком умолчании: Caddy
+склеивает их всегда (`//api/settings` доходит до контроллера как `/settings`), поэтому в
+vhost явно стоит `MergeSlashes On`, а регэкспы сами терпят повторы (`^/+`, `room/+admin`). `/api/schedule` и `/api/themes` одним путём отдают открытое чтение и
 принимают запись под `requireAdmin`, поэтому снаружи им разрешён только `GET`. Открытые
 ручки контроллера, которых в списке нет намеренно (`/api/mcp`, `/api/similar-tracks`,
 `/api/geocode`, `/api/personas`, каталоги сообщества), с причинами — в
@@ -480,7 +482,7 @@ docker-шлюза (ниже). Десять анонимных запросов �
 
 **Проверка на живом Apache** — после `graceful`, не одним точным путём: сузить сети в
 правиле до заведомо чужой (`Require ip 203.0.113.0/24` в обеих секциях) и пройти
-таблицу — `/admin`, `/Room/admin`, `/API/settings`, `/api/stations`, `/api/admin-auth`,
+таблицу — `/admin`, `/Room/admin`, `/API/settings`, `//api/settings`, `/api/stations`, `/api/admin-auth`,
 `POST /api/stream-stop`, `PUT /api/schedule` отдают 403, а `/`,
 `/manifest.webmanifest`, `/room/messages`, `/api/now-playing`, `/API/Now-Playing`,
 `/api/onboarding/status` и `GET /api/schedule` — 200; потом сети вернуть. Из дома

@@ -136,10 +136,20 @@
     #
     # Частный адрес в X-Forwarded-For правило не обходит: mod_remoteip игнорирует
     # его без списка доверенных прокси (RemoteIPInternalProxy/RemoteIPTrustedProxy).
-    <LocationMatch "(?i)^/(admin|room/admin|api/(?!(now-playing|state|session|health|dj|schedule|themes|request|request/[^/]+|like|beacon|onboarding/status|cover/[^/]+|persona-avatar/[^/]+|station-auth|listen\.(pls|m3u))$))">
+    #
+    # Лишние слэши. Caddy склеивает их и в сопоставлении путей, и в handle_path:
+    # //api/settings и /api//settings доходят до контроллера как /settings,
+    # /room//admin/… — до комнаты как /admin/…, а //admin Next.js уводит
+    # 308-м на /admin. <LocationMatch> же видит путь склеенным, только пока
+    # MergeSlashes On — это умолчание Apache 2.4.39+, но правило на умолчании не
+    # держится: директива поставлена явно, а регэкспы сами терпят повторы
+    # (^/+, room/+admin; лишний слэш после api/ в белый список не попадает и
+    # закрыт). Оба рубежа проверяет station/tests/test_apache_rule.py.
+    MergeSlashes On
+    <LocationMatch "(?i)^/+(admin|room/+admin|api/(?!(now-playing|state|session|health|dj|schedule|themes|request|request/[^/]+|like|beacon|onboarding/status|cover/[^/]+|persona-avatar/[^/]+|station-auth|listen\.(pls|m3u))$))">
         Require ip 127.0.0.1 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
     </LocationMatch>
-    <LocationMatch "(?i)^/api/(schedule|themes)$">
+    <LocationMatch "(?i)^/+api/(schedule|themes)$">
         Require method GET
         Require ip 127.0.0.1 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
     </LocationMatch>
