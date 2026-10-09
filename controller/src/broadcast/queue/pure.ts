@@ -59,6 +59,31 @@ export function pickLinkInterval() {
   return 1 + Math.floor(Math.random() * 9);
 }
 
+// Fork: the longest interval pickLinkInterval can draw at a frequency — the
+// clamp for a countdown restored across a restart. Kept in step with the
+// ranges above by scripts/link-countdown-restore.test.ts, which samples them.
+export function linkIntervalMax(f: string = settings.effectiveFrequency()) {
+  if (f === 'silent')     return Infinity;
+  if (f === 'quiet')      return 20;
+  if (f === 'chatty')     return 5;
+  if (f === 'aggressive') return 3;
+  return 15;
+}
+
+// Fork: the link countdown (`Queue.tracksUntilLink`) as recovered from
+// queue.json. The class field is drawn at import, BEFORE settings.load(), so
+// without this every restart counted down a default-frequency interval instead
+// of the persona's — up to an hour of air before the first link. A saved count
+// is clamped into the CURRENT frequency's range (the persona may have changed
+// while the controller was down; ≤ 0 already means "due"); a silent persona,
+// an absent field (a snapshot from before this), Infinity (written as null)
+// and junk all take a fresh draw.
+export function restoredLinkInterval(stored: unknown, fresh: number = pickLinkInterval()) {
+  if (!Number.isFinite(fresh)) return fresh;
+  if (typeof stored !== 'number' || !Number.isFinite(stored)) return fresh;
+  return Math.min(Math.max(Math.floor(stored), 0), linkIntervalMax());
+}
+
 // How many consecutive reconcile checks may report an EMPTY dj_queue (while the
 // controller still holds sent items) before we treat those items as genuinely
 // gone and clear them. A single empty read is ambiguous — a just-sent pick may

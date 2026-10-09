@@ -118,6 +118,7 @@ import {
   pickLeadSec,
   topUpDepth,
   pickLinkInterval,
+  restoredLinkInterval,
   playAlreadyRecorded,
   shouldDropCrossSessionLink,
   shouldDropObsoleteHostSpeech,
@@ -567,6 +568,9 @@ class Queue {
           // every upgrade.
           tracksSinceJingle: this._tracksSinceJingle,
           lastRotateJingle: this._lastRotateJingle,
+          // Fork: the link countdown, for the same reason (see recover()).
+          // A silent persona's Infinity is written as null and redrawn.
+          tracksUntilLink: this.tracksUntilLink,
           savedAt: new Date().toISOString(),
         }, null, 2));
       } catch (err) {
@@ -598,8 +602,10 @@ class Queue {
   // key differs and the watcher reconciles normally (see onTrackStarted, which
   // drops any upcoming items Liquidsoap consumed while the controller was down).
   recover() {
+    let storedLinkCount: unknown;
     if (existsSync(config.queue.file)) try {
       const stored = JSON.parse(readFileSync(config.queue.file, 'utf8'));
+      storedLinkCount = stored.tracksUntilLink;
       // Drop anything queued long enough ago that Liquidsoap has certainly
       // played past it — guards against a stale snapshot from a long downtime
       // resurrecting tracks as permanent "Up next" zombies.
@@ -638,6 +644,10 @@ class Queue {
     } catch (err) {
       console.error('[queue] recover failed:', (err as Error).message);
     }
+    // Fork: the link countdown. The field initialiser ran at import, before
+    // settings.load(), and drew a default-frequency interval; this runs after
+    // it, so a fresh draw here is the persona's. Clamped, not trusted.
+    this.tracksUntilLink = restoredLinkInterval(storedLinkCount);
     this.recoverPauseTalk();
     if (existsSync(config.queue.recentPlaysFile)) {
       try {
