@@ -147,6 +147,38 @@ async function main() {
     }
   });
 
+  console.log('notificationclick');
+
+  await test('поднимается вкладка плеера, а не первая вкладка сайта', async () => {
+    const admin = win('/admin');
+    const player = win('/');
+    const sw = worker(UA.android, [admin, win('/manual'), player]);
+    await sw.click({ url: '/?chat=1' });
+    assert.equal(admin.focused, false);
+    assert.deepEqual(admin.messages, []);
+    assert.equal(player.focused, true);
+    // объект создан в контексте vm — у него чужой Object.prototype
+    assert.equal(JSON.stringify(player.messages), '[{"type":"room:open-chat"}]');
+    assert.deepEqual(sw.opened, []);
+  });
+
+  await test('плеера среди вкладок нет — новая с ?chat=1, чужие не трогаются', async () => {
+    const admin = win('/admin');
+    const news = win('/news');
+    const sw = worker(UA.android, [admin, news]);
+    await sw.click({ url: '/?chat=1' });
+    assert.equal(admin.focused || news.focused, false);
+    assert.deepEqual(sw.opened, [`${ORIGIN}/?chat=1`]);
+  });
+
+  await test('плеер с чатом в адресе — тоже плеер', async () => {
+    const player = win('/?chat=1#x');
+    const sw = worker(UA.android, [player]);
+    await sw.click({});
+    assert.equal(player.focused, true);
+    assert.deepEqual(sw.opened, []);
+  });
+
   if (failures) {
     console.error(`\n${failures} проверок не прошло`);
     process.exit(1);

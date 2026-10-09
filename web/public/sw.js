@@ -151,23 +151,27 @@ self.addEventListener('push', (event) => {
   );
 });
 
-// Нажатие на уведомление: открытая вкладка станции поднимается и открывает чат,
+// Нажатие на уведомление: открытая вкладка плеера поднимается и открывает чат,
 // иначе открывается новая — с `?chat=1`, по которому плеер откроет его сам.
+// Вкладка плеера — та, чей путь совпадает с адресом уведомления (`/`): любая
+// вкладка сайта не годится — `room:open-chat` слушает только плеер, и у
+// владельца первой оказывалась админка, где чат не открывался.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const url = new URL((event.notification.data && event.notification.data.url) || '/?chat=1',
-    self.location.origin).href;
+  const target = new URL((event.notification.data && event.notification.data.url) || '/?chat=1',
+    self.location.origin);
   event.waitUntil(
     (async () => {
       const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
       for (const w of wins) {
-        if (new URL(w.url).origin === self.location.origin && 'focus' in w) {
+        const at = new URL(w.url);
+        if (at.origin === target.origin && at.pathname === target.pathname && 'focus' in w) {
           await w.focus();
           w.postMessage({ type: 'room:open-chat' });
           return;
         }
       }
-      await self.clients.openWindow(url);
+      await self.clients.openWindow(target.href);
     })()
   );
 });
