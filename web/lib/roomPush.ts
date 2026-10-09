@@ -51,10 +51,44 @@ function headers(): Record<string, string> {
   };
 }
 
+// Подписки не стало, а согласие слушателя осталось. WebKit снимает подписку сам
+// (за «тихие» push — см. sw.js), а оформить её заново без жеста человека нельзя:
+// переподписка при открытии плеера молча не удаётся, и галочка «Уведомлять»
+// рисуется включённой при мёртвом push. Состояние модуля, а не ящика:
+// переподписку при открытии плеера делает скин, когда ящик ещё закрыт.
+let lost = false;
+const watchers = new Set<() => void>();
+
+function setLost(value: boolean): void {
+  if (lost === value) return;
+  lost = value;
+  for (const fn of watchers) fn();
+}
+
+/** Push не оформился при включённом согласии — ящику пора сказать об этом. */
+export function pushLost(): boolean {
+  return lost;
+}
+
+/** Подписка для useSyncExternalStore: зовёт `fn`, когда pushLost() сменился. */
+export function watchPushLost(fn: () => void): () => void {
+  watchers.add(fn);
+  return () => { watchers.delete(fn); };
+}
+
 /** Подписаться — или обновить подписку: комната ловит упоминание по имени,
- *  и имя, сменённое после подписки, должно до неё доехать. */
+ *  и имя, сменённое после подписки, должно до неё доехать. Зовётся только при
+ *  включённом согласии, поэтому «не вышло» в браузере с push — это потеря;
+ *  браузер без push потерь не знает: у него остаются уведомления страницы. */
 export async function enablePush(): Promise<boolean> {
-  if (!pushSupported() || Notification.permission !== 'granted') return false;
+  if (!pushSupported()) return false;
+  const ok = await subscribe();
+  setLost(!ok);
+  return ok;
+}
+
+async function subscribe(): Promise<boolean> {
+  if (Notification.permission !== 'granted') return false;
   try {
     const reg = await navigator.serviceWorker.ready;
     const res = await fetch(`${ROOM}/push/key`);
@@ -85,6 +119,7 @@ export async function enablePush(): Promise<boolean> {
 }
 
 export async function disablePush(): Promise<void> {
+  setLost(false);
   if (!pushSupported()) return;
   try {
     const reg = await navigator.serviceWorker.getRegistration();

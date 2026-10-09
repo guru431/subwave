@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { listener, setNotifyEnabled, LISTENER_NAME_MAX } from '@/lib/listener';
 import { askPermission, notifyState, readEnv, type NotifyState } from '@/lib/roomNotify';
-import { disablePush, enablePush } from '@/lib/roomPush';
+import { disablePush, enablePush, pushLost, watchPushLost } from '@/lib/roomPush';
 import type { FeedItem } from '@/lib/roomRules';
 
 const TEXT_MAX = 280;        // та же цифра, что у заказа (REQUEST_TEXT_MAX)
@@ -30,6 +30,9 @@ export default function ChatDrawer({ items, send, sending }: ChatDrawerProps) {
   const [problem, setProblem] = useState<string | null>(null);
   const [notifyOn, setNotifyOn] = useState(false);
   const [state, setState] = useState<NotifyState>('ask');
+  // Подписку снял браузер (WebKit — за «тихие» push), а переподписка без жеста
+  // не удалась: галочка стоит, push мёртв. Молчать нельзя — нужно нажатие.
+  const lost = useSyncExternalStore(watchPushLost, pushLost, () => false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -59,6 +62,13 @@ export default function ChatDrawer({ items, send, sending }: ChatDrawerProps) {
     // push, комната без ключа) — остаются уведомления страницы, как раньше.
     if (on) void enablePush();
   }, [notifyOn]);
+
+  // То же включение, но из нажатия: подписку WebKit оформляет только по жесту.
+  const renewPush = useCallback(async () => {
+    const next = await askPermission();
+    setState(next);
+    if (next === 'ready') void enablePush();
+  }, []);
 
   const submit = useCallback(async () => {
     if (sending) return;
@@ -143,6 +153,15 @@ export default function ChatDrawer({ items, send, sending }: ChatDrawerProps) {
             {sending ? 'Отправляю…' : 'Отправить'}
           </button>
         </div>
+        {notifyOn && lost && (state === 'ask' || state === 'ready') && (
+          <button
+            type="button"
+            onClick={() => void renewPush()}
+            className="self-start text-left text-[11px] text-vermilion underline"
+          >
+            Уведомления отключены — включите заново
+          </button>
+        )}
       </div>
     </div>
   );

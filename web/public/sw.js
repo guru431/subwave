@@ -104,11 +104,25 @@ async function networkFirst(request) {
   }
 }
 
+// WebKit — Safari и любой браузер на iOS. Узнаётся по строке агента: движка
+// service worker не сообщает. `AppleWebKit` пишут и Chromium-браузеры, но у
+// всех них есть токен `Chrome/` (Edge, Opera, Samsung — тоже), а у iOS-сборок
+// Chrome и Edge его нет (`CriOS/`, `EdgiOS/`) — они и есть WebKit. `Safari/`
+// не годится как признак: у установленного на iPhone приложения его в строке нет.
+function isWebKit(ua) {
+  return /AppleWebKit\//.test(ua) && !/\b(Chrome|Chromium|Edg)\//.test(ua);
+}
+
 // Web Push комнаты (station/room/push.py): важное в чате при закрытой вкладке.
 // Открытая и видимая вкладка скажет сама — тостом, и вторая карточка об одном
 // была бы шумом. Тег `subwave-chat` — тот же, что у уведомления страницы
 // (lib/roomNotify.ts): живая скрытая вкладка и push-сервис не выстроят в
 // шторке двух карточек об одном сообщении, вторая заменит первую.
+//
+// Кроме WebKit: push, на который не вызван showNotification, он считает тихим и
+// после нескольких таких снимает подписку — а переподписка без жеста молча не
+// удаётся. Поэтому там уведомление показывается всегда, а при видимом окне
+// сразу закрывается: о сообщении и так скажет тост.
 self.addEventListener('push', (event) => {
   let data = {};
   try {
@@ -119,14 +133,20 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     (async () => {
       const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-      if (wins.some((w) => w.visibilityState === 'visible')) return;
+      const visible = wins.some((w) => w.visibilityState === 'visible');
+      const webkit = isWebKit((self.navigator && self.navigator.userAgent) || '');
+      if (visible && !webkit) return;
+      const tag = data.tag || 'subwave-chat';
       await self.registration.showNotification(data.title || 'AI радио', {
         body: data.body || '',
-        tag: data.tag || 'subwave-chat',
+        tag,
         icon: '/icons/192',
         badge: '/icons/192',
         data: { url: data.url || '/?chat=1' },
       });
+      if (!visible) return;
+      const shown = await self.registration.getNotifications({ tag });
+      for (const n of shown) n.close();
     })()
   );
 });
