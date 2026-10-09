@@ -31,6 +31,12 @@ PRONUNCIATION = {
 }
 _PRONUNCIATION = re.compile(r"\b(" + "|".join(map(re.escape, PRONUNCIATION)) + r")\b")
 
+# «Трек» — заимствование и по норме читается твёрдо, [трэк]; F5 по букве «е» читал
+# мягко (слух владельца 2026-10-09). Замена на «э» — до RUAccent: в её словаре все
+# формы «трэк» с ударением. Только с начала слова и в «саундтрек»: внутри слова
+# («стрекоза», «стрекот») это русский корень с мягким «р».
+_TREK = re.compile(r"(?<![^\W\d_])((?:саунд)?тр)(е)(?=к)", re.IGNORECASE)
+
 # Словарь коллекции: латинские исполнители и названия песен русскими буквами, с
 # ударением (собирает tools/pronunciation.py). «Wasting My Hate» ESpeech читала
 # «Востинг Майхэд», «Dire Straits» — «Даррис Тредс» (эфир 23.09). Применяется ПОСЛЕ
@@ -185,8 +191,10 @@ def pieces(text: str, limit: int) -> list[tuple[str, int]]:
 
 
 def respell(text: str) -> str:
-    """Слова из PRONUNCIATION — русскими буквами; только целые слова, регистр важен."""
-    return _PRONUNCIATION.sub(lambda m: PRONUNCIATION[m.group(1)], text)
+    """Слова из PRONUNCIATION — русскими буквами; только целые слова, регистр важен.
+    «Трек» и его формы — через «э»."""
+    text = _PRONUNCIATION.sub(lambda m: PRONUNCIATION[m.group(1)], text)
+    return _TREK.sub(lambda m: m.group(1) + ("Э" if m.group(2) == "Е" else "э"), text)
 
 
 def cyrillize(text: str) -> str:

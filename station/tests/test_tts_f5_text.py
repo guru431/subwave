@@ -97,6 +97,19 @@ def test_metallica_is_respelled_for_the_stress_dictionary():
     assert T.respell("а есть Metallica.") == "а есть Металлика."
 
 
+def test_trek_is_read_hard():
+    """«Трек» по норме [трэк]; F5 по букве «е» читал мягко — слух владельца 2026-10-09.
+    Через «э» все формы знает и словарь ударений RUAccent (тр+эк, тр+эками…)."""
+    assert (T.respell("Следующий трек, два трека и саундтрек.")
+            == "Следующий трэк, два трэка и саундтрэк.")
+    assert T.respell("Треки. ТРЕКОВ") == "Трэки. ТРЭКОВ"
+
+
+def test_trek_inside_a_russian_word_stays_soft():
+    text = "Стрекоза, стрекот."
+    assert T.respell(text) == text
+
+
 def test_units_split_sentences_and_strong_clauses_not_commas():
     """F5 сам решает, где дышать внутри куска, и запятые выходили от 40 до 330 мс,
     двоеточие — 50 (эфир 2026-09-23). Поэтому единицы — предложения и части по
