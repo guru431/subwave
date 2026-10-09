@@ -101,6 +101,17 @@ test('earliestOriginalYear: Cyrillic still gates on title and artist', () => {
   );
 });
 
+test('earliestOriginalYear: ё and е, é and e are one letter, as in normArtist', () => {
+  assert.equal(
+    earliestOriginalYear([rec('Чёрная луна', 'Агата Кристи', '1990')], { title: 'Черная луна', artist: 'Агата Кристи' }),
+    1990,
+  );
+  assert.equal(
+    earliestOriginalYear([rec('Déjà Vu', 'Beyoncé', '2006')], { title: 'Deja Vu', artist: 'Beyonce' }),
+    2006,
+  );
+});
+
 test('earliestOriginalYear: Latin unchanged', () => {
   assert.equal(
     earliestOriginalYear([rec('Dancing Queen (Remastered)', 'ABBA', '1976')], { title: 'Dancing Queen', artist: 'ABBA' }),

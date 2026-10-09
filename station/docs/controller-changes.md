@@ -813,6 +813,11 @@ era_untrusted`), `scripts/folder-genres.test.ts`,
 имя со списком латинских «Various Artists», и кириллица в нём ничего не ломает.
 Правка годится апстриму как есть (предложение не отправлялось).
 
+`musicbrainz.norm` раскладывает строку (`NFD`) до фильтра, как `normArtist`: фильтр
+тогда выбрасывает диакритические знаки, и «Чёрная» в MusicBrainz совпадает с «Черная»
+в теге, а «Beyoncé» — с «Beyonce». Без этого буква «ё» на одной стороне и «е» на
+другой давали тот же промах. Тест — `scripts/artist-cyrillic.test.ts`.
+
 **После выкатки — повторить промахи MusicBrainz.** Штамп промаха не даёт трек
 переспрашивать, а сверка (Admin → Library → Reconcile with Navidrome,
 `POST /api/library/reconcile`) спрашивает MusicBrainz только о треках без штампа.
