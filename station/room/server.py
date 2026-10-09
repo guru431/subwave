@@ -16,11 +16,15 @@
     GET  /admin/dislikes              → {"artists": [...], "tracks": [...]}   (пароль владельца)
     POST /admin/dislikes/decide       → {"ok": true}   (тело — {kind, key, action})
 
-Личность слушателя приезжает заголовками `X-Listener-Id` и `X-Listener-Name`:
-ни паролей, ни базы пользователей — станция закрыта общим паролем, аудитория
-семейная, и подмена имени даёт ровно то, что и так доступно (написать под чужим
-именем). Имя едет percent-encoded: заголовки по RFC 7230 — latin-1, и кириллица
-в них иначе не проходит.
+Личность слушателя приезжает заголовками `X-Listener-Id` и `X-Listener-Name`,
+и это подпись, а не учётка: ни паролей, ни базы пользователей. Станция открыта
+всем, кто знает адрес (осознанное решение, station/docs/deploy.md), и `/room/*`
+вместе с ней — читать ленту и писать в неё может кто угодно. Чат публичен
+осознанно: в нём нет ничего, кроме того, что слушатели сами написали, а подмена
+имени даёт ровно это — написать под чужим именем. Держат комнату лимиты: личный
+и общий на запись, потолки сверок и подписок, лента — неделю и не больше
+LIMIT_MAX последних сообщений на запрос. Имя едет percent-encoded: заголовки по
+RFC 7230 — latin-1, и кириллица в них иначе не проходит.
 
 Запросы `/admin/…` — владельцу станции: вместо личности слушателя у них пароль
 админки в `Authorization`, и проверяет его контроллер (`admin.py`).
@@ -31,11 +35,13 @@
 Стандартная библиотека плюс один пакет — `cryptography` для Web Push
 (`push.py`, там же почему).
 """
+import collections
 import http.client
 import json
 import os
 import sys
 import threading
+import time
 import urllib.parse
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -49,11 +55,14 @@ import notify
 import push
 import station
 import subsonic
-from store import Store
+from store import RETENTION_DAYS, Store
 
 FEED_LIMIT = 50          # сколько отдаём плееру по умолчанию
 UNREAD_LIMIT = 20        # сколько отдаём ведущему: он читает вслух, не листает
-LIMIT_MAX = 200
+# Больше не отдаём, сколько бы ни попросили: лента открыта наружу, а
+# `since` отдаёт самые свежие после курсора — листать назад нечем, и снаружи
+# видно не больше LIMIT_MAX последних сообщений. Плееру хватает FEED_LIMIT.
+LIMIT_MAX = FEED_LIMIT
 # Сколько байт отвергнутого тела согласны вычитать, чтобы ответ дошёл до
 # клиента. Больше — обрываем соединение: дочитывать мегабайты за тем, кто уже
 # нарушил лимит, значит выполнять его работу.
@@ -76,6 +85,14 @@ PASS_HEADERS = ("Content-Type", "Content-Length", "Content-Range",
 class Config:
     rate_seconds: int = 60
     rate_max: int = 10
+    # Потолок сообщений всей комнаты за то же окно `rate_seconds`. Личный
+    # лимит держится на `X-Listener-Id`, который выбирает сам клиент, и новый
+    # id на каждое сообщение снимал его целиком
+    rate_global: int = 30
+    # Потолок сверок `/resolve` на всю комнату за `rate_seconds`: личности у
+    # сверки нет (плеер шлёт её без заголовков), а каждая — до шести походов
+    # в Navidrome (subsonic.MAX_ATTEMPTS)
+    resolve_max: int = 30
     max_body: int = 8 * 1024
     read_timeout: float = 30
     navidrome: tuple[str, str, str] = field(default_factory=lambda: ("", "", ""))
@@ -86,9 +103,35 @@ class Config:
     # Потолок подписок: адрес ручки открыт наружу, и без предела таблицу
     # можно было бы раздувать сколько угодно
     push_max: int = 500
+    # Подписок на один `X-Listener-Id`; новая сверх — вытесняет его же старую
+    push_per_listener: int = 3
     # Потолок записей в таблице дизлайков: адрес открыт наружу, и без предела
     # её можно было бы раздувать сколько угодно — как подписки push
     dislikes_max: int = 5000
+
+
+class Window:
+    """Скользящее окно: не больше `cap` ударов за `seconds`. Для потолков без
+    базы под ними — сверка ничего не пишет, и считать её негде, кроме памяти.
+
+    Время — параметром: тест, зависящий от часов, зелёный через раз.
+    """
+
+    def __init__(self, seconds: float, cap: int):
+        self.seconds = seconds
+        self.cap = cap
+        self.hits: collections.deque[float] = collections.deque()
+        self.lock = threading.Lock()
+
+    def take(self, now: float) -> bool:
+        """Засчитать удар, если в окне есть место. Отказ не засчитывается."""
+        with self.lock:
+            while self.hits and self.hits[0] <= now - self.seconds:
+                self.hits.popleft()
+            if len(self.hits) >= self.cap:
+                return False
+            self.hits.append(now)
+            return True
 
 
 def _limit(raw: str | None, default: int) -> int:
@@ -110,6 +153,7 @@ def build_handler(store: Store, config: Config):
     # Счётчик живёт на сервере, а не модульной глобалью: тесты поднимают
     # несколько серверов в одном процессе, и общий счётчик протёк бы между ними.
     slots = threading.BoundedSemaphore(config.download_slots)
+    resolves = Window(config.rate_seconds, config.resolve_max)
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -305,6 +349,10 @@ def build_handler(store: Store, config: Config):
                 self._send(200, {"ok": True})
             elif path in ("/messages", "/unread"):
                 default = FEED_LIMIT if path == "/messages" else UNREAD_LIMIT
+                if path == "/unread":
+                    # Чистка не только при записи: в тихом чате ведущий иначе
+                    # получал бы сообщения старше срока хранения
+                    store.prune_on_read()
                 since = _since(query.get("since", [None])[0])
                 items = store.since(since, _limit(query.get("limit", [None])[0], default))
                 self._send(200, {"messages": items,
@@ -313,6 +361,12 @@ def build_handler(store: Store, config: Config):
                 q = (query.get("q", [""])[0] or "").strip()
                 if not q:
                     self._send(400, {"error": "нужен параметр q"})
+                    return
+                if not resolves.take(time.monotonic()):
+                    # Плеер на отказ просто не показывает подсказку — заказ
+                    # всё равно уходит текстом, и каскад станции его разберёт
+                    self._send(429, {"error": f"не больше {config.resolve_max} сверок "
+                                              f"за {config.rate_seconds} с"})
                     return
                 base, user, password = config.navidrome
                 try:
@@ -426,10 +480,17 @@ def build_handler(store: Store, config: Config):
             text, who = value
 
             record = store.add(listener, who, text,
-                               rate=(config.rate_seconds, config.rate_max))
-            if record is None:
+                               rate=(config.rate_seconds, config.rate_max),
+                               room_rate=(config.rate_seconds, config.rate_global))
+            if record == "listener":
                 self._send(429, {"error": f"не больше {config.rate_max} сообщений "
                                           f"за {config.rate_seconds} с"})
+                return
+            if record == "room":
+                self._send(429, {"error": f"чат переполнен: не больше "
+                                          f"{config.rate_global} сообщений за "
+                                          f"{config.rate_seconds} с на всех — "
+                                          "попробуйте позже"})
                 return
             store.prune()
             self._send(201, {"id": record["id"], "at": record["at"]})
@@ -449,7 +510,8 @@ def build_handler(store: Store, config: Config):
             # в любом сообщении будило бы всех, кто не назвался
             name = (guard.sanitize(urllib.parse.unquote(raw_name))[:guard.NAME_MAX]
                     if raw_name else "")
-            if not store.subscribe(sub, listener, name, cap=config.push_max):
+            if not store.subscribe(sub, listener, name, cap=config.push_max,
+                                   per_listener=config.push_per_listener):
                 self._send(429, {"error": f"подписок уже {config.push_max}"})
                 return
             self._send(201, {"ok": True})
@@ -579,10 +641,13 @@ def push_subject(environ) -> str:
 def main() -> None:
     port = int(os.environ.get("PORT", "8080"))
     store = Store(os.environ.get("ROOM_DB", "/data/room.db"),
-                  retention_days=int(os.environ.get("RETENTION_DAYS", "14")))
+                  retention_days=int(os.environ.get("RETENTION_DAYS", RETENTION_DAYS)))
     config = Config(
         rate_seconds=int(os.environ.get("RATE_SECONDS", "60")),
         rate_max=int(os.environ.get("RATE_MAX", "10")),
+        rate_global=int(os.environ.get("RATE_GLOBAL", "30")),
+        resolve_max=int(os.environ.get("RESOLVE_MAX", "30")),
+        push_per_listener=int(os.environ.get("PUSH_PER_LISTENER", "3")),
         navidrome=(os.environ.get("NAVIDROME_URL", ""),
                    os.environ.get("NAVIDROME_USER", ""),
                    os.environ.get("NAVIDROME_PASS", "")),

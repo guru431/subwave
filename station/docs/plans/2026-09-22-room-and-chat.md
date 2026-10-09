@@ -31,6 +31,13 @@
    Navidrome был один пользователь — админский `<admin-user>`. Заведена `subwave-room`
    (`isAdmin=false`), пароль в vault `_boss` (`NAVIDROME_ROOM_PASS`), запись в индексе
    `api_keys`. Комната смотрит наружу, и админский пароль ей не нужен.
+   **Поправка 2026-10-09:** в работе комната ходит учёткой контроллера — override
+   передаёт ей общие `${NAVIDROME_USER}`/`${NAVIDROME_PASS}`. Отдельную через эти
+   имена не передать: контроллер читает тот же `.env` через `env_file`, env у него
+   главнее настроек, и он ушёл бы под учёткой комнаты, потеряв флаг Report Real Path
+   на строке плеера прежней учётки. Отдельной учётке нужны свои
+   `ROOM_NAVIDROME_USER`/`ROOM_NAVIDROME_PASS` — подробно в
+   [room/README.md](../../room/README.md), «Сверка с коллекцией».
 2. **Отказ до чтения тела рвал соединение.** `POST /messages` без `X-Listener-Id` и с
    телом сверх лимита отвечал 400/413 и закрывал сокет, не вычитав тело: Windows шлёт
    RST, и клиент вместо кода получает «соединение разорвано». Тело отвергнутого запроса
@@ -684,7 +691,7 @@ Expected: PASS, 8 быстрых тестов; девятый (`integration`) в
 - [x] **Шаг 5: Проверить на живом Navidrome**
 
 ```bash
-set -a && . /c/AI/projects/_boss/secrets/vault.env && set +a
+set -a && . <_boss>/secrets/vault.env && set +a
 pytest tests/test_room_resolve.py -m integration -v
 ```
 
@@ -1126,11 +1133,11 @@ CMD ["python", "-u", "server.py"]
 - [x] **Шаг 2: Собрать образ локально и убедиться, что он стартует**
 
 ```bash
-cd /c/AI/projects/music
+cd <repo>
 docker build -f station/room/Dockerfile -t subwave-room:1 . 2>&1 | tail -3
 ```
 
-Expected: `Successfully tagged`. Если docker на work-ai недоступен — пропустить и собирать сразу на Debian (шаг 5), отметив это в отчёте: локальная сборка здесь удобство, а не требование.
+Expected: `Successfully tagged`. Если docker на <workstation> недоступен — пропустить и собирать сразу на Debian (шаг 5), отметив это в отчёте: локальная сборка здесь удобство, а не требование.
 
 - [x] **Шаг 3: Свой Caddyfile**
 
@@ -1204,7 +1211,7 @@ services:
 - [x] **Шаг 5: Собрать и поднять на Debian**
 
 ```bash
-D=/c/AI/projects/music
+D=<repo>
 tar -czf /tmp/room-src.tar.gz -C $D deploy/room music/normalize.py
 scp -P <ssh-port> -i <ssh-key> /tmp/room-src.tar.gz <ssh-user>@<station-host>:/tmp/
 scp -P <ssh-port> -i <ssh-key> $D/station/deploy/caddy/Caddyfile <ssh-user>@<station-host>:/tmp/Caddyfile
@@ -1355,7 +1362,7 @@ export default async function readChat(ctx, state, services, config) {
 - [x] **Шаг 3: Положить навык на станцию**
 
 ```bash
-D=/c/AI/projects/music
+D=<repo>
 tar -czf /tmp/skill-chat.tar.gz -C $D/station/deploy/skills chat
 scp -P <ssh-port> -i <ssh-key> /tmp/skill-chat.tar.gz <ssh-user>@<station-host>:/tmp/
 ssh -p <ssh-port> -i <ssh-key> <ssh-user>@<station-host> '
@@ -1368,7 +1375,7 @@ ssh -p <ssh-port> -i <ssh-key> <ssh-user>@<station-host> '
 - [x] **Шаг 4: Заставить контроллер перечитать навыки и включить `chat`**
 
 ```bash
-set -a && . /c/AI/projects/_boss/secrets/vault.env && set +a
+set -a && . <_boss>/secrets/vault.env && set +a
 curl -s -u "$SUBWAVE_ADMIN_USER:$SUBWAVE_ADMIN_PASS" -X POST \
   http://<station-host>:7700/api/dj/skills/rescan
 curl -s -u "$SUBWAVE_ADMIN_USER:$SUBWAVE_ADMIN_PASS" \
@@ -1440,7 +1447,7 @@ git commit -m "Навык chat: ведущий читает комнату и о
 
 ```bash
 git clone --depth 1 -b v1.8.0 https://github.com/perminder-klair/subwave.git /tmp/sw-web
-cd /tmp/sw-web && git apply /c/AI/projects/music/station/docs/web-changes.md
+cd /tmp/sw-web && git apply <repo>/station/docs/web-changes.md
 git status --short | head
 ```
 
@@ -1699,9 +1706,9 @@ ssh -p <ssh-port> -i <ssh-key> <ssh-user>@<station-host> 'cd <deploy-dir>/subwav
 - [x] **Шаг 7: Пересобрать патч и проверить на чистом клоне**
 
 ```bash
-cd /tmp/sw-web && git add -A && git diff --cached HEAD > /c/AI/projects/music/station/docs/web-changes.md
+cd /tmp/sw-web && git add -A && git diff --cached HEAD > <repo>/station/docs/web-changes.md
 git clone --depth 1 -b v1.8.0 https://github.com/perminder-klair/subwave.git /tmp/check-web
-cd /tmp/check-web && git apply --check /c/AI/projects/music/station/docs/web-changes.md && echo PATCH_OK
+cd /tmp/check-web && git apply --check <repo>/station/docs/web-changes.md && echo PATCH_OK
 ```
 
 Expected: `PATCH_OK`. **`git add -A` обязателен**: `git diff HEAD` не видит новых файлов, и патч молча вышел бы без `ChatDrawer.tsx` и `listener.ts` — ровно та ошибка, что уже случалась в проекте (28 файлов вместо 30).

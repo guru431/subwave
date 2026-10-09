@@ -24,15 +24,17 @@ CREATE INDEX IF NOT EXISTS messages_at ON messages (at);
 CREATE INDEX IF NOT EXISTS messages_listener ON messages (listener_id, at);
 
 -- подписки Web Push: адрес push-сервиса браузера и ключи шифрования.
--- `name` — имя слушателя на момент подписки, по нему ловится упоминание
+-- `name` — имя слушателя на момент подписки, по нему ловится упоминание;
+-- `last_success_at` — последний 2xx push-сервиса (NULL — успеха ещё не было)
 CREATE TABLE IF NOT EXISTS push_subscriptions (
-  endpoint    TEXT PRIMARY KEY,
-  p256dh      TEXT NOT NULL,
-  auth        TEXT NOT NULL,
-  listener_id TEXT NOT NULL,
-  name        TEXT NOT NULL,
-  created_at  TEXT NOT NULL,
-  failures    INTEGER NOT NULL DEFAULT 0
+  endpoint        TEXT PRIMARY KEY,
+  p256dh          TEXT NOT NULL,
+  auth            TEXT NOT NULL,
+  listener_id     TEXT NOT NULL,
+  name            TEXT NOT NULL,
+  created_at      TEXT NOT NULL,
+  failures        INTEGER NOT NULL DEFAULT 0,
+  last_success_at TEXT
 );
 
 -- дизлайки слушателей: одна отметка слушателя на цель. target — song_id у
@@ -63,10 +65,19 @@ CREATE TABLE IF NOT EXISTS dislike_decisions (
 );
 """
 
-# Подряд столько временных отказов push-сервиса — и подписка забывается: так
-# выглядит браузер, который удалили, не отписавшись.
+# Подписка забывается по отказам, только если их подряд не меньше
+# PUSH_FAILURES_MAX И успеха не было дольше PUSH_STALE_DAYS: так выглядит
+# браузер, который удалили, не отписавшись. Одного счётчика мало — пачка 5xx
+# за вечер означает беду push-сервиса, а не смерть подписки.
 PUSH_FAILURES_MAX = 5
+PUSH_STALE_DAYS = 30
 PUSH_GONE = (404, 410)
+# Сколько дней хранится лента. Она открыта всем, кто знает адрес станции,
+# поэтому короткая память — часть защиты; неделя — то, что нужно от чата
+# ведущему и слушателям.
+RETENTION_DAYS = 7
+# Как часто чистить ленту на пути чтения (`prune_on_read`)
+PRUNE_READ_EVERY = timedelta(minutes=10)
 
 
 def _iso(moment: datetime) -> str:
@@ -81,7 +92,8 @@ def _iso_ms(moment: datetime) -> str:
 
 
 class Store:
-    def __init__(self, path: str, retention_days: int = 14):
+    def __init__(self, path: str, retention_days: int = RETENTION_DAYS,
+                 now: datetime | None = None):
         # check_same_thread=False: сервер — ThreadingHTTPServer, соединение одно
         # на процесс. Блокировка — потому что рассылка push идёт фоновым
         # потоком: пара «запрос + commit» из двух потоков иначе может сойтись
@@ -89,18 +101,43 @@ class Store:
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
+        self._migrate(now or datetime.now(timezone.utc))
         self.db.commit()
         self.retention_days = retention_days
         self.lock = threading.Lock()
+        self._read_pruned_at: datetime | None = None
+
+    def _migrate(self, now: datetime) -> None:
+        """Довести базу прежней схемы. `CREATE TABLE IF NOT EXISTS` заводит
+        новые таблицы сам, а новую колонку в старой таблице — нет.
+
+        `last_success_at` у подписок, заведённых до неё, ставится временем
+        этого старта: о прошлых успехах ничего не известно, и отсчёт от даты
+        подписки стёр бы давние подписки первым же отказом.
+        """
+        columns = {r["name"] for r in self.db.execute(
+            "PRAGMA table_info(push_subscriptions)")}
+        if "last_success_at" not in columns:
+            # Колонка и её заполнение — одной транзакцией: упади процесс между
+            # ними, следующий старт увидел бы колонку и не заполнил её вовсе
+            self.db.execute("BEGIN")
+            self.db.execute("ALTER TABLE push_subscriptions ADD COLUMN last_success_at TEXT")
+            self.db.execute("UPDATE push_subscriptions SET last_success_at = ?", (_iso(now),))
 
     def close(self) -> None:
         self.db.close()
 
     def add(self, listener_id: str, name: str, text: str,
             now: datetime | None = None,
-            rate: tuple[int, int] | None = None) -> dict | None:
+            rate: tuple[int, int] | None = None,
+            room_rate: tuple[int, int] | None = None) -> dict | str:
         """Добавить сообщение. `rate` — (секунд, сообщений): лимит слушателя;
-        исчерпан — None, и ничего не добавлено.
+        `room_rate` — такой же, но на всю комнату. Исчерпан — строка-причина
+        (`"listener"` или `"room"`), и ничего не добавлено.
+
+        Общий потолок нужен потому, что `listener_id` выбирает сам клиент: новый
+        id на каждое сообщение снимал бы личный лимит целиком. Личный
+        проверяется первым — исчерпавшему свой честнее сказать про него.
 
         Подсчёт и вставка — под одной блокировкой, как у set_dislike: иначе два
         запроса разом прошли бы проверку оба.
@@ -114,7 +151,14 @@ class Store:
                     "SELECT COUNT(*) FROM messages WHERE listener_id = ? AND at > ?",
                     (listener_id, _iso(now - timedelta(seconds=seconds)))).fetchone()
                 if count >= cap:
-                    return None
+                    return "listener"
+            if room_rate is not None:
+                seconds, cap = room_rate
+                (count,) = self.db.execute(
+                    "SELECT COUNT(*) FROM messages WHERE at > ?",
+                    (_iso(now - timedelta(seconds=seconds)),)).fetchone()
+                if count >= cap:
+                    return "room"
             cur = self.db.execute(
                 "INSERT INTO messages (at, listener_id, name, text) VALUES (?, ?, ?, ?)",
                 (moment, listener_id, name, text))
@@ -147,29 +191,61 @@ class Store:
             self.db.commit()
         return cur.rowcount
 
+    def prune_on_read(self, now: datetime | None = None) -> int:
+        """`prune()` для пути чтения — не чаще раза в PRUNE_READ_EVERY.
+
+        Чистка шла только при записи, и тихий чат хранил старое сколь угодно
+        долго: ведущий получал сообщения давностью больше срока хранения.
+        Путь чтения открыт наружу, поэтому DELETE с commit на каждый запрос —
+        лишняя работа, а при сроке в неделю десять минут ничего не решают.
+        """
+        now = now or datetime.now(timezone.utc)
+        with self.lock:
+            if (self._read_pruned_at is not None
+                    and now - self._read_pruned_at < PRUNE_READ_EVERY):
+                return 0
+            self._read_pruned_at = now
+        return self.prune(now)
+
     def subscribe(self, sub: dict, listener_id: str, name: str,
-                  now: datetime | None = None, cap: int | None = None) -> bool:
+                  now: datetime | None = None, cap: int | None = None,
+                  per_listener: int | None = None) -> bool:
         """Завести или обновить подписку. Повторная подписка того же браузера —
         обычное дело (плеер переподписывается при каждом открытии, чтобы имя
         для упоминаний не отставало), поэтому это upsert, а не отказ.
 
+        Счётчик отказов upsert не трогает: переподписаться может кто угодно
+        снаружи, и обнуление держало бы мёртвый адрес в рассылке вечно.
+
         `cap` — потолок подписок: новую сверх него не заводим (False), прежнюю
-        обновляем всегда. Проверка и вставка — под одной блокировкой.
+        обновляем всегда. `per_listener` — потолок на один `listener_id`: новая
+        подписка сверх него вытесняет самую старую того же слушателя. Один id —
+        один браузер, и лишние адреса у него — брошенные прежние подписки;
+        отказ оставил бы настоящего слушателя без уведомлений из-за них.
+        Проверка и вставка — под одной блокировкой.
         """
         with self.lock:
-            if cap is not None and not self.db.execute(
-                    "SELECT 1 FROM push_subscriptions WHERE endpoint = ?",
-                    (sub["endpoint"],)).fetchone():
+            known = self.db.execute(
+                "SELECT 1 FROM push_subscriptions WHERE endpoint = ?",
+                (sub["endpoint"],)).fetchone()
+            if not known and per_listener is not None:
+                self.db.execute(
+                    "DELETE FROM push_subscriptions WHERE endpoint IN ("
+                    " SELECT endpoint FROM push_subscriptions WHERE listener_id = ?"
+                    " ORDER BY created_at DESC, rowid DESC LIMIT -1 OFFSET ?)",
+                    (listener_id, max(per_listener - 1, 0)))
+            if cap is not None and not known:
                 (count,) = self.db.execute(
                     "SELECT COUNT(*) FROM push_subscriptions").fetchone()
                 if count >= cap:
+                    self.db.rollback()
                     return False
             self.db.execute(
                 "INSERT INTO push_subscriptions "
                 "(endpoint, p256dh, auth, listener_id, name, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(endpoint) DO UPDATE SET "
                 "p256dh = excluded.p256dh, auth = excluded.auth, "
-                "listener_id = excluded.listener_id, name = excluded.name, failures = 0",
+                "listener_id = excluded.listener_id, name = excluded.name",
                 (sub["endpoint"], sub["p256dh"], sub["auth"], listener_id, name,
                  _iso(now or datetime.now(timezone.utc))))
             self.db.commit()
@@ -189,21 +265,38 @@ class Store:
                 "FROM push_subscriptions").fetchall()
         return [dict(r) for r in rows]
 
-    def push_result(self, endpoint: str, status: int) -> None:
-        """Учесть ответ push-сервиса: 404/410 — подписки больше нет, успех
-        обнуляет счётчик, прочий отказ его растит до PUSH_FAILURES_MAX."""
+    def push_result(self, endpoint: str, status: int,
+                    now: datetime | None = None) -> None:
+        """Учесть ответ push-сервиса.
+
+        404/410 — подписки больше нет, она забывается сразу. Успех обнуляет
+        счётчик отказов и помечает время. 0 — сбой на стороне комнаты (сеть,
+        DNS, таймаут; см. push.send): подписка тут ни при чём, и он не
+        считается вовсе — иначе пять сообщений в чате во время обрыва стёрли
+        бы все подписки разом. Прочий отказ (429, 5xx, …) растит счётчик, а
+        подписку забывает, только если отказов подряд не меньше
+        PUSH_FAILURES_MAX и успеха (или, пока его не было, подписки) нет
+        дольше PUSH_STALE_DAYS.
+        """
+        if status == 0:
+            return
+        moment = now or datetime.now(timezone.utc)
         with self.lock:
             if status in PUSH_GONE:
                 self.db.execute("DELETE FROM push_subscriptions WHERE endpoint = ?",
                                 (endpoint,))
             elif 200 <= status < 300:
-                self.db.execute("UPDATE push_subscriptions SET failures = 0 "
-                                "WHERE endpoint = ?", (endpoint,))
+                self.db.execute("UPDATE push_subscriptions SET failures = 0, "
+                                "last_success_at = ? WHERE endpoint = ?",
+                                (_iso(moment), endpoint))
             else:
                 self.db.execute("UPDATE push_subscriptions SET failures = failures + 1 "
                                 "WHERE endpoint = ?", (endpoint,))
-                self.db.execute("DELETE FROM push_subscriptions WHERE endpoint = ? "
-                                "AND failures >= ?", (endpoint, PUSH_FAILURES_MAX))
+                self.db.execute(
+                    "DELETE FROM push_subscriptions WHERE endpoint = ? AND failures >= ? "
+                    "AND COALESCE(last_success_at, created_at) <= ?",
+                    (endpoint, PUSH_FAILURES_MAX,
+                     _iso(moment - timedelta(days=PUSH_STALE_DAYS))))
             self.db.commit()
 
     def set_dislike(self, row: dict, cap: int, now: datetime | None = None) -> str:

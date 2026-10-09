@@ -63,6 +63,9 @@ services:
   #
   # Учётка Navidrome та же, что у контроллера, и берётся из `.env` — комната
   # ходит в Subsonic только на чтение, ради сверки заказа с коллекцией.
+  # Отдельную через эти же имена не передать: контроллер читает тот же .env
+  # (env_file) и ушёл бы под ней, потеряв флаг Report Real Path своей строки
+  # плеера. Своей учётке комнаты нужны свои ROOM_NAVIDROME_* (station/room/README.md).
   room:
     image: subwave-room:2
     pull_policy: never
@@ -70,7 +73,7 @@ services:
     restart: unless-stopped
     environment:
       ROOM_DB: /data/room.db
-      RETENTION_DAYS: "14"
+      RETENTION_DAYS: "7"
       RATE_SECONDS: "60"
       RATE_MAX: "10"
       NAVIDROME_URL: ${NAVIDROME_URL}

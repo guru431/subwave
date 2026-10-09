@@ -3,6 +3,7 @@
 Сервер поднимается на 127.0.0.1 и живёт доли секунды — это быстрый тест, а не
 `integration`: наружу он не ходит, Navidrome подменён.
 """
+import contextlib
 import importlib.util
 import json
 import socket
@@ -11,6 +12,7 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
@@ -141,6 +143,90 @@ def test_rate_limit_is_per_listener(room):
     for _ in range(3):
         call(base, "/messages", {"text": "раз"}, {"X-Listener-Id": "l1"})
     assert call(base, "/messages", {"text": "раз"}, {"X-Listener-Id": "l2"})[0] == 201
+
+
+@contextlib.contextmanager
+def serve(store, config):
+    """Сервер со своим Config — для потолков, которые фикстура не задаёт."""
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), server_mod.build_handler(store, config))
+    thread = threading.Thread(target=lambda: srv.serve_forever(poll_interval=0.02),
+                              daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{srv.server_address[1]}"
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_new_listener_id_does_not_lift_the_room_cap(tmp_path):
+    # X-Listener-Id выбирает сам клиент: прежде новый id на каждое сообщение
+    # снимал лимит целиком, и анонимный путь из интернета не знал потолка
+    store = store_mod.Store(str(tmp_path / "room.db"))
+    try:
+        with serve(store, server_mod.Config(rate_max=3, rate_global=4)) as base:
+            for i in range(4):
+                assert call(base, "/messages", {"text": "раз"},
+                            {"X-Listener-Id": f"spam{i}"})[0] == 201
+            code, body = call(base, "/messages", {"text": "ещё"},
+                              {"X-Listener-Id": "spam-new"})
+            assert code == 429 and "error" in body
+            assert len(store.since(0, 50)) == 4
+    finally:
+        store.close()
+
+
+def test_resolve_has_a_room_wide_limit(tmp_path, monkeypatch):
+    # у сверки нет личности (плеер шлёт её без заголовков), а каждая — до шести
+    # походов в Navidrome: без потолка /resolve был открытым усилителем нагрузки
+    calls = []
+    monkeypatch.setattr(server_mod.subsonic, "resolve",
+                        lambda q, *a, **kw: calls.append(q) or
+                        {"exact": None, "alternatives": []})
+    store = store_mod.Store(str(tmp_path / "room.db"))
+    try:
+        with serve(store, server_mod.Config(navidrome=("http://navidrome", "u", "p"),
+                                            resolve_max=2)) as base:
+            assert call(base, "/resolve?q=raz")[0] == 200
+            assert call(base, "/resolve?q=dva")[0] == 200
+            code, body = call(base, "/resolve?q=tri")
+            assert code == 429 and "error" in body
+            # пустой запрос отвергается раньше и потолок не тратит
+            assert call(base, "/resolve")[0] == 400
+            assert calls == ["raz", "dva"]
+    finally:
+        store.close()
+
+
+def test_window_counts_hits_in_a_sliding_window():
+    window = server_mod.Window(seconds=60, cap=2)
+    assert window.take(now=0) and window.take(now=1)
+    assert not window.take(now=30)               # отказ попытку не засчитывает
+    assert window.take(now=60.5)                 # первый удар вышел из окна
+    assert not window.take(now=60.9)             # второй (в 1) — ещё нет
+    assert window.take(now=121)
+
+
+def test_feed_limit_is_capped_whatever_the_client_asks(room):
+    # лента открыта наружу: сколько бы ни попросил клиент, отдаётся не больше
+    # 50 последних (столько и берёт плеер), листать назад нечем
+    base, store, _ = room
+    for i in range(60):
+        store.add(f"l{i}", "Аня", f"сообщение {i}")
+    for path in ("/messages?limit=1000", "/unread?limit=1000"):
+        code, body = call(base, path)
+        assert code == 200 and len(body["messages"]) == 50
+        assert body["messages"][-1]["text"] == "сообщение 59"
+
+
+def test_unread_never_serves_what_is_past_retention(room):
+    # чистка шла только при записи: тихий чат хранил старое сколь угодно
+    # долго, и ведущий получал сообщения давностью больше срока хранения
+    base, store, _ = room
+    store.add("l1", "Аня", "давнее", now=datetime(2020, 1, 1, tzinfo=timezone.utc))
+    store.add("l1", "Аня", "свежее")
+    _, body = call(base, "/unread")
+    assert [m["text"] for m in body["messages"]] == ["свежее"]
 
 
 def test_unread_returns_only_what_is_newer(room):

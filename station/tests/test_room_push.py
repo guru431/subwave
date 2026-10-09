@@ -8,8 +8,10 @@
 import importlib.util
 import json
 import os
+import sqlite3
 import sys
 import threading
+from datetime import datetime, timedelta, timezone
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -139,6 +141,16 @@ def test_subscription_with_broken_keys_is_refused():
     assert push.check_subscription(bad)[0] is None
 
 
+def test_subscription_with_a_key_off_the_curve_is_refused():
+    # 65 байт с 0x04 впереди, но не точка P-256: шифрование на таком ключе
+    # падает исключением, а исключение рассылки (код 0) подписку не стирает —
+    # значит, её нельзя и принять
+    bad = _subscription()
+    bad["keys"]["p256dh"] = push.b64u(b"\x04" + b"\x00" * 64)
+    sub, problem = push.check_subscription(bad)
+    assert sub is None and problem
+
+
 def test_send_reports_the_push_service_answer():
     vapid = push.Vapid(ec.generate_private_key(ec.SECP256R1()))
     ua, p256dh, auth = _browser_keys()
@@ -192,7 +204,7 @@ def _subscribe(store, listener, name, endpoint=None):
 
 
 class Inline:
-    """spawn без потока: тест проверяет, что уехало, а не планировщик."""
+    """wake без потока: тест проверяет, что уехало, а не планировщик."""
     def __call__(self, fn, *args):
         fn(*args)
 
@@ -204,7 +216,7 @@ def test_every_message_wakes_everyone_but_its_author(store):
     _subscribe(store, "anya-phone", "аня")        # тот же человек, другое устройство
     _subscribe(store, "petya", "Петя")
     sent = []
-    n = notify.Notifier(store, vapid=None, subject="s", spawn=Inline(),
+    n = notify.Notifier(store, vapid=None, subject="s", wake=Inline(),
                         sender=lambda sub, payload, *_: sent.append((sub["listener_id"], payload)) or 201)
     assert n.on_message("petya", "Петя", "Всем привет!") == 2
     assert sorted(who for who, _ in sent) == ["anya", "anya-phone"]
@@ -215,20 +227,121 @@ def test_every_message_wakes_everyone_but_its_author(store):
     assert [who for who, _ in sent] == ["petya"]
 
 
-def test_gone_subscription_is_forgotten_and_flaky_one_after_five_failures(store):
-    gone = _subscribe(store, "a", "Аня")
-    flaky = _subscribe(store, "b", "Боря")
-    store.push_result(gone, 410)
-    assert [s["endpoint"] for s in store.subscriptions()] == [flaky]
-    for _ in range(store_mod.PUSH_FAILURES_MAX - 1):
-        store.push_result(flaky, 503)
-    assert store.subscriptions()
-    store.push_result(flaky, 201)          # успех обнуляет счётчик
-    for _ in range(store_mod.PUSH_FAILURES_MAX - 1):
-        store.push_result(flaky, 503)
-    assert store.subscriptions()
-    store.push_result(flaky, 503)
+def test_messages_waiting_for_delivery_collapse_into_the_latest(store):
+    # в шторке у чата одна карточка (тег и Topic `subwave-chat`), поэтому
+    # неотправленное заменяется новым: очередь не длиннее числа подписок,
+    # сколько бы сообщений ни пришло, пока рассылка занята
+    _subscribe(store, "anya", "Аня")
+    _subscribe(store, "petya", "Петя")
+    sent = []
+    n = notify.Notifier(store, vapid=None, subject="s", wake=lambda drain: None,
+                        sender=lambda sub, payload, *_: sent.append(
+                            (sub["listener_id"], payload["body"])) or 201)
+    for i in range(50):
+        n.on_message(f"spam{i}", f"Спамер {i}", f"сообщение {i}")
+    assert len(n.pending) == 2
+    assert n.drain() == 2
+    assert sorted(sent) == [("anya", "сообщение 49"), ("petya", "сообщение 49")]
+    assert n.drain() == 0
+
+
+def test_delivery_runs_on_one_thread_however_many_messages(store):
+    # прежде каждое сообщение запускало свой поток, и сотня сообщений с разных
+    # id — сотня параллельных обходов до 500 подписок по 10 с на каждую
+    _subscribe(store, "anya", "Аня")
+    entered, release = threading.Event(), threading.Event()
+    sent = []
+
+    def sender(sub, payload, *_):
+        entered.set()
+        release.wait(timeout=5)
+        sent.append(payload["body"])
+        return 201
+
+    before = set(threading.enumerate())
+    n = notify.Notifier(store, vapid=None, subject="s", sender=sender)
+    n.on_message("petya", "Петя", "первое")
+    assert entered.wait(timeout=5)                  # рассылка занята первым
+    for i in range(2, 6):
+        n.on_message("petya", "Петя", f"сообщение {i}")
+    assert len(set(threading.enumerate()) - before) == 1
+    release.set()
+    for _ in range(250):
+        if len(sent) == 2:
+            break
+        threading.Event().wait(0.02)
+    # пока шла первая рассылка, четыре сообщения схлопнулись в последнее
+    assert sent == ["первое", "сообщение 5"]
+
+
+T0 = datetime(2026, 10, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+
+def _subscribe_at(store, listener, now):
+    sub, _ = push.check_subscription(_subscription(f"{FCM}{listener}"))
+    store.subscribe(sub, listener, listener, now=now)
+    return sub["endpoint"]
+
+
+def test_gone_subscription_is_forgotten_at_once(store):
+    gone = _subscribe_at(store, "a", T0)
+    kept = _subscribe_at(store, "b", T0)
+    store.push_result(gone, 410, now=T0)
+    assert [s["endpoint"] for s in store.subscriptions()] == [kept]
+    store.push_result(kept, 404, now=T0)
     assert store.subscriptions() == []
+
+
+def test_network_failure_on_our_side_never_erases_subscriptions(store):
+    # код 0 — URLError, OSError, таймаут: обрыв интернета или DNS у комнаты.
+    # Прежде пять таких отказов подряд стирали подписку, то есть пять
+    # сообщений в чате во время обрыва — все подписки разом
+    flaky = _subscribe_at(store, "a", T0)
+    for day in range(60):
+        store.push_result(flaky, 0, now=T0 + timedelta(days=day))
+    assert [s["endpoint"] for s in store.subscriptions()] == [flaky]
+
+
+def test_refusals_erase_only_a_subscription_without_success_for_a_month(store):
+    flaky = _subscribe_at(store, "a", T0)
+    # пачка отказов в первый же день — временная беда push-сервиса, а не смерть
+    for _ in range(store_mod.PUSH_FAILURES_MAX * 3):
+        store.push_result(flaky, 503, now=T0 + timedelta(hours=1))
+    assert store.subscriptions()
+    store.push_result(flaky, 201, now=T0 + timedelta(days=10))    # жива
+    late = T0 + timedelta(days=10 + store_mod.PUSH_STALE_DAYS + 1)
+    # успеха нет больше месяца, но отказов ещё мало — рано
+    for _ in range(store_mod.PUSH_FAILURES_MAX - 1):
+        store.push_result(flaky, 429, now=late)
+    assert store.subscriptions()
+    store.push_result(flaky, 500, now=late)
+    assert store.subscriptions() == []
+
+
+def test_database_from_before_success_times_keeps_its_subscriptions(tmp_path):
+    # room.db на станции заведён без времени последнего успеха: колонка
+    # появляется сама, а старые строки получают отсрочку от первого старта,
+    # а не стираются первым же отказом из-за давней даты подписки
+    path = tmp_path / "room.db"
+    db = sqlite3.connect(path)
+    db.execute("CREATE TABLE push_subscriptions (endpoint TEXT PRIMARY KEY, "
+               "p256dh TEXT NOT NULL, auth TEXT NOT NULL, listener_id TEXT NOT NULL, "
+               "name TEXT NOT NULL, created_at TEXT NOT NULL, "
+               "failures INTEGER NOT NULL DEFAULT 0)")
+    db.execute("INSERT INTO push_subscriptions VALUES (?, 'k', 'a', 'l1', 'Аня', ?, ?)",
+               (FCM, (T0 - timedelta(days=90)).isoformat(), store_mod.PUSH_FAILURES_MAX))
+    db.commit()
+    db.close()
+    s = store_mod.Store(str(path), now=T0)
+    try:
+        s.push_result(FCM, 503, now=T0 + timedelta(days=1))
+        assert [x["endpoint"] for x in s.subscriptions()] == [FCM]
+        s.push_result(FCM, 503, now=T0 + timedelta(days=store_mod.PUSH_STALE_DAYS + 1))
+        assert s.subscriptions() == []
+    finally:
+        s.close()
+    # повторный старт колонку не заводит заново и не падает
+    store_mod.Store(str(path), now=T0).close()
 
 
 def _turn(text, aired, kind="chat"):
@@ -240,7 +353,7 @@ def test_dj_reply_rings_once_and_history_never(store):
     window = [_turn("старый ответ", "2026-09-23T10:00:00Z"),
               _turn("это была подводка", "2026-09-23T10:01:00Z", kind="link")]
     replies = []
-    n = notify.Notifier(store, vapid=None, subject="s", spawn=Inline(),
+    n = notify.Notifier(store, vapid=None, subject="s", wake=Inline(),
                         sender=lambda sub, payload, *_: replies.append(payload["body"]) or 201)
     watch = notify.DjWatch(lambda: list(window), n, store)
     assert watch.tick() == 0                           # засев: история — не новость
@@ -266,7 +379,7 @@ def room(tmp_path):
     delivered = []
     notifier = notify.Notifier(
         store, push.Vapid(ec.generate_private_key(ec.SECP256R1())), "https://fm.example.org",
-        spawn=Inline(),
+        wake=Inline(),
         sender=lambda sub, payload, *_: delivered.append((sub["listener_id"], payload)) or 201)
     config = server_mod.Config(rate_seconds=60, rate_max=10, max_body=8192,
                                notifier=notifier)
@@ -356,7 +469,7 @@ def test_subscription_over_the_cap_is_refused_but_renewal_is_not(tmp_path):
     store = store_mod.Store(str(tmp_path / "room.db"))
     notifier = notify.Notifier(
         store, push.Vapid(ec.generate_private_key(ec.SECP256R1())), "https://fm.example.org",
-        spawn=Inline())
+        wake=Inline())
     srv = ThreadingHTTPServer(("127.0.0.1", 0), server_mod.build_handler(
         store, server_mod.Config(notifier=notifier, push_max=1)))
     thread = threading.Thread(target=lambda: srv.serve_forever(poll_interval=0.02),
@@ -370,6 +483,29 @@ def test_subscription_over_the_cap_is_refused_but_renewal_is_not(tmp_path):
                     listener="petya", name="Петя")[0] == 429
         assert call(base, "/push/subscribe", {"subscription": first})[0] == 201
         assert len(store.subscriptions()) == 1
+    finally:
+        srv.shutdown()
+        srv.server_close()
+        store.close()
+
+
+def test_one_listener_cannot_hold_more_than_its_share_of_subscriptions(tmp_path):
+    store = store_mod.Store(str(tmp_path / "room.db"))
+    notifier = notify.Notifier(
+        store, push.Vapid(ec.generate_private_key(ec.SECP256R1())), "https://fm.example.org",
+        wake=Inline())
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), server_mod.build_handler(
+        store, server_mod.Config(notifier=notifier, push_per_listener=2)))
+    thread = threading.Thread(target=lambda: srv.serve_forever(poll_interval=0.02),
+                              daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
+        for i in range(5):
+            assert call(base, "/push/subscribe",
+                        {"subscription": _subscription(f"{FCM}{i}")})[0] == 201
+        assert [s["endpoint"] for s in store.subscriptions()
+                if s["listener_id"] == "anya"] == [f"{FCM}3", f"{FCM}4"]
     finally:
         srv.shutdown()
         srv.server_close()

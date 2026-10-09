@@ -55,8 +55,13 @@ v1.8-форка (`user_version` 21, `path` есть, `era_untrusted` нет) и 
   pipeline: подводки и стык (C04, C09).
 - v1.12.0 — `one arbitrated talk-slot scheduler for every spoken segment` (#1505):
   все реплики через один планировщик слотов.
-- v1.11.0 — `first-class station credentials` (#1484): маршруты слушателя под
-  `requireStationAuth` — заказ (C02) и комната.
+- v1.11.0 — `first-class station credentials` (#1484): пароль станции в мобильном
+  приложении, маршрутов контроллера не меняет. `requireStationAuth` (#1575) стоит
+  только на `GET /similar-tracks`: ни заказ (C02), ни комната под ним не стоят.
+  Комната — вообще не маршрут контроллера: отдельный контейнер за Caddy `/room/*`,
+  открытый всем, кто знает адрес станции (`station/room/README.md`, «Личность
+  слушателя»). Поправка 2026-10-09: прежде здесь комната ошибочно числилась под
+  `requireStationAuth`.
 - v1.16.0/v1.17.0 — ротация id Navidrome 0.64 (#1255, #1703): `library-db` и
   сверка библиотеки (C12).
 - v1.17.0 — `show-filter: flatten OpenSubsonic genre objects in trackGenres`
