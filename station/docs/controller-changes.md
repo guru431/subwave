@@ -715,11 +715,15 @@ bash station/tools/push-to-station.sh <ref>     # по умолчанию HEAD
 
 [push-to-station.sh](../tools/push-to-station.sh) берёт хост и SSH из
 `station/.env` (`STATION_SSH`, `SSH_PORT`, `SSH_KEY`; шаблон — `station/.env.example`),
-собирает `git bundle` из всех веток и тегов, копирует его на хост и там: заводит
-`~/radio`, если его нет, делает `fetch` из бандла, `checkout -f --detach <sha>` и
-`git clean -fd`, удаляет бандл и печатает `station: ~/radio @ <sha>`. Доступа к
-приватному `origin` хосту не нужно. Правки, сделанные в клоне руками, следующий
-вызов затрёт.
+собирает `git bundle` из всех веток, тегов и самой ревизии, копирует его на хост и там:
+заводит `~/radio`, если его нет, делает `fetch` из бандла, `checkout -f --detach <sha>`
+и `git clean -fd`, печатает `station: ~/radio @ <sha>`. Доступа к приватному `origin`
+хосту не нужно. Правки, сделанные в клоне руками, следующий вызов затрёт.
+
+Ревизия едет в бандле временным ref-ом `refs/push-to-station/head` (удаляется по
+выходу скрипта): коммит, достижимый только из detached HEAD или remote-tracking ref,
+в `--branches --tags` не попадал, и `checkout` на хосте падал. Бандл на хосте удаляет
+`trap … EXIT` — и при сбое `fetch` или `checkout` тоже, а не только при успехе.
 
 Бандл, а не архив с рабочей машины, — из-за концов строк: дерево, приехавшее с
 Windows с CRLF, роняет shell-тесты апстрима (`aio-log-link`, `instructions`,
