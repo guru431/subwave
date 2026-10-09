@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
-import { pollWhileVisible } from '@/lib/poll';
+import { useCallback, useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import { pollWhileVisible, type Poll } from '@/lib/poll';
 import { splitAudibleTurns } from '@/lib/sessionFeed';
 import { useStationClient } from '@/lib/stationClient';
 import type {
@@ -58,7 +58,8 @@ export interface UseStationFeedOptions {
    *  so a tuned-in player keeps polling in the background instead.
    *  A ref rather than a boolean because this hook runs BEFORE usePlayer (the
    *  Opus gate needs the feed first) and because tuning in must not tear down
-   *  and re-subscribe the poll. */
+   *  and re-subscribe the poll. Fork (W07): the ref is read on a visibility
+   *  flip, so whoever flips it while the page is hidden calls `resyncPoll`. */
   keepAliveWhenHidden?: RefObject<boolean>;
 }
 
@@ -74,7 +75,9 @@ function setIfChanged<T>(setter: Dispatch<SetStateAction<T>>, next: T): void {
 // The listener offset is the advertised stream.bufferSeconds. Never measure it
 // as `buffered.end − currentTime`: that reports only the demuxed window (2.25s
 // against a true 22.5s offset), which flips every title ~20s early.
-export function useStationFeed({ keepAliveWhenHidden }: UseStationFeedOptions = {}): StationFeed {
+export function useStationFeed(
+  { keepAliveWhenHidden }: UseStationFeedOptions = {},
+): StationFeed & { resyncPoll: () => void } {
   const client = useStationClient();
   const [nowPlaying, setNowPlaying] = useState<NowPlayingTrack | null>(null);
   const [context, setContext] = useState<StationContext | null>(null);
@@ -102,6 +105,7 @@ export function useStationFeed({ keepAliveWhenHidden }: UseStationFeedOptions = 
   // time. Raw payload in a ref, filtered copy in state.
   const rawSessionRef = useRef<SessionPayload>(EMPTY_SESSION);
   const voiceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollRef = useRef<Poll | null>(null);
 
   useEffect(() => {
     // Re-derive the visible feed and re-arm for the next line to become
@@ -211,8 +215,10 @@ export function useStationFeed({ keepAliveWhenHidden }: UseStationFeedOptions = 
       5000,
       () => (keepAliveWhenHidden?.current ? BACKGROUND_POLL_MS : null),
     );
+    pollRef.current = stopPolling;
     return () => {
       stopPolling();
+      pollRef.current = null;
       // A held track switch (or a held spoken line) must not land after teardown.
       if (promoteTimerRef.current) {
         clearTimeout(promoteTimerRef.current);
@@ -225,5 +231,9 @@ export function useStationFeed({ keepAliveWhenHidden }: UseStationFeedOptions = 
     };
   }, [client, keepAliveWhenHidden]);
 
-  return { nowPlaying, context, dj, activeShow, listeners, streamOnline, llmTokens, state, session, trackStartedAt, opusEnabled, timezone, locale };
+  // Fork (W07): see keepAliveWhenHidden. Stable, and deliberately not part of
+  // StationFeed — PlayerCore keeps it out of the feed context.
+  const resyncPoll = useCallback(() => { pollRef.current?.resync(); }, []);
+
+  return { nowPlaying, context, dj, activeShow, listeners, streamOnline, llmTokens, state, session, trackStartedAt, opusEnabled, timezone, locale, resyncPoll };
 }

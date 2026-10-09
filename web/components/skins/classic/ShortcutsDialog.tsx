@@ -3,6 +3,7 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { cn } from '@/lib/cn';
 import { Kbd } from '@/components/ui/kbd';
+import { useSkinSelection } from '@/components/skins/SkinContext';
 
 interface Shortcut {
   keys: string[];
@@ -37,6 +38,10 @@ export interface ShortcutsDialogProps {
 export default function ShortcutsDialog({ open, onOpenChange, container }: ShortcutsDialogProps) {
   const contained = !!container;
   const pos = contained ? 'absolute' : 'fixed';
+  // Fork (W01): `S` cycles the skins on offer, and the player page offers one
+  // (PlayerShell) — a key that does nothing is not listed.
+  const skinCount = useSkinSelection()?.skins.length ?? 0;
+  const shortcuts = skinCount > 1 ? SHORTCUTS : SHORTCUTS.filter(s => s.keys[0] !== 'S');
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal container={container}>
@@ -66,7 +71,7 @@ export default function ShortcutsDialog({ open, onOpenChange, container }: Short
 
           <div className="v3-scroll flex-1 overflow-auto px-6 py-3">
             <ul className="flex flex-col">
-              {SHORTCUTS.map((s) => (
+              {shortcuts.map((s) => (
                 <li
                   key={s.label}
                   className="flex items-center justify-between gap-4 border-b border-dashed border-separator-soft py-2.5"

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type RefObject } from 'react';
 import { useStationClient } from '@/lib/stationClient';
+import { mediaText } from '@/lib/mediaMetadata';
 import type { NowPlayingTrack, SessionTurn } from '@/lib/types';
 
 // How long after the last spoken turn the DJ avatar stays on the lock screen:
@@ -34,6 +35,9 @@ export interface UseMediaSessionParams {
   /** On-air host name, shown as the metadata "artist" while the DJ is talking so
    *  the lock screen doesn't pretend Track Artist is speaking. */
   personaName?: string | null;
+  /** Fork (W07): the station's own name, the fallback title/album in place of
+   *  the product's (see lib/mediaMetadata.ts). */
+  stationName?: string | null;
 }
 
 // Turn kinds that map to "the DJ is on the mic". Tracks and request acks share
@@ -96,6 +100,7 @@ export function useMediaSession({
   boothFeed,
   personaAvatarUrl,
   personaName,
+  stationName,
 }: UseMediaSessionParams): void {
   const client = useStationClient();
   // True for TALKING_LINGER_MS after the most recent voice turn. Held in state
@@ -153,13 +158,15 @@ export function useMediaSession({
     // with the persona wins while the DJ talks. The cover stays in the chain so
     // the next push after the linger expires reverts on its own.
     const useAvatar = talking && !!personaArt;
-    const title = useAvatar
-      ? (nowPlaying?.title || 'SUB/WAVE')
-      : (nowPlaying?.title || 'SUB/WAVE');
-    const artist = useAvatar
-      ? (personaName || nowPlaying?.artist || 'Live broadcast')
-      : (nowPlaying?.artist || 'Live broadcast');
-    const album = nowPlaying?.album || 'SUB/WAVE';
+    // Fork (W07): Russian text, the station's name and no "[Unknown Album]".
+    const { title, artist, album } = mediaText({
+      title: nowPlaying?.title,
+      artist: nowPlaying?.artist,
+      album: nowPlaying?.album,
+      talking: useAvatar,
+      personaName,
+      stationName,
+    });
 
     let artwork: MediaImage[];
     if (useAvatar && personaArt) {
@@ -184,6 +191,7 @@ export function useMediaSession({
     talking,
     personaAvatarUrl,
     personaName,
+    stationName,
     client,
   ]);
 

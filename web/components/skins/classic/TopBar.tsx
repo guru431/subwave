@@ -2,6 +2,7 @@
 
 import { memo } from 'react';
 import { buildTagline } from '@/lib/tagline';
+import { ruStationName } from '@/lib/ru';
 import InstallButton from '@/components/InstallButton';
 import ThemeSwitcher from '@/components/ThemeSwitcher';
 import type { ActiveShow, StationContext } from '@/lib/types';
@@ -46,7 +47,7 @@ export default memo(function TopBar({
             data-spinning={tunedIn ? 'true' : undefined}
             aria-hidden="true"
           />
-          <span className="v3-eyebrow shrink-0">{stationName?.trim() || 'AI радио'}</span>
+          <span className="v3-eyebrow shrink-0">{ruStationName(stationName)}</span>
           {showName && (
             onOpenSchedule ? (
               <button

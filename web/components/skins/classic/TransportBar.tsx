@@ -227,14 +227,17 @@ export default memo(function TransportBar({
             // iOS does not permit volume changes from a web app. Render the
             // familiar control in its native disabled state, not a tappable-
             // looking imitation; VoiceOver explains the hardware route.
+            // Fork (W05): it still mirrors the mute, which iOS does honour —
+            // pinned at 100 it read as "sound on" while muted.
             <div className="flex items-center gap-2 lg:gap-4">
               <input
                 type="range"
                 min={0}
                 max={100}
-                value={100}
+                value={muted ? 0 : 100}
                 disabled
                 aria-label="Громкость на iPhone задаётся кнопками устройства"
+                aria-valuetext={muted ? 'звук выключен' : undefined}
                 className="h-10 w-[50px] cursor-not-allowed opacity-40 lg:h-[48px] lg:w-[136px]"
               />
               {muteButton}

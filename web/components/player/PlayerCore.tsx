@@ -108,7 +108,14 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
     idleStopped,
   } = usePlayer({ opusEnabled: feed.opusEnabled });
 
-  useEffect(() => { tunedInRef.current = tunedIn; }, [tunedIn]);
+  // Fork (W07): tuning in or out from the lock screen, headphones or a media
+  // key flips the ref while the page stays hidden — no visibility change to
+  // make the poll re-read it, so resync here or it stays as it was.
+  const resyncFeedPoll = feed.resyncPoll;
+  useEffect(() => {
+    tunedInRef.current = tunedIn;
+    resyncFeedPoll();
+  }, [tunedIn, resyncFeedPoll]);
 
   // Only an explicit false is offline — see PlayerAudio.offline.
   const offline = feed.streamOnline === false;
@@ -175,6 +182,8 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
     boothFeed: feed.session.messages,
     personaAvatarUrl,
     personaName,
+    // Fork (W07): the same source as the classic header's station name.
+    stationName: typeof feed.dj?.station === 'string' ? feed.dj.station : null,
   });
 
   // useStationFeed returns a fresh object every render; its fields are

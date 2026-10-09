@@ -98,6 +98,10 @@ export function ruAgo(rel: string): string {
   return m && unit ? `${m[1]} ${unit} назад` : `${rel} назад`;
 }
 
+// Имя станции из настройки `station` (W04) или запасное, пока оно не пришло.
+// Одно на шапку плеера и экран блокировки (lib/mediaMetadata.ts).
+export const ruStationName = (v?: string | null): string => v?.trim() || 'AI радио';
+
 // Navidrome подставляет «[Unknown Album]» вместо пустого тега; это не название
 // альбома, а заглушка, поэтому в эфирной карточке она не показывается вовсе.
 const ALBUM_PLACEHOLDERS = new Set(['[unknown album]', 'unknown album', '[unknown]']);

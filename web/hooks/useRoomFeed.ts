@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
-import { pollWhileVisible } from '@/lib/poll';
+import { pollWhileVisible, type Poll } from '@/lib/poll';
 import { listener, setLastSeenId, setListenerName } from '@/lib/listener';
 import { unreadCount, type RoomMessage } from '@/lib/roomRules';
 
@@ -19,7 +19,8 @@ export interface UseRoomFeedOptions {
   /** Скрытая вкладка опрашивает комнату, только пока играет эфир: страница при
    *  этом и так жива и ходит за /now-playing. Ref, а не значение, — чтобы
    *  включение эфира не пересобирало подписку (тот же приём, что у
-   *  useStationFeed). */
+   *  useStationFeed). Ref читается на смене видимости, поэтому кто меняет его
+   *  в скрытой вкладке, зовёт `resyncPoll`. */
   keepAliveWhenHidden?: RefObject<boolean>;
   /** Зовётся на каждой непустой пачке. `firstLoad` — пачка первого удачного
    *  опроса: по ней ничего не должно звучать, это история, а не новое.
@@ -35,6 +36,9 @@ export interface RoomFeed {
   sending: boolean;
   /** `null` — отправлено; строка — причина отказа для показа человеку. */
   send: (text: string, name: string) => Promise<string | null>;
+  /** Перечитать `keepAliveWhenHidden` сейчас, а не на следующей смене видимости:
+   *  эфир, включённый с экрана блокировки, иначе не запускал опрос. Стабильна. */
+  resyncPoll: () => void;
 }
 
 export function useRoomFeed({ open, keepAliveWhenHidden, onArrive }: UseRoomFeedOptions): RoomFeed {
@@ -50,6 +54,7 @@ export function useRoomFeed({ open, keepAliveWhenHidden, onArrive }: UseRoomFeed
   const arriveRef = useRef(onArrive);
   const busyRef = useRef(false);
   const ownIdsRef = useRef<Set<number>>(new Set());
+  const pollerRef = useRef<Poll | null>(null);
 
   useEffect(() => { arriveRef.current = onArrive; }, [onArrive]);
   useEffect(() => { openRef.current = open; }, [open]);
@@ -97,11 +102,19 @@ export function useRoomFeed({ open, keepAliveWhenHidden, onArrive }: UseRoomFeed
   // переднем плане стреляет сразу, поэтому свежее подтянется тем же движением.
   useEffect(() => { if (open) markRead(sinceRef.current); }, [open, markRead]);
 
-  useEffect(() => pollWhileVisible(
-    () => { void poll(); },
-    open ? OPEN_POLL_MS : CLOSED_POLL_MS,
-    () => (keepAliveWhenHidden?.current ? CLOSED_POLL_MS : null),
-  ), [open, poll, keepAliveWhenHidden]);
+  useEffect(() => {
+    const poller = pollWhileVisible(
+      () => { void poll(); },
+      open ? OPEN_POLL_MS : CLOSED_POLL_MS,
+      () => (keepAliveWhenHidden?.current ? CLOSED_POLL_MS : null),
+    );
+    pollerRef.current = poller;
+    return () => {
+      poller();
+      pollerRef.current = null;
+    };
+  }, [open, poll, keepAliveWhenHidden]);
+  const resyncPoll = useCallback(() => { pollerRef.current?.resync(); }, []);
 
   const send = useCallback(async (text: string, name: string): Promise<string | null> => {
     const body = text.trim();
@@ -140,5 +153,5 @@ export function useRoomFeed({ open, keepAliveWhenHidden, onArrive }: UseRoomFeed
     }
   }, [markRead, poll]);
 
-  return { messages, unread, sending, send };
+  return { messages, unread, sending, send, resyncPoll };
 }
