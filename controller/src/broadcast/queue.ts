@@ -4173,11 +4173,30 @@ class Queue {
       let d = Number(ahead.track?.duration) || 0;
       if (!d && ahead.track?.id) d = Number(library.get(ahead.track.id)?.durationSec) || 0;
       if (!d) return null;
-      const playable = playableDurationSec(d, ahead.cueOutSec ?? null, ahead.cueInSec ?? null);
+      // Fork: an unsent item's cues are stamped only at its drain — count it
+      // the way the drain will cut it (undrainedPlayableSec).
+      const playable = ahead.sent
+        ? playableDurationSec(d, ahead.cueOutSec ?? null, ahead.cueInSec ?? null)
+        : this.undrainedPlayableSec(ahead, d);
       if (playable == null) return null;
       remaining += playable;
     }
     return remaining + this.hiddenDelayBeforeItemAirs(item);
+  }
+
+  // Fork: the span an UNSENT item will air for, composed exactly as the drain
+  // composes it for resolveBoundaryCut — the #447 length cap (never on a
+  // request) and the trimmed silent tail, earliest wins, measured from the
+  // trimmed head. Its own cueOutSec/cueInSec do not exist until it drains, so
+  // counting the tagged length overstated every forecast behind a capped or
+  // trimmed pick (dropStalePicks took off picks that fit their show). The show
+  // boundary cut and a stem blend are left out: both are decided AT the drain,
+  // from this very forecast.
+  undrainedPlayableSec(item: QueueItem, durSec: number): number | null {
+    const cap = item.requestedBy ? null : settings.effectiveMaxTrackSec();
+    const trim = silenceTrim.resolveSilenceTrim(item.track);
+    const early = positiveCues([cap, trim.cueOutSec]);
+    return playableDurationSec(durSec, early.length ? Math.min(...early) : null, trim.cueInSec);
   }
 
   // Tracks played in the last `hours` hours — used by the picker to block
