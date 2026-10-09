@@ -3,23 +3,47 @@
 # службами, и память кончается у него раньше, чем у cgroup контейнера
 # (tsc однажды пять раз подряд уронил хост в глобальный OOM).
 #   bash station/tools/guarded.sh <команда> [аргументы…]
-# MemAvailable ниже MIN_AVAIL МБ (по умолчанию 500) — команда снимается, код 3.
+# MemAvailable ниже MIN_AVAIL МБ (по умолчанию 500) — команда снимается, код 3:
+# SIGTERM её группе процессов, через GRACE с (по умолчанию 10) — SIGKILL.
+#
+# Команда идёт в своей группе (setsid): sudo не пересылает команде сигнал от
+# процесса из своей группы, а без setsid сторож в ней и был — `sudo docker
+# build` сигнал «снятия» просто проглатывал. Процессы под sudo принадлежат root:
+# сигнал группе идёт через `sudo -n kill`, а нет такого права — своими правами;
+# жива ли команда, видно по /proc, а не по `kill -0` (процессу root он отвечает
+# «нет прав», то есть «мёртв»).
 set -u
 MIN_AVAIL=${MIN_AVAIL:-500}
-"$@" &
+GRACE=${GRACE:-10}
+# Скрипт не интерактивный: фоновый процесс не лидер группы, и setsid делает
+# группой его самого, без лишнего fork, — $! и есть номер группы.
+setsid "$@" &
 pid=$!
-killed=
-low=999999
-while kill -0 "$pid" 2>/dev/null; do
-  avail=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
+signal() {   # $1 — сигнал всей группе команды
+  sudo -n kill -"$1" -- -"$pid" 2>/dev/null || kill -"$1" -- -"$pid" 2>/dev/null \
+    || echo "GUARD не удалось послать SIG$1 группе $pid — нет прав"
+}
+# Ctrl+C и прочие сигналы сторожу — команде: она в другой группе и сама их
+# больше не получает, а без этого пережила бы сторожа.
+trap 'echo "GUARD прерван — останавливаю: $*"; signal TERM' INT TERM HUP
+mem() { awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo; }
+stopped=
+hard=
+low=$(mem)
+sleep 0.5   # первая проверка — когда команда уже запущена, а не до её exec
+while [ -e "/proc/$pid" ]; do
+  avail=$(mem)
   [ "$avail" -lt "$low" ] && low=$avail
-  if [ -z "$killed" ] && [ "$avail" -lt "$MIN_AVAIL" ]; then
+  if [ -z "$stopped" ] && [ "$avail" -lt "$MIN_AVAIL" ]; then
     echo "GUARD MemAvailable ${avail} МБ — снято: $*"
-    kill "$pid"; killed=1
+    signal TERM; stopped=$SECONDS
+  elif [ -n "$stopped" ] && [ -z "$hard" ] && [ $((SECONDS - stopped)) -ge "$GRACE" ]; then
+    echo "GUARD за ${GRACE} с команда не завершилась — SIGKILL"
+    signal KILL; hard=1
   fi
   sleep 0.5
 done
 wait "$pid"; rc=$?
 echo "GUARD минимум MemAvailable за прогон: ${low} МБ"
-[ -n "$killed" ] && exit 3
+[ -n "$stopped" ] && exit 3
 exit "$rc"

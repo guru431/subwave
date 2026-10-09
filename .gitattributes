@@ -1,0 +1,8 @@
+# Наше (форк), у апстрима .gitattributes нет.
+#
+# show-filter.ts апстрима несёт литеральный NUL в шаблонной строке, и git
+# считает файл двоичным: дифф, ревью и `git log -p` видели «Binary files
+# differ». `diff` велит показывать его как текст. Слияние этим не чинится:
+# git сливает файл с NUL как двоичный даже при `merge=text` (проверено,
+# git 2.55), — рецепт в station/docs/controller-changes.md, «Обновление апстрима».
+controller/src/music/show-filter.ts diff

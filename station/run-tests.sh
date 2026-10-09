@@ -13,9 +13,9 @@
 #   run-tests.sh --src /home/<user>/radio  клон на хосте поверх образа (после push-to-station.sh)
 #   run-tests.sh --image subwave-controller:1.17.0   другой тег
 #
-# Падения из KNOWN ниже — среда образа и апстрим, к нашим коммитам отношения не
-# имеют (эталон KNOWN — сверено с чистым клоном v1.17.0 2026-10-05). Код 1 — есть падения вне
-# этого списка. Итог печатается строкой TESTS_RESULT для ClaudeTestSweep.
+# Падения из KNOWN (с --src — из KNOWN_SRC) ниже — среда образа и апстрим, к нашим
+# коммитам отношения не имеют (эталон — чистый v1.17.0). Код 1 — есть падения вне
+# списка. Итог печатается строкой TESTS_RESULT для ClaudeTestSweep.
 set -u
 
 HERE=$(cd "$(dirname "$0")" && pwd)          # station/
@@ -45,43 +45,76 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# Падение — «файл» (тест-скрипт упал целиком) или «файл :: тест» (node:test);
-# шаблоны сопоставляются как в `case`.
-KNOWN=(
-  # Эталон снят на чистом v1.17.0 2026-10-05: объединение падений прогона в
-  # образе апстрима и прогона с --src. С --src падают только два последних
-  # пункта, остальное — среда образа.
-  #
-  # Среда образа: в нём нет каталогов репозитория (web/, docker/, liquidsoap/,
-  # scripts/*.sh, docker-compose*.yml), а тесты читают их или импортируют
-  # модули web/. С --src эти тесты проходят.
-  "aio-analyzer-heavy.test.ts"
-  "aio-analyzer-replicas.test.ts"
-  "aio-log-link.test.ts"
-  "analyzer-replicas-compose.test.ts :: *"
-  "dissolve-wash-shape.test.ts :: *"
-  "gemini-tts-settings.test.ts :: *"
-  "gemini-tts.test.ts :: *"
-  "jingle-play.test.ts"
-  "max-listeners.test.ts"
-  "observatory-genres.test.ts"
-  "playlists-cap.test.ts"
-  "settings-talk-placement-route.test.ts :: *"
-  "show-boundary-drain.test.ts :: *"
-  "show-candidate-display.test.ts :: *"
-  "show-filter-cap.test.ts"
-  "skill-schema.test.ts :: the mirror carries the skill schema to the browser"
-  "state-bootstrap.test.ts"
-  "station-clock-format.test.ts"
-  "stream-buffer-renderers.test.ts :: *"
-  "transition-effects.test.ts :: *"
-  "trusted-proxies.test.ts"
+# Падение — «файл» (тест-скрипт или модуль упал целиком) или «файл :: тест»
+# (node:test); шаблоны сопоставляются как в `case`. «файл :: *» — только для
+# файла, где падает КАЖДЫЙ тест: в файле, где падает часть, остальные гоняют код
+# форка (queue.ts, artist-guard.ts, routes/settings/core.ts), и «:: *» засчитал бы
+# известной и их регрессию.
+#
+# KNOWN_SRC — падения и с --src: зависимостей нет в самом образе, а node_modules
+# клон берёт из него же.
+KNOWN_SRC=(
   # Нужен typescript — devDependency, в образ (`--omit=dev`) не входит.
   "gen-schemas.test.ts"
   # vocal_gate_test.py требует python-зависимостей анализатора, которых в образе
   # контроллера нет.
   "analyzer-python.test.ts"
 )
+KNOWN=(
+  # Без --src: KNOWN_SRC плюс среда образа. В образе нет каталогов репозитория
+  # (web/, docker/, liquidsoap/, scripts/*.sh, docker-compose*.yml), а тесты
+  # читают их или импортируют модули web/; с --src они проходят.
+  #
+  # Эталон — чистый v1.17.0: файлы сняты прогоном в образе 2026-10-05, точные
+  # имена вместо «:: *» — 2026-10-09 эмуляцией образа на рабочей машине (только
+  # то, что копирует Dockerfile.controller) и чтением самих тестов: падают ровно
+  # те test(), что читают названные каталоги. settings-talk-placement-route на
+  # Windows падает ещё и целиком (EBUSY при удалении library.db) — в образе
+  # Linux этого нет, имена сняты по коду.
+  #
+  # Файл целиком: падает код модуля на верхнем уровне (импорт web/, чтение
+  # docker/ или radio.liq). test(), объявленные до места падения, идут и
+  # сверяются по именам (max-listeners, trusted-proxies — по шесть,
+  # jingle-play — три); объявленные после в образе не регистрируются вовсе, их
+  # проверяет только --src (jingle-play — семь, все про ротацию джинглов в
+  # queue.ts).
+  "aio-analyzer-heavy.test.ts"
+  "aio-analyzer-replicas.test.ts"
+  "aio-log-link.test.ts"
+  "jingle-play.test.ts"
+  "max-listeners.test.ts"
+  "observatory-genres.test.ts"
+  "playlists-cap.test.ts"
+  "show-filter-cap.test.ts"
+  "state-bootstrap.test.ts"
+  "station-clock-format.test.ts"
+  "trusted-proxies.test.ts"
+  # Каждый тест файла читает отсутствующее — «:: *» допустим.
+  "analyzer-replicas-compose.test.ts :: *"
+  "dissolve-wash-shape.test.ts :: *"
+  "show-candidate-display.test.ts :: *"
+  "stream-buffer-renderers.test.ts :: *"
+  # Падает часть файла — только эти тесты.
+  "gemini-tts-settings.test.ts :: the web field ceiling agrees with the engine and the save path"
+  "gemini-tts.test.ts :: gemini is offered as a Cloud provider, not as a peer engine card"
+  "gemini-tts.test.ts :: the engine <-> provider mapping is exact in both directions"
+  "gemini-tts.test.ts :: gemini's badge reads the engine flag, not cloudByProvider"
+  "gemini-tts.test.ts :: Gemini is offered as a provider card, not as its own engine card"
+  "gemini-tts.test.ts :: a persona on Gemini gets ONE voice field, shaped like the cloud one"
+  "gemini-tts.test.ts :: a Gemini persona is never labelled piper"
+  "gemini-tts.test.ts :: the Gemini voice list lives beside the cloud ones, once"
+  "gemini-tts.test.ts :: the station Voice panel offers model, voice and pronunciation"
+  "gemini-tts.test.ts :: the cloud-only panel content is gated on the selection, not removed"
+  "gemini-tts.test.ts :: both panels derive the Gemini selection from the one stored engine id"
+  "settings-talk-placement-route.test.ts :: DJ behaviour segmented controls expose their visible labels and help text"
+  "settings-talk-placement-route.test.ts :: DJ recap controls hydrate, save and display nested validation errors"
+  "show-boundary-drain.test.ts :: a boundary cut is a plain crossfade — every gesture stands down"
+  "skill-schema.test.ts :: the mirror carries the skill schema to the browser"
+  "transition-effects.test.ts :: the admin form names the same six gestures the controller does"
+  "${KNOWN_SRC[@]}"
+)
+# Клон монтируется целиком — среды образа в падениях нет.
+[ "$SRC" = "-" ] || KNOWN=("${KNOWN_SRC[@]}")
 # Не запускаются вовсе: нагрузочный тест сеет 200 тыс. треков в базу на 820 МБ
 # и идёт дольше двух минут — хосту станции такой прогон не по карману.
 SKIP_FILES="observatory-scale.test.ts"
