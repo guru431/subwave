@@ -28,7 +28,7 @@
 - Слот `tts`: `on-demand`, `priority 20`, `vram_gb 3.0` и `cold_start_sec 90` (временные, до замера), `excludes ["chatterbox"]`, `idle_timeout_sec 900`, `port 4126`, `mem_limit "3g"`, compose `restart: "no"`.
 - База образа `vllm/vllm-openai:v0.27.1`; её `ENTRYPOINT ["vllm","serve"]` перебивается.
 - В репозитории music есть **чужие незакоммиченные правки** (`bridge.py`, `CLAUDE.md`, `FINDINGS.md`, `station/tts-bridge/README.md` и др.). Коммитить только свои пути: `git add <пути>`, никогда `-A`. Многострочные сообщения коммита — через файл и `git commit -F`; последняя строка: `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>`.
-- Тесты music: каждый < 1 с, у быстрого набора бюджет 60 с и запаса нет. Запуск: `PY="/c/Program Files/Python314/python"`, `M=c:/AI/projects/music`, `"$PY" -m pytest -q <файл>` из `$M`. В этом Python есть numpy, httpx, starlette; **нет** fastapi, soundfile, torch — модули службы грузятся тестами через `sys.path`, а fastapi/torch/f5_tts подменяются заглушками.
+- Тесты music: каждый < 1 с, у быстрого набора бюджет 60 с и запаса нет. Запуск: `PY="/c/Program Files/Python314/python"`, `M=<repo>`, `"$PY" -m pytest -q <файл>` из `$M`. В этом Python есть numpy, httpx, starlette; **нет** fastapi, soundfile, torch — модули службы грузятся тестами через `sys.path`, а fastapi/torch/f5_tts подменяются заглушками.
 - SSH на gpu-host: `SSH="ssh -p <ssh-port> -i <ssh-key> -o BatchMode=yes -o LogLevel=ERROR -o ServerAliveInterval=30 <gpu-user>@<gpu-host>"`, вызов `$SSH "<PowerShell>"`; удалённый шелл — PowerShell; `.ps1` писать только ASCII (PS 5.1 без BOM читает UTF-8 как ANSI). Порты gpu-host из LAN закрыты брандмауэром — проверки ходят на `127.0.0.1` изнутри SSH.
 
 ---
@@ -2552,10 +2552,10 @@ git -C $M commit -m "F5-служба: версии зависимостей, р�
 ### Task 11: Слот `tts` у пульта
 
 **Files:**
-- Modify: `c:/AI/projects/llm_routers/gpu-ctl/slots.json` (блок после `tts-qwen`, строки 70-83)
-- Create: `c:/AI/projects/llm_routers/gpu-ctl/deploy/compose/tts.yaml`
-- Modify: `c:/AI/projects/llm_routers/gpu-ctl/CURRENT-STATE.md` (блок facts — генерацией; таблица «Что стоит в слотах», строки 59-68)
-- Modify: `c:/AI/projects/llm_routers/gpu-ctl/README.md:25-28`, `c:/AI/projects/llm_routers/gpu-ctl/CLAUDE.md:7-10`
+- Modify: `<llm-routers>/gpu-ctl/slots.json` (блок после `tts-qwen`, строки 70-83)
+- Create: `<llm-routers>/gpu-ctl/deploy/compose/tts.yaml`
+- Modify: `<llm-routers>/gpu-ctl/CURRENT-STATE.md` (блок facts — генерацией; таблица «Что стоит в слотах», строки 59-68)
+- Modify: `<llm-routers>/gpu-ctl/README.md:25-28`, `<llm-routers>/gpu-ctl/CLAUDE.md:7-10`
 
 **Interfaces:**
 - Consumes: образ `f5-tts:local` (задача 10), каталоги `<gpu-ssd>\LLM\docker\f5-tts\` (задача 9).
@@ -2657,10 +2657,10 @@ services:
 - [ ] **Step 4: Блок фактов и тесты пульта**
 
 ```bash
-L=c:/AI/projects/llm_routers
+L=<llm-routers>
 cd $L && "$PY" gpu-ctl/facts.py --write
 cd $L/gpu-ctl && "$PY" -m pytest -q
-powershell.exe -NoProfile -Command "Invoke-Pester C:\AI\projects\llm_routers\gpu-ctl\tests\ -Output Detailed" | tail -15
+powershell.exe -NoProfile -Command "Invoke-Pester <llm-routers>\gpu-ctl\tests\ -Output Detailed" | tail -15
 ```
 
 Expected: `facts.py` — «блок фактов обновлён», в таблице параметров строка `tts` и «Слотов в декларации: 8»; pytest зелёный (`test_slots_compose_contract`: порт 4126, `mem_limit "3g" == "3g"`, `restart "no"`, `pull_policy never`); Pester зелёный, `Config.Tests` прогоняет `Test-SlotConfig` по новому `slots.json`. Если Pester краснеет на тесте, который перебирает все слоты, — это находка для чтения, а не для подгонки: прочитать тест, понять, чего он требует от нового слота, и привести **декларацию** в соответствие; менять тест — только если он зашил старый состав слотов поимённо.
@@ -2712,13 +2712,13 @@ Expected: в `--stat` только эти пять файлов.
 - [ ] **Step 7: Выкатка и проверка**
 
 ```bash
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\AI\projects\llm_routers\gpu-ctl\deploy\deploy.ps1" -Ssh
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<llm-routers>\gpu-ctl\deploy\deploy.ps1" -Ssh
 ```
 
 Затем:
 
 ```bash
-V="c:/AI/projects/_boss/secrets/vault.env"; T=$(grep -m1 '^GPU_CTL_TOKEN=' "$V" | cut -d= -f2- | tr -d '\r')
+V="<_boss>/secrets/vault.env"; T=$(grep -m1 '^GPU_CTL_TOKEN=' "$V" | cut -d= -f2- | tr -d '\r')
 curl -s --max-time 15 -H "X-Token: $T" http://<gpu-host>:8119/state | "$PY" -c "
 import json, sys
 d = json.load(sys.stdin)
@@ -2773,7 +2773,7 @@ Expected: всё зелёное; суммарное время не выросл
 git -C $M add docs/superpowers/specs/2026-09-23-tts-f5-migration-design.md
 git -C $M commit -m "Спека миграции TTS: поправки по итогам плана 1"
 git -C $M push origin main
-git -C c:/AI/projects/llm_routers push origin main
+git -C <llm-routers> push origin main
 ```
 
 Expected: оба пуша — fast-forward без конфликтов.

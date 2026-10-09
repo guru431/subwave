@@ -89,7 +89,7 @@
 - [x] **Шаг 1: Подготовить клон с наложенным патчем**
 
 ```bash
-M=/c/AI/projects/music
+M=<repo>
 git clone --depth 1 -b v1.8.0 https://github.com/perminder-klair/subwave.git /tmp/sw-queue
 cd /tmp/sw-queue && git apply $M/station/docs/controller-changes.md
 git status --short
@@ -429,7 +429,7 @@ Expected: линтер чист, набор проходит. Особое вн�
 - [x] **Шаг 7: Коммит патча**
 
 ```bash
-M=/c/AI/projects/music
+M=<repo>
 cd /tmp/sw-queue && git add -A && git diff --cached HEAD -- controller/ > $M/station/docs/controller-changes.md
 git clone --depth 1 -b v1.8.0 https://github.com/perminder-klair/subwave.git /tmp/check-queue
 cd /tmp/check-queue && git apply --check $M/station/docs/controller-changes.md && echo PATCH_OK
@@ -467,7 +467,7 @@ Expected: образ собран, контейнер `Up`.
 До применения настройки станция работает с `lookahead = 1`.
 
 ```bash
-set -a && . /c/AI/projects/_boss/secrets/vault.env && set +a
+set -a && . <_boss>/secrets/vault.env && set +a
 curl -s -u "$SUBWAVE_ADMIN_USER:$SUBWAVE_ADMIN_PASS" http://<station-host>:7700/api/state \
   | python -c "import json,sys; d=json.load(sys.stdin); print('в очереди:', len(d.get('upcoming', [])))"
 ```
@@ -487,7 +487,7 @@ Expected: 0 или 1 — как и раньше. Это контрольный �
 ```
 
 ```bash
-cd /c/AI/projects/music
+cd <repo>
 python station/onboard/onboard.py --patch station/onboard/patches/2026-09-22-queue-lookahead.json --dry-run
 python station/onboard/onboard.py --patch station/onboard/patches/2026-09-22-queue-lookahead.json
 ```

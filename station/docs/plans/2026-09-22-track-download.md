@@ -1492,7 +1492,7 @@ COPY station/room/guard.py station/room/store.py station/room/subsonic.py \
 - [ ] **Step 2: Проверить, что образ собирается и стартует**
 
 ```bash
-cd /c/AI/projects/music && docker build -f station/room/Dockerfile -t subwave-room:test .
+cd <repo> && docker build -f station/room/Dockerfile -t subwave-room:test .
 docker run --rm -e CONTROLLER_URL=http://controller:7701 subwave-room:test \
   python -c "import naming, station, server; print('модули на месте')"
 ```
@@ -1781,7 +1781,7 @@ git commit -m "Плеер: кнопка скачивания на карточк
 - [ ] **Step 1: Собрать и поднять комнату**
 
 ```bash
-cd /c/AI/projects/music
+cd <repo>
 tar -czf /tmp/room-src.tar.gz deploy/room music/normalize.py
 scp -P <ssh-port> -i <ssh-key> /tmp/room-src.tar.gz <ssh-user>@<station-host>:/tmp/
 ssh -p <ssh-port> -i <ssh-key> <ssh-user>@<station-host> '

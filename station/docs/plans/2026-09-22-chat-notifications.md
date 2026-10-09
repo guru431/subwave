@@ -72,7 +72,7 @@ ssh -p <ssh-port> -i <ssh-key> <ssh-user>@<station-host> '
   rm -rf <home>/sw-ru &&
   git clone --depth 1 -b v1.8.0 https://github.com/perminder-klair/subwave.git <home>/sw-ru'
 scp -P <ssh-port> -i <ssh-key> \
-  /c/AI/projects/music/station/docs/web-changes.md <ssh-user>@<station-host>:/tmp/ru-web.patch
+  <repo>/station/docs/web-changes.md <ssh-user>@<station-host>:/tmp/ru-web.patch
 ssh -p <ssh-port> -i <ssh-key> <ssh-user>@<station-host> '
   cd <home>/sw-ru && git apply /tmp/ru-web.patch && git status --porcelain | wc -l'
 ```
@@ -344,8 +344,8 @@ Expected: PASS, 16 проверок, `all passed`.
 
 ```bash
 ssh -p <ssh-port> -i <ssh-key> <ssh-user>@<station-host> 'cd <home>/sw-ru && git add -A && git diff --cached HEAD' \
-  > /c/AI/projects/music/station/docs/web-changes.md
-cd /c/AI/projects/music
+  > <repo>/station/docs/web-changes.md
+cd <repo>
 git add station/docs/web-changes.md
 git commit -m "Правила уведомлений чата: что непрочитано, что важно, как склеить ленту"
 ```
@@ -527,8 +527,8 @@ Expected: PASS. `npm ci` нужен один раз на клон; в следу
 
 ```bash
 ssh -p <ssh-port> -i <ssh-key> <ssh-user>@<station-host> 'cd <home>/sw-ru && git add -A && git diff --cached HEAD' \
-  > /c/AI/projects/music/station/docs/web-changes.md
-cd /c/AI/projects/music
+  > <repo>/station/docs/web-changes.md
+cd <repo>
 git add station/docs/web-changes.md
 git commit -m "Слушатель помнит, докуда дочитал; тост обзавёлся кнопкой «Открыть»"
 ```
@@ -702,8 +702,8 @@ Expected: PASS. Хук пока никем не вызывается — это 
 
 ```bash
 ssh -p <ssh-port> -i <ssh-key> <ssh-user>@<station-host> 'cd <home>/sw-ru && git add -A && git diff --cached HEAD' \
-  > /c/AI/projects/music/station/docs/web-changes.md
-cd /c/AI/projects/music
+  > <repo>/station/docs/web-changes.md
+cd <repo>
 git add station/docs/web-changes.md
 git commit -m "Опрос комнаты живёт выше ящика: два курсора и частота по состоянию"
 ```
@@ -880,8 +880,8 @@ Expected: PASS, 6 проверок, затем чистый линт.
 
 ```bash
 ssh -p <ssh-port> -i <ssh-key> <ssh-user>@<station-host> 'cd <home>/sw-ru && git add -A && git diff --cached HEAD' \
-  > /c/AI/projects/music/station/docs/web-changes.md
-cd /c/AI/projects/music
+  > <repo>/station/docs/web-changes.md
+cd <repo>
 git add station/docs/web-changes.md
 git commit -m "Системное уведомление: гейт разрешения и честный ответ на каждом отказе"
 ```
@@ -1196,8 +1196,8 @@ Expected: PASS. Если `tsc` ругается на `useRef`/`useMemo`/`useCall
 
 ```bash
 ssh -p <ssh-port> -i <ssh-key> <ssh-user>@<station-host> 'cd <home>/sw-ru && git add -A && git diff --cached HEAD' \
-  > /c/AI/projects/music/station/docs/web-changes.md
-cd /c/AI/projects/music
+  > <repo>/station/docs/web-changes.md
+cd <repo>
 git add station/docs/web-changes.md
 git commit -m "Ящик чата — представление, скин — источник: счётчик, тосты, лента со станцией"
 ```
@@ -1221,7 +1221,7 @@ git commit -m "Ящик чата — представление, скин — и
 ssh -p <ssh-port> -i <ssh-key> <ssh-user>@<station-host> '
   rm -rf /tmp/check && git clone --depth 1 -b v1.8.0 https://github.com/perminder-klair/subwave.git /tmp/check >/dev/null 2>&1'
 scp -P <ssh-port> -i <ssh-key> \
-  /c/AI/projects/music/station/docs/web-changes.md <ssh-user>@<station-host>:/tmp/ru-web.patch
+  <repo>/station/docs/web-changes.md <ssh-user>@<station-host>:/tmp/ru-web.patch
 ssh -p <ssh-port> -i <ssh-key> <ssh-user>@<station-host> 'cd /tmp/check && git apply --check /tmp/ru-web.patch && echo APPLIES'
 ```
 
@@ -1334,7 +1334,7 @@ worker и хранение подписок; он вынесен в `IDEAS.md`.
 - [x] **Шаг 8: Отметить план исполненным и закоммитить**
 
 ```bash
-cd /c/AI/projects/music
+cd <repo>
 git add station/docs/web-changes.md IDEAS.md CLAUDE.md docs/superpowers/plans/2026-09-22-chat-notifications.md
 git commit -m "Уведомления чата в эфире: приёмка, документация и отложенный Web Push"
 ```

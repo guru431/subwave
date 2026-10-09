@@ -203,7 +203,7 @@
 - Станция выходит в интернет: `https://<station-domain>` → Apache на Debian → Caddy стека.
   Конфиг — `station/deploy/apache-fm.conf.example`, копия на хосте в `<deploy-dir>/deploy/`,
   подключён одной строкой в конец **общего** `<apache-dir>/apache2.conf` (там же
-  `<neighbour-site>`, `<neighbour-site>`, десяток чужих доменов — перед правкой бэкап, после правки
+  соседние службы и десяток чужих доменов — перед правкой бэкап, после правки
   `apache2ctl configtest` и `graceful`; проверил — бэкап удалить, иначе `.bak-*` копятся
   рядом с живым конфигом). `/admin`, `/room/admin` и весь `/api/*`, кроме белого списка
   ручек плеера, закрыты по адресу источника (правило case-insensitive — `(?i)`: Caddy и

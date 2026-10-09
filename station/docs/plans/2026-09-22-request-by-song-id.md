@@ -84,7 +84,7 @@
 - [x] **Шаг 1: Подготовить клон с уже наложенными патчами**
 
 ```bash
-M=/c/AI/projects/music
+M=<repo>
 git clone --depth 1 -b v1.8.0 https://github.com/perminder-klair/subwave.git /tmp/sw-req
 cd /tmp/sw-req
 git apply $M/station/docs/controller-changes.md
@@ -127,7 +127,7 @@ docker run --rm -v /tmp/sw-req:/app -w /app/controller node:22-alpine \
 
 Expected: `gen:schemas` переписал `web/lib/schemas.generated.ts`, `lint` (eslint + `tsc --noEmit`) прошёл. Ошибка вида «module may import only zod» означает, что в схему заехал посторонний импорт — чинить в схеме, а не в линтере.
 
-Если docker на work-ai недоступен, то же самое делается на Debian:
+Если docker на <workstation> недоступен, то же самое делается на Debian:
 
 ```bash
 tar -czf /tmp/sw-req.tar.gz -C /tmp sw-req
@@ -151,7 +151,7 @@ Expected: файл в списке изменённых, в диффе видн�
 - [x] **Шаг 5: Коммит патча (промежуточный)**
 
 ```bash
-M=/c/AI/projects/music
+M=<repo>
 cd /tmp/sw-req && git diff HEAD -- controller/ > $M/station/docs/controller-changes.md
 cd $M && git add station/docs/controller-changes.md
 git commit -m "Схема заказа: необязательный songId для точного заказа"
@@ -320,7 +320,7 @@ Expected: образ собран, контейнер `Up`. Если `Dockerfile
 - [x] **Шаг 7: Проверить точный заказ на живой станции**
 
 ```bash
-set -a && . /c/AI/projects/_boss/secrets/vault.env && set +a
+set -a && . <_boss>/secrets/vault.env && set +a
 # взять настоящий id трека через комнату
 curl -s -G http://<station-host>:7700/room/resolve \
   --data-urlencode 'q=Depeche Mode — Enjoy the Silence' | python -m json.tool | head -20
@@ -363,7 +363,7 @@ Expected: `status: resolved`, трек найден каскадом. Это р�
 - [x] **Шаг 9: Пересобрать патч и закоммитить**
 
 ```bash
-M=/c/AI/projects/music
+M=<repo>
 cd /tmp/sw-req && git diff HEAD -- controller/ > $M/station/docs/controller-changes.md
 git clone --depth 1 -b v1.8.0 https://github.com/perminder-klair/subwave.git /tmp/check-ctrl
 cd /tmp/check-ctrl && git apply --check $M/station/docs/controller-changes.md && echo PATCH_OK
@@ -559,7 +559,7 @@ Expected: сборка проходит, контейнер поднят.
 - [x] **Шаг 6: Пересобрать патч плеера и проверить на чистом клоне**
 
 ```bash
-M=/c/AI/projects/music
+M=<repo>
 cd /tmp/sw-req && git add -A && git diff --cached HEAD -- web/ > $M/station/docs/web-changes.md
 git clone --depth 1 -b v1.8.0 https://github.com/perminder-klair/subwave.git /tmp/check-web2
 cd /tmp/check-web2 && git apply --check $M/station/docs/web-changes.md && echo PATCH_OK
@@ -570,7 +570,7 @@ Expected: `PATCH_OK`. **`git add -A` обязателен** — иначе но�
 - [x] **Шаг 7: Коммит**
 
 ```bash
-cd /c/AI/projects/music
+cd <repo>
 git add station/docs/web-changes.md
 git commit -m "Ящик заказа: сверка с коллекцией до отправки и выбор альтернативы"
 ```

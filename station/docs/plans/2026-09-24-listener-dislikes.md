@@ -23,8 +23,8 @@
 - **Правится только классический скин** (`components/skins/classic/`), остальные пять остаются апстримными.
 - **Патч веба пересобирается только так:** `git -C <клон> add -A && git -C <клон> diff --cached HEAD > station/docs/web-changes.md`, после чего проверяется наложением на **чистый** клон v1.8.0. Файл патча — LF (`*.patch -text` в `.gitattributes`).
 - **Без новых зависимостей:** комната — стандартная библиотека плюс уже приколоченный `cryptography`; веб — только то, что уже есть в `web/package.json`.
-- **Коммиты:** перед коммитом — `git -C C:/AI/projects/music status --short`, чужие незакоммиченные файлы не трогать; коммит только с явными путями: `git -C C:/AI/projects/music add <пути> && git -C C:/AI/projects/music commit -F <файл> -- <пути>`. Многострочное сообщение — файлом (Write в `C:/AI/tmp/dislikes-commit.txt`), по-русски в стиле журнала («Комната: …»), в конце строка `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
-- **Быстрые тесты:** `python -m pytest tests/test_room_*.py -q -p no:cacheprovider` из `C:/AI/projects/music` (эталон до плана — 152 passed, 5 deselected, 2.8 с). Тест дольше секунды в быстром наборе — чинится или получает маркер `integration`.
+- **Коммиты:** перед коммитом — `git -C <repo> status --short`, чужие незакоммиченные файлы не трогать; коммит только с явными путями: `git -C <repo> add <пути> && git -C <repo> commit -F <файл> -- <пути>`. Многострочное сообщение — файлом (Write в `<tmp>/dislikes-commit.txt`), по-русски в стиле журнала («Комната: …»), в конце строка `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- **Быстрые тесты:** `python -m pytest tests/test_room_*.py -q -p no:cacheprovider` из `<repo>` (эталон до плана — 152 passed, 5 deselected, 2.8 с). Тест дольше секунды в быстром наборе — чинится или получает маркер `integration`.
 - **Если сессия идёт в worktree** (`EnterWorktree`): heredoc, `printf` с длинным текстом, `git -C` на чужой путь и `ssh` с `git` внутри обвязка отвергает — удалённые команды и сообщения коммитов писать файлами.
 
 ## Review Focus
@@ -37,8 +37,8 @@
 
 ## Рабочее место
 
-- Репозиторий — `C:/AI/projects/music`, ветка `main`. Комната (Tasks 1–4) правится прямо в нём.
-- Веб (Tasks 5–6) правится в **клоне апстрима** `C:/AI/tmp/sw-dislikes` (v1.8.0 + текущий `ru-web.patch`), в репозиторий уезжает пересобранным патчем. Клон вне репозитория и живёт до конца плана; `node` (v26) и `npx` на work-ai есть, тесты чистых модулей гоняются локально через `npx --yes tsx`.
+- Репозиторий — `<repo>`, ветка `main`. Комната (Tasks 1–4) правится прямо в нём.
+- Веб (Tasks 5–6) правится в **клоне апстрима** `<tmp>/sw-dislikes` (v1.8.0 + текущий `ru-web.patch`), в репозиторий уезжает пересобранным патчем. Клон вне репозитория и живёт до конца плана; `node` (v26) и `npx` на <workstation> есть, тесты чистых модулей гоняются локально через `npx --yes tsx`.
 - Выкатка (Tasks 7–8) — на Debian `<ssh-user>@<station-host>`, SSH `-p <ssh-port> -i <ssh-key>`. Tasks 7–8 выполняет основная сессия, не субагент: нужны SSH и живая проверка.
 
 ---
@@ -378,7 +378,7 @@ Expected: `19 passed`.
 
 - [ ] **Step 5: Коммит**
 
-Сообщение (файлом `C:/AI/tmp/dislikes-commit.txt`):
+Сообщение (файлом `<tmp>/dislikes-commit.txt`):
 
 ```
 Комната: дизлайки — цель отметки и сводка в предложения
@@ -391,8 +391,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ```
 
 ```bash
-git -C C:/AI/projects/music add station/room/dislikes.py tests/test_room_dislikes.py
-git -C C:/AI/projects/music commit -F C:/AI/tmp/dislikes-commit.txt -- station/room/dislikes.py tests/test_room_dislikes.py
+git -C <repo> add station/room/dislikes.py tests/test_room_dislikes.py
+git -C <repo> commit -F <tmp>/dislikes-commit.txt -- station/room/dislikes.py tests/test_room_dislikes.py
 ```
 
 ---
@@ -676,8 +676,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ```
 
 ```bash
-git -C C:/AI/projects/music add station/room/store.py tests/test_room_store.py
-git -C C:/AI/projects/music commit -F C:/AI/tmp/dislikes-commit.txt -- station/room/store.py tests/test_room_store.py
+git -C <repo> add station/room/store.py tests/test_room_store.py
+git -C <repo> commit -F <tmp>/dislikes-commit.txt -- station/room/store.py tests/test_room_store.py
 ```
 
 ---
@@ -878,8 +878,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ```
 
 ```bash
-git -C C:/AI/projects/music add station/room/admin.py tests/test_room_admin.py
-git -C C:/AI/projects/music commit -F C:/AI/tmp/dislikes-commit.txt -- station/room/admin.py tests/test_room_admin.py
+git -C <repo> add station/room/admin.py tests/test_room_admin.py
+git -C <repo> commit -F <tmp>/dislikes-commit.txt -- station/room/admin.py tests/test_room_admin.py
 ```
 
 ---
@@ -1554,15 +1554,15 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 
 ```bash
 P="station/room/server.py station/room/station.py station/room/Dockerfile station/room/README.md tests/test_room_station.py tests/test_room_dislikes_server.py"
-git -C C:/AI/projects/music add $P
-git -C C:/AI/projects/music commit -F C:/AI/tmp/dislikes-commit.txt -- $P
+git -C <repo> add $P
+git -C <repo> commit -F <tmp>/dislikes-commit.txt -- $P
 ```
 
 ---
 
 ### Task 5: Плеер — кнопка «не нравится» с меню (патч веба)
 
-**Files (в клоне `C:/AI/tmp/sw-dislikes`, в репозиторий — патчем):**
+**Files (в клоне `<tmp>/sw-dislikes`, в репозиторий — патчем):**
 - Create: `web/lib/roomDislikes.ts`, `web/lib/roomDislikes.test.ts`
 - Create: `web/components/skins/classic/DislikesContext.tsx`
 - Create: `web/components/skins/classic/DislikeMenu.tsx`
@@ -1579,7 +1579,7 @@ git -C C:/AI/projects/music commit -F C:/AI/tmp/dislikes-commit.txt -- $P
 - [ ] **Step 1: Рабочий клон**
 
 ```bash
-W=C:/AI/tmp/sw-dislikes
+W=<tmp>/sw-dislikes
 test -d "$W/.git" || git -c core.autocrlf=false clone -q --depth 1 -b v1.8.0 https://github.com/perminder-klair/subwave.git "$W"
 git -C "$W" status --short | head -1
 ```
@@ -1587,16 +1587,16 @@ git -C "$W" status --short | head -1
 Если клон свежий (вывод статуса пуст) — наложить текущий патч и застейджить его, чтобы свои правки дальше были видны отдельно (`git diff` — правки, `??` — новые файлы):
 
 ```bash
-git -C "$W" apply C:/AI/projects/music/station/docs/web-changes.md
+git -C "$W" apply <repo>/station/docs/web-changes.md
 git -C "$W" add -A
-grep -c "^diff --git" C:/AI/projects/music/station/docs/web-changes.md
+grep -c "^diff --git" <repo>/station/docs/web-changes.md
 ```
 
 Expected: `git apply` молчит, счёт — `50`.
 
 - [ ] **Step 2: Написать падающий тест чистого модуля**
 
-Создать `C:/AI/tmp/sw-dislikes/web/lib/roomDislikes.test.ts`:
+Создать `<tmp>/sw-dislikes/web/lib/roomDislikes.test.ts`:
 
 ```ts
 // «Не нравится»: разбор ответа комнаты и тексты тостов.
@@ -1683,12 +1683,12 @@ console.log('\nвсё прошло');
 
 - [ ] **Step 3: Убедиться, что тест падает**
 
-Run: `npx --yes tsx C:/AI/tmp/sw-dislikes/web/lib/roomDislikes.test.ts`
+Run: `npx --yes tsx <tmp>/sw-dislikes/web/lib/roomDislikes.test.ts`
 Expected: ошибка `Cannot find module './roomDislikes'`.
 
 - [ ] **Step 4: Написать модуль**
 
-Создать `C:/AI/tmp/sw-dislikes/web/lib/roomDislikes.ts`:
+Создать `<tmp>/sw-dislikes/web/lib/roomDislikes.ts`:
 
 ```ts
 // «Не нравится» слушателя: запросы в комнату (deploy/room, /room/dislikes) и
@@ -1786,12 +1786,12 @@ export async function setDislike(songId: string, kind: DislikeKind, on: boolean)
 
 - [ ] **Step 5: Убедиться, что тест проходит**
 
-Run: `npx --yes tsx C:/AI/tmp/sw-dislikes/web/lib/roomDislikes.test.ts`
+Run: `npx --yes tsx <tmp>/sw-dislikes/web/lib/roomDislikes.test.ts`
 Expected: девять `✓` и `всё прошло`.
 
 - [ ] **Step 6: Провайдер отметок**
 
-Создать `C:/AI/tmp/sw-dislikes/web/components/skins/classic/DislikesContext.tsx`:
+Создать `<tmp>/sw-dislikes/web/components/skins/classic/DislikesContext.tsx`:
 
 ```tsx
 'use client';
@@ -1865,7 +1865,7 @@ export function useDislikes(): Dislikes | null {
 
 - [ ] **Step 7: Кнопка с меню**
 
-Создать `C:/AI/tmp/sw-dislikes/web/components/skins/classic/DislikeMenu.tsx`:
+Создать `<tmp>/sw-dislikes/web/components/skins/classic/DislikeMenu.tsx`:
 
 ```tsx
 'use client';
@@ -1981,13 +1981,13 @@ export default function DislikeMenu({ songId, title, artist, size = 15, classNam
 Зависимости веба — один раз на клон:
 
 ```bash
-npm --prefix C:/AI/tmp/sw-dislikes/web ci --no-audit --no-fund
+npm --prefix <tmp>/sw-dislikes/web ci --no-audit --no-fund
 ```
 
 Типы (скрипт `typecheck` = `tsc --noEmit`, `npm run` исполняет его в каталоге пакета):
 
 ```bash
-npm --prefix C:/AI/tmp/sw-dislikes/web run typecheck
+npm --prefix <tmp>/sw-dislikes/web run typecheck
 ```
 
 Expected: единственная ошибка — старая `lib/roomPush.test.ts(43,…)` из [README l10n](../web-changes.md); ни одной в новых и изменённых файлах.
@@ -1995,7 +1995,7 @@ Expected: единственная ошибка — старая `lib/roomPush.t
 ESLint ищет конфиг от текущего каталога — поэтому через PowerShell:
 
 ```powershell
-Push-Location C:\AI\tmp\sw-dislikes\web; try { npx eslint lib/roomDislikes.ts lib/roomDislikes.test.ts components/skins/classic/DislikesContext.tsx components/skins/classic/DislikeMenu.tsx components/skins/classic/ClassicSkin.tsx components/skins/classic/CenterStage.tsx components/skins/classic/drawers/TimelineDrawer.tsx } finally { Pop-Location }
+Push-Location <tmp>\sw-dislikes\web; try { npx eslint lib/roomDislikes.ts lib/roomDislikes.test.ts components/skins/classic/DislikesContext.tsx components/skins/classic/DislikeMenu.tsx components/skins/classic/ClassicSkin.tsx components/skins/classic/CenterStage.tsx components/skins/classic/drawers/TimelineDrawer.tsx } finally { Pop-Location }
 ```
 
 Expected: без ошибок. Если `npm ci` на Windows не собирается — те же проверки в контейнере на Debian, как тесты чата в README l10n (`node:22-bookworm-slim`, `-w /work/web`).
@@ -2032,17 +2032,17 @@ Expected: без ошибок. Если `npm ci` на Windows не собира�
 - [ ] **Step 11: Пересобрать патч и проверить на чистом клоне**
 
 ```bash
-W=C:/AI/tmp/sw-dislikes
+W=<tmp>/sw-dislikes
 git -C "$W" status --short
 ```
 
 Expected: изменённые — ровно `ClassicSkin.tsx`, `CenterStage.tsx`, `TimelineDrawer.tsx`; новые — ровно четыре файла этой задачи; ни `node_modules`, ни `.next`.
 
 ```bash
-git -C "$W" add -A && git -C "$W" diff --cached HEAD > C:/AI/projects/music/station/docs/web-changes.md
-grep -c "^diff --git" C:/AI/projects/music/station/docs/web-changes.md
-rm -rf C:/AI/tmp/sw-check && git -c core.autocrlf=false clone -q --depth 1 -b v1.8.0 https://github.com/perminder-klair/subwave.git C:/AI/tmp/sw-check
-git -C C:/AI/tmp/sw-check apply --check C:/AI/projects/music/station/docs/web-changes.md && echo APPLY_OK
+git -C "$W" add -A && git -C "$W" diff --cached HEAD > <repo>/station/docs/web-changes.md
+grep -c "^diff --git" <repo>/station/docs/web-changes.md
+rm -rf <tmp>/sw-check && git -c core.autocrlf=false clone -q --depth 1 -b v1.8.0 https://github.com/perminder-klair/subwave.git <tmp>/sw-check
+git -C <tmp>/sw-check apply --check <repo>/station/docs/web-changes.md && echo APPLY_OK
 ```
 
 Expected: счёт — `54`, затем `APPLY_OK`. В README l10n число в предложении «Всего в патче 50 файлов.» (оно разорвано переносом строки после «в патче») заменить на фактическое (`54`).
@@ -2063,15 +2063,15 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 
 ```bash
 P="station/docs/web-changes.md station/docs/web-changes.md"
-git -C C:/AI/projects/music add $P
-git -C C:/AI/projects/music commit -F C:/AI/tmp/dislikes-commit.txt -- $P
+git -C <repo> add $P
+git -C <repo> commit -F <tmp>/dislikes-commit.txt -- $P
 ```
 
 ---
 
 ### Task 6: Админка — карточка Dislikes на вкладке Blocked (патч веба)
 
-**Files (в клоне `C:/AI/tmp/sw-dislikes`, в репозиторий — патчем):**
+**Files (в клоне `<tmp>/sw-dislikes`, в репозиторий — патчем):**
 - Create: `web/lib/dislikeSuggestions.ts`, `web/lib/dislikeSuggestions.test.ts`
 - Create: `web/components/admin/library/DislikesCard.tsx`
 - Modify: `web/components/admin/library/queries.ts` (ключ `libraryKeys.dislikes`)
@@ -2084,7 +2084,7 @@ git -C C:/AI/projects/music commit -F C:/AI/tmp/dislikes-commit.txt -- $P
 
 - [ ] **Step 1: Написать падающий тест чистого модуля**
 
-Создать `C:/AI/tmp/sw-dislikes/web/lib/dislikeSuggestions.test.ts`:
+Создать `<tmp>/sw-dislikes/web/lib/dislikeSuggestions.test.ts`:
 
 ```ts
 // Dislike suggestions: parsing the room's answer, the blocklist check rows and
@@ -2188,12 +2188,12 @@ console.log('\nall passed');
 
 - [ ] **Step 2: Убедиться, что тест падает**
 
-Run: `npx --yes tsx C:/AI/tmp/sw-dislikes/web/lib/dislikeSuggestions.test.ts`
+Run: `npx --yes tsx <tmp>/sw-dislikes/web/lib/dislikeSuggestions.test.ts`
 Expected: ошибка `Cannot find module './dislikeSuggestions'`.
 
 - [ ] **Step 3: Написать модуль**
 
-Создать `C:/AI/tmp/sw-dislikes/web/lib/dislikeSuggestions.ts`:
+Создать `<tmp>/sw-dislikes/web/lib/dislikeSuggestions.ts`:
 
 ```ts
 // Block suggestions from listener dislikes (the room, /room/admin/dislikes) and
@@ -2298,12 +2298,12 @@ export function reasonLine(s: Suggestion): string {
 
 - [ ] **Step 4: Убедиться, что тест проходит**
 
-Run: `npx --yes tsx C:/AI/tmp/sw-dislikes/web/lib/dislikeSuggestions.test.ts`
+Run: `npx --yes tsx <tmp>/sw-dislikes/web/lib/dislikeSuggestions.test.ts`
 Expected: десять `✓` и `all passed`.
 
 - [ ] **Step 5: Ключ кэша**
 
-В `C:/AI/tmp/sw-dislikes/web/components/admin/library/queries.ts` в `libraryKeys` после строки `blocked: () => ['library', 'blocked'] as const,` добавить:
+В `<tmp>/sw-dislikes/web/components/admin/library/queries.ts` в `libraryKeys` после строки `blocked: () => ['library', 'blocked'] as const,` добавить:
 
 ```ts
   // Dislike suggestions from the room — not Tracks, so not under `rows`.
@@ -2312,7 +2312,7 @@ Expected: десять `✓` и `all passed`.
 
 - [ ] **Step 6: Карточка**
 
-Создать `C:/AI/tmp/sw-dislikes/web/components/admin/library/DislikesCard.tsx`:
+Создать `<tmp>/sw-dislikes/web/components/admin/library/DislikesCard.tsx`:
 
 ```tsx
 'use client';
@@ -2525,7 +2525,7 @@ export function DislikesCard() {
 
 - [ ] **Step 7: Карточка — первой на вкладке**
 
-В `C:/AI/tmp/sw-dislikes/web/components/admin/library/tabs/BlockedTabContainer.tsx`:
+В `<tmp>/sw-dislikes/web/components/admin/library/tabs/BlockedTabContainer.tsx`:
 - после `import { BlockedTab } from '../BlockedTab';` добавить `import { DislikesCard } from '../DislikesCard';`;
 - в `return (` сразу после открывающего `<>` вставить:
 
@@ -2538,13 +2538,13 @@ export function DislikesCard() {
 - [ ] **Step 8: Типы и линтер**
 
 ```bash
-npm --prefix C:/AI/tmp/sw-dislikes/web run typecheck
+npm --prefix <tmp>/sw-dislikes/web run typecheck
 ```
 
 Expected: только старая ошибка `lib/roomPush.test.ts(43,…)`.
 
 ```powershell
-Push-Location C:\AI\tmp\sw-dislikes\web; try { npx eslint lib/dislikeSuggestions.ts lib/dislikeSuggestions.test.ts components/admin/library/DislikesCard.tsx components/admin/library/queries.ts components/admin/library/tabs/BlockedTabContainer.tsx } finally { Pop-Location }
+Push-Location <tmp>\sw-dislikes\web; try { npx eslint lib/dislikeSuggestions.ts lib/dislikeSuggestions.test.ts components/admin/library/DislikesCard.tsx components/admin/library/queries.ts components/admin/library/tabs/BlockedTabContainer.tsx } finally { Pop-Location }
 ```
 
 Expected: без ошибок.
@@ -2587,12 +2587,12 @@ artist}`). С настоящим `songId` ответ «заблокирован�
 - [ ] **Step 10: Пересобрать патч и проверить на чистом клоне**
 
 ```bash
-W=C:/AI/tmp/sw-dislikes
+W=<tmp>/sw-dislikes
 git -C "$W" status --short
-git -C "$W" add -A && git -C "$W" diff --cached HEAD > C:/AI/projects/music/station/docs/web-changes.md
-grep -c "^diff --git" C:/AI/projects/music/station/docs/web-changes.md
-rm -rf C:/AI/tmp/sw-check && git -c core.autocrlf=false clone -q --depth 1 -b v1.8.0 https://github.com/perminder-klair/subwave.git C:/AI/tmp/sw-check
-git -C C:/AI/tmp/sw-check apply --check C:/AI/projects/music/station/docs/web-changes.md && echo APPLY_OK
+git -C "$W" add -A && git -C "$W" diff --cached HEAD > <repo>/station/docs/web-changes.md
+grep -c "^diff --git" <repo>/station/docs/web-changes.md
+rm -rf <tmp>/sw-check && git -c core.autocrlf=false clone -q --depth 1 -b v1.8.0 https://github.com/perminder-klair/subwave.git <tmp>/sw-check
+git -C <tmp>/sw-check apply --check <repo>/station/docs/web-changes.md && echo APPLY_OK
 ```
 
 Expected: в статусе — только файлы этой задачи сверх Task 5; счёт — `58`; `APPLY_OK`. Число в README l10n («Всего в патче … файлов.») — на фактическое (`58`).
@@ -2614,8 +2614,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 
 ```bash
 P="station/docs/web-changes.md station/docs/web-changes.md"
-git -C C:/AI/projects/music add $P
-git -C C:/AI/projects/music commit -F C:/AI/tmp/dislikes-commit.txt -- $P
+git -C <repo> add $P
+git -C <repo> commit -F <tmp>/dislikes-commit.txt -- $P
 ```
 
 ---
@@ -2653,14 +2653,14 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ```
 
 ```bash
-git -C C:/AI/projects/music add station/deploy/apache-fm.conf.example
-git -C C:/AI/projects/music commit -F C:/AI/tmp/dislikes-commit.txt -- station/deploy/apache-fm.conf.example
+git -C <repo> add station/deploy/apache-fm.conf.example
+git -C <repo> commit -F <tmp>/dislikes-commit.txt -- station/deploy/apache-fm.conf.example
 ```
 
 - [ ] **Step 2: Выкатить Apache**
 
 ```bash
-scp -P <ssh-port> -i <ssh-key> C:/AI/projects/music/station/deploy/apache-fm.conf.example <ssh-user>@<station-host>:/tmp/apache-fm.conf
+scp -P <ssh-port> -i <ssh-key> <repo>/station/deploy/apache-fm.conf.example <ssh-user>@<station-host>:/tmp/apache-fm.conf
 ssh -p <ssh-port> -i <ssh-key> <ssh-user>@<station-host> 'sudo cp <deploy-dir>/deploy/apache-fm.conf <deploy-dir>/deploy/apache-fm.conf.bak-$(date +%Y%m%d-%H%M%S) && sudo cp /tmp/apache-fm.conf <deploy-dir>/deploy/apache-fm.conf && sudo apache2ctl configtest && sudo apache2ctl graceful && echo APACHE_OK'
 ```
 
@@ -2669,7 +2669,7 @@ Expected: `Syntax OK` и `APACHE_OK`. Откат — вернуть `.bak-*` и 
 - [ ] **Step 3: Выкатить комнату**
 
 ```bash
-tar --force-local --exclude=__pycache__ -czf /tmp/room-src.tar.gz -C C:/AI/projects/music deploy/room music/normalize.py
+tar --force-local --exclude=__pycache__ -czf /tmp/room-src.tar.gz -C <repo> deploy/room music/normalize.py
 scp -P <ssh-port> -i <ssh-key> /tmp/room-src.tar.gz <ssh-user>@<station-host>:/tmp/
 ssh -p <ssh-port> -i <ssh-key> <ssh-user>@<station-host> 'sudo docker tag subwave-room:1 subwave-room:1-pre-dislikes && rm -rf /tmp/room-build && mkdir -p /tmp/room-build && tar -xzf /tmp/room-src.tar.gz -C /tmp/room-build && cd /tmp/room-build && sudo docker build -q -f station/room/Dockerfile -t subwave-room:1 . && cd <deploy-dir>/subwave && sudo docker compose up -d room && curl -s --retry 10 --retry-delay 1 http://127.0.0.1:7700/room/health && curl -s -H "X-Listener-Id: probe" http://127.0.0.1:7700/room/dislikes && curl -s -o /dev/null -w " admin=%{http_code}\n" http://127.0.0.1:7700/room/admin/dislikes'
 ```
@@ -2679,9 +2679,9 @@ Expected: `{"ok": true}` (пока контейнер встаёт, Caddy отв
 - [ ] **Step 4: Выкатить веб — из чистого клона и патча репозитория**
 
 ```bash
-rm -rf C:/AI/tmp/sw-build && git -c core.autocrlf=false clone -q --depth 1 -b v1.8.0 https://github.com/perminder-klair/subwave.git C:/AI/tmp/sw-build
-git -C C:/AI/tmp/sw-build apply C:/AI/projects/music/station/docs/web-changes.md && echo APPLY_OK
-tar --force-local -czf /tmp/web-ru.tar.gz -C C:/AI/tmp/sw-build web
+rm -rf <tmp>/sw-build && git -c core.autocrlf=false clone -q --depth 1 -b v1.8.0 https://github.com/perminder-klair/subwave.git <tmp>/sw-build
+git -C <tmp>/sw-build apply <repo>/station/docs/web-changes.md && echo APPLY_OK
+tar --force-local -czf /tmp/web-ru.tar.gz -C <tmp>/sw-build web
 scp -P <ssh-port> -i <ssh-key> /tmp/web-ru.tar.gz <ssh-user>@<station-host>:/tmp/
 ssh -p <ssh-port> -i <ssh-key> <ssh-user>@<station-host> 'sudo docker tag subwave-web:1.8.0-ru subwave-web:1.8.0-ru-pre-dislikes && rm -rf /tmp/subwave-ru && mkdir -p /tmp/subwave-ru && tar -xzf /tmp/web-ru.tar.gz -C /tmp/subwave-ru && cd /tmp/subwave-ru && sudo docker build -q -f web/Dockerfile -t subwave-web:1.8.0-ru --build-arg SUBWAVE_BUILD_VERSION=1.8.0-ru . && cd <deploy-dir>/subwave && sudo docker compose up -d web && echo WEB_OK'
 ```
@@ -2703,7 +2703,7 @@ Expected: все `sub-wave-*` — `Up`; в логе комнаты строка 
 Выполняет основная сессия.
 
 **Files:**
-- Create (вне репозитория): `C:/AI/tmp/dislikes-accept.py`
+- Create (вне репозитория): `<tmp>/dislikes-accept.py`
 - Modify: `station/docs/deploy.md` (таблица состояния), `AGENTS.md` (строка про закрытые пути), `CLAUDE.md` (грабли, число тестов), `station/room/README.md` (факт приёмки)
 
 **Interfaces:**
@@ -2712,7 +2712,7 @@ Expected: все `sub-wave-*` — `Up`; в логе комнаты строка 
 
 - [ ] **Step 1: Скрипт приёмки**
 
-Создать `C:/AI/tmp/dislikes-accept.py`:
+Создать `<tmp>/dislikes-accept.py`:
 
 ```python
 """Живая приёмка дизлайков — на Debian: python3 /tmp/dislikes-accept.py
@@ -2874,7 +2874,7 @@ sys.exit(1 if failed else 0)
 - [ ] **Step 2: Прогнать приёмку**
 
 ```bash
-scp -P <ssh-port> -i <ssh-key> C:/AI/tmp/dislikes-accept.py <ssh-user>@<station-host>:/tmp/
+scp -P <ssh-port> -i <ssh-key> <tmp>/dislikes-accept.py <ssh-user>@<station-host>:/tmp/
 ssh -p <ssh-port> -i <ssh-key> <ssh-user>@<station-host> 'python3 /tmp/dislikes-accept.py; echo EXIT=$?'
 ```
 
@@ -2889,10 +2889,10 @@ Expected: все строки `OK` (допустимы `SKIP` с причино�
 Снимок плеера без звука headless-Edge:
 
 ```bash
-"C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" --headless=new --disable-gpu --window-size=1280,900 --virtual-time-budget=15000 --screenshot=C:/AI/tmp/dislikes-player.png https://<station-domain>/
+"C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" --headless=new --disable-gpu --window-size=1280,900 --virtual-time-budget=15000 --screenshot=<tmp>/dislikes-player.png https://<station-domain>/
 ```
 
-Открыть `C:/AI/tmp/dislikes-player.png` (Read) и найти значок 👎 между сердцем и стрелкой скачивания в строке исполнителя. Если карточку закрыл оверлей «включить эфир» — снимок не довод ни в какую сторону, остаётся проверка владельцем. Меню, строку «Уже прозвучало» на телефоне и карточку Dislikes в админке (`http://<station-host>:7700/admin/library`, вкладка Blocked) снимком не проверить — попросить владельца посмотреть: меню открывается и на телефоне, галочки ставятся и снимаются, тост говорит «Решение за владельцем станции», карточка первая на вкладке, Block и Keep работают.
+Открыть `<tmp>/dislikes-player.png` (Read) и найти значок 👎 между сердцем и стрелкой скачивания в строке исполнителя. Если карточку закрыл оверлей «включить эфир» — снимок не довод ни в какую сторону, остаётся проверка владельцем. Меню, строку «Уже прозвучало» на телефоне и карточку Dislikes в админке (`http://<station-host>:7700/admin/library`, вкладка Blocked) снимком не проверить — попросить владельца посмотреть: меню открывается и на телефоне, галочки ставятся и снимаются, тост говорит «Решение за владельцем станции», карточка первая на вкладке, Block и Keep работают.
 
 - [ ] **Step 5: Документация состояния**
 
@@ -2937,14 +2937,14 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 
 ```bash
 P="station/docs/deploy.md AGENTS.md CLAUDE.md station/room/README.md"
-git -C C:/AI/projects/music add $P
-git -C C:/AI/projects/music commit -F C:/AI/tmp/dislikes-commit.txt -- $P
+git -C <repo> add $P
+git -C <repo> commit -F <tmp>/dislikes-commit.txt -- $P
 ```
 
 - [ ] **Step 7: Отправить в origin**
 
 ```bash
-git -C C:/AI/projects/music push origin main
+git -C <repo> push origin main
 ```
 
 Expected: коммиты плана уехали на `git.<domain-2>`; зеркало на Gitea подтянет само.

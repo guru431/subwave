@@ -13,14 +13,14 @@
 ## Global Constraints
 
 - **Апстрим — ровно `v1.8.0`**, образы `subwave-controller:1.8.0-ru` и `subwave-web:1.8.0-ru`: тег образа обязан совпадать с версией апстрима.
-- **Тесты и линт — только в `node:22-bookworm-slim` на Debian.** На work-ai Node 26, и нативные `better-sqlite3`/`sqlite-vec` под ним не проверены.
+- **Тесты и линт — только в `node:22-bookworm-slim` на Debian.** На <workstation> Node 26, и нативные `better-sqlite3`/`sqlite-vec` под ним не проверены.
 - **Судить о наборе тестов — по разнице с эталоном** (`sw.sh baseline`), а не по нулю: часть тестов апстрима краснеет и на чистом клоне.
 - **`controller/src/schemas/*.ts` импортируют только `zod`.** Зеркало `web/lib/schemas.generated.ts` генерируется `npm run gen:schemas` и руками не правится; все модули схем лежат в нём в одной области видимости — новые имена верхнего уровня должны быть уникальны.
 - **Пределы:** имя правила и значение для всех полей, кроме `folder`, — 64 символа (`RULE_TEXT_MAX`); путь в правиле Folder — до 512 (`RULE_PATH_MAX`); до 12 значений в правиле. Жанры папок: до 12 на папку, до 64 символов на жанр, до 200 папок в таблице.
 - **Пути — абсолютные**, как их отдаёт Navidrome 0.63.2 с Report Real Path (`<music-mount>/…`); хранятся без завершающего `/` и **без обрезки пробелов**.
 - **Подписи в админке — по-английски**, как вся админка (она не переводилась). Комментарии в коде контроллера — по-английски, как в апстриме и в `controller-ru.patch`.
 - **`show-filter.ts` править только точечно (Edit):** `grep` считает его двоичным, файл целиком не переписывать.
-- **Чужие незакоммиченные файлы в `C:\AI\projects\music` не трогать.** На 2026-09-23 это `CLAUDE.md`, `FINDINGS.md`, `station/loudness/README.md`, `station/docs/deploy.md`, `station/tts-f5/*`, `docs/superpowers/specs/2026-09-23-tts-f5-migration-design.md`, `tests/test_tts_f5_voices.py`, `station/onboard/patches/2026-09-23-voice-gain-5.json`. Перед коммитом — `git status --short`; коммит — только с явными путями (`git commit -F <файл> -- <пути>`), многострочное сообщение — файлом, в конце `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>`.
+- **Чужие незакоммиченные файлы в `<repo>` не трогать.** На 2026-09-23 это `CLAUDE.md`, `FINDINGS.md`, `station/loudness/README.md`, `station/docs/deploy.md`, `station/tts-f5/*`, `docs/superpowers/specs/2026-09-23-tts-f5-migration-design.md`, `tests/test_tts_f5_voices.py`, `station/onboard/patches/2026-09-23-voice-gain-5.json`. Перед коммитом — `git status --short`; коммит — только с явными путями (`git commit -F <файл> -- <пути>`), многострочное сообщение — файлом, в конце `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>`.
 - **Если сессия идёт после `EnterWorktree`:** heredoc, `printf` с длинным текстом, `git -C` на чужой путь и `ssh` с `git` внутри обвязка отвергает. Всё удалённое — через скрипты-файлы ниже (`sw-remote.sh <команда>`).
 
 ## Review Focus
@@ -33,21 +33,21 @@
 
 ## Рабочее место — одним абзацем
 
-Код правится в **локальном зеркале** `C:\AI\tmp\sw-genre` (обычные файлы, без git), тестируется и собирается в **клоне на Debian** `/tmp/sw-genre` (v1.8.0 + оба текущих патча, закоммичены как `genre-base`; чистый апстрим помечен тегом `genre-v180`). `push.sh` переносит изменённые `.ts/.tsx` зеркала в клон, `sw-remote.sh <команда>` запускает там `sw.sh`. «Коммит» задач 1–9 — `sw-remote.sh checkpoint "…"` в клоне на Debian; в репозиторий `music` правки уезжают патчами в задаче 10.
+Код правится в **локальном зеркале** `<tmp>\sw-genre` (обычные файлы, без git), тестируется и собирается в **клоне на Debian** `/tmp/sw-genre` (v1.8.0 + оба текущих патча, закоммичены как `genre-base`; чистый апстрим помечен тегом `genre-v180`). `push.sh` переносит изменённые `.ts/.tsx` зеркала в клон, `sw-remote.sh <команда>` запускает там `sw.sh`. «Коммит» задач 1–9 — `sw-remote.sh checkpoint "…"` в клоне на Debian; в репозиторий `music` правки уезжают патчами в задаче 10.
 
 ---
 
 ### Task 1: Рабочее место и эталон тестов
 
 **Files:**
-- Create: `C:\AI\tmp\sw-genre-tools\sw.sh`, `summary.py`, `bootstrap.sh`, `push.sh`, `sw-remote.sh`
+- Create: `<tmp>\sw-genre-tools\sw.sh`, `summary.py`, `bootstrap.sh`, `push.sh`, `sw-remote.sh`
 - Не в репозитории: инструменты плана.
 
 **Interfaces:**
 - Consumes: `station/docs/controller-changes.md`, `station/docs/web-changes.md` из репозитория.
-- Produces: клон `/tmp/sw-genre` с тегами `genre-v180` и `genre-base`; зеркало `C:\AI\tmp\sw-genre\{controller/src,controller/scripts,web/components/admin,web/lib}`; эталон `/tmp/sw-genre-tools/base.log`; команды `sw-remote.sh setup|mirror|baseline|apply|test|suite|lint|gen-schemas|wtest|wlint|checkpoint|ourdiff|mkpatch|livediff|build-controller|build-web|build-web-nocache|health|persona|api|reconcile|folders|rules|backup-state|aired`.
+- Produces: клон `/tmp/sw-genre` с тегами `genre-v180` и `genre-base`; зеркало `<tmp>\sw-genre\{controller/src,controller/scripts,web/components/admin,web/lib}`; эталон `/tmp/sw-genre-tools/base.log`; команды `sw-remote.sh setup|mirror|baseline|apply|test|suite|lint|gen-schemas|wtest|wlint|checkpoint|ourdiff|mkpatch|livediff|build-controller|build-web|build-web-nocache|health|persona|api|reconcile|folders|rules|backup-state|aired`.
 
-- [ ] **Step 1: Создать `C:\AI\tmp\sw-genre-tools\sw.sh`**
+- [ ] **Step 1: Создать `<tmp>\sw-genre-tools\sw.sh`**
 
 ```bash
 #!/bin/bash
@@ -203,7 +203,7 @@ case "$cmd" in
 esac
 ```
 
-- [ ] **Step 2: Создать `C:\AI\tmp\sw-genre-tools\summary.py`**
+- [ ] **Step 2: Создать `<tmp>\sw-genre-tools\summary.py`**
 
 ```python
 """Короткие сводки ответов API станции для приёмки (sw.sh folders|rules|persona)."""
@@ -230,7 +230,7 @@ elif mode == "persona":
     print(p["name"], p["tts"]["voice"], v["tts"]["gainDb"]["remote"])
 ```
 
-- [ ] **Step 3: Создать `C:\AI\tmp\sw-genre-tools\bootstrap.sh`, `push.sh`, `sw-remote.sh`**
+- [ ] **Step 3: Создать `<tmp>\sw-genre-tools\bootstrap.sh`, `push.sh`, `sw-remote.sh`**
 
 `bootstrap.sh`:
 
@@ -242,16 +242,16 @@ elif mode == "persona":
 set -euo pipefail
 KEY=<ssh-key>
 H=<ssh-user>@<station-host>
-TOOLS=/c/AI/tmp/sw-genre-tools
-REPO=/c/AI/projects/music/deploy/subwave
+TOOLS=<tmp>/sw-genre-tools
+REPO=<repo>/deploy/subwave
 ssh -p <ssh-port> -i $KEY $H 'mkdir -p /tmp/sw-genre-tools'
 scp -q -P <ssh-port> -i $KEY $TOOLS/sw.sh $TOOLS/summary.py \
   $REPO/controller/controller-ru.patch $REPO/l10n/ru-web.patch $H:/tmp/sw-genre-tools/
 ssh -p <ssh-port> -i $KEY $H "sed -i 's/\r\$//' /tmp/sw-genre-tools/sw.sh /tmp/sw-genre-tools/summary.py && bash /tmp/sw-genre-tools/sw.sh setup && bash /tmp/sw-genre-tools/sw.sh mirror"
-rm -rf /c/AI/tmp/sw-genre && mkdir -p /c/AI/tmp/sw-genre
-scp -q -P <ssh-port> -i $KEY $H:/tmp/sw-genre-mirror.tgz /c/AI/tmp/sw-genre-mirror.tgz
-tar -xzf /c/AI/tmp/sw-genre-mirror.tgz -C /c/AI/tmp/sw-genre
-echo "BOOTSTRAP_OK: $(find /c/AI/tmp/sw-genre -type f | wc -l) files mirrored"
+rm -rf <tmp>/sw-genre && mkdir -p <tmp>/sw-genre
+scp -q -P <ssh-port> -i $KEY $H:/tmp/sw-genre-mirror.tgz <tmp>/sw-genre-mirror.tgz
+tar -xzf <tmp>/sw-genre-mirror.tgz -C <tmp>/sw-genre
+echo "BOOTSTRAP_OK: $(find <tmp>/sw-genre -type f | wc -l) files mirrored"
 ```
 
 `push.sh`:
@@ -264,12 +264,12 @@ echo "BOOTSTRAP_OK: $(find /c/AI/tmp/sw-genre -type f | wc -l) files mirrored"
 set -euo pipefail
 KEY=<ssh-key>
 H=<ssh-user>@<station-host>
-cd /c/AI/tmp/sw-genre
+cd <tmp>/sw-genre
 find controller web -type f \( -name '*.ts' -o -name '*.tsx' \) ! -path 'web/lib/schemas.generated.ts' \
-  > /c/AI/tmp/sw-genre-push.list
-tar -czf /c/AI/tmp/sw-genre-push.tgz -T /c/AI/tmp/sw-genre-push.list
-scp -q -P <ssh-port> -i $KEY /c/AI/tmp/sw-genre-push.tgz $H:/tmp/sw-genre-push.tgz
-scp -q -P <ssh-port> -i $KEY /c/AI/tmp/sw-genre-tools/sw.sh /c/AI/tmp/sw-genre-tools/summary.py $H:/tmp/sw-genre-tools/
+  > <tmp>/sw-genre-push.list
+tar -czf <tmp>/sw-genre-push.tgz -T <tmp>/sw-genre-push.list
+scp -q -P <ssh-port> -i $KEY <tmp>/sw-genre-push.tgz $H:/tmp/sw-genre-push.tgz
+scp -q -P <ssh-port> -i $KEY <tmp>/sw-genre-tools/sw.sh <tmp>/sw-genre-tools/summary.py $H:/tmp/sw-genre-tools/
 ssh -p <ssh-port> -i $KEY $H "sed -i 's/\r\$//' /tmp/sw-genre-tools/sw.sh /tmp/sw-genre-tools/summary.py && bash /tmp/sw-genre-tools/sw.sh apply"
 ```
 
@@ -281,31 +281,31 @@ ssh -p <ssh-port> -i $KEY $H "sed -i 's/\r\$//' /tmp/sw-genre-tools/sw.sh /tmp/s
 exec ssh -p <ssh-port> -i <ssh-key> <ssh-user>@<station-host> bash /tmp/sw-genre-tools/sw.sh "$@"
 ```
 
-Если любой из этих скриптов падает с `$'\r': command not found` — снять CR: `sed -i 's/\r$//' /c/AI/tmp/sw-genre-tools/*.sh`.
+Если любой из этих скриптов падает с `$'\r': command not found` — снять CR: `sed -i 's/\r$//' <tmp>/sw-genre-tools/*.sh`.
 
 - [ ] **Step 4: Поднять клон и зеркало**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/bootstrap.sh`
+Run: `bash <tmp>/sw-genre-tools/bootstrap.sh`
 Expected: `SETUP_OK`, `MIRROR_OK`, `BOOTSTRAP_OK: <N> files mirrored` (N — сотни).
 
 - [ ] **Step 5: Снять эталон тестов и линта** (несколько минут — можно в фоне)
 
-Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh baseline`
+Run: `bash <tmp>/sw-genre-tools/sw-remote.sh baseline`
 Expected: `baseline failing: <K>` и `LINT_BASE_OK`. Если `LINT_BASE_FAIL` — не исправлять: сохранить `/tmp/sw-genre-tools/base.lint` как эталон и дальше сравнивать ошибки линта с ним.
 
 - [ ] **Step 6: Проверить конвейер пустым проходом**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/push.sh && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh test blocklist-rules.test.ts`
-Expected: `applied <N> files`, затем `blocklist-rules.test.ts: all assertions passed`. И `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh ourdiff` — пустой вывод (зеркало совпадает с клоном).
+Run: `bash <tmp>/sw-genre-tools/push.sh && bash <tmp>/sw-genre-tools/sw-remote.sh test blocklist-rules.test.ts`
+Expected: `applied <N> files`, затем `blocklist-rules.test.ts: all assertions passed`. И `bash <tmp>/sw-genre-tools/sw-remote.sh ourdiff` — пустой вывод (зеркало совпадает с клоном).
 
 ---
 
 ### Task 2: Жанр с кириллицей
 
 **Files:**
-- Test: `C:\AI\tmp\sw-genre\controller\scripts\genre-cyrillic.test.ts` (Create)
-- Modify: `C:\AI\tmp\sw-genre\controller\src\music\show-filter.ts` (≈ строки 41–45 и 70)
-- Modify: `C:\AI\tmp\sw-genre\controller\src\music\subsonic.ts` (строка 8 и ≈ 366–369)
+- Test: `<tmp>\sw-genre\controller\scripts\genre-cyrillic.test.ts` (Create)
+- Modify: `<tmp>\sw-genre\controller\src\music\show-filter.ts` (≈ строки 41–45 и 70)
+- Modify: `<tmp>\sw-genre\controller\src\music\subsonic.ts` (строка 8 и ≈ 366–369)
 
 **Interfaces:**
 - Consumes: ничего.
@@ -340,7 +340,7 @@ console.log('genre-cyrillic.test.ts: all assertions passed');
 
 - [ ] **Step 2: Убедиться, что тест падает**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/push.sh && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh test genre-cyrillic.test.ts`
+Run: `bash <tmp>/sw-genre-tools/push.sh && bash <tmp>/sw-genre-tools/sw-remote.sh test genre-cyrillic.test.ts`
 Expected: FAIL — `AssertionError … Cyrillic letters survive` (`'' !== 'рок'`).
 
 - [ ] **Step 3: `show-filter.ts` — нормализация** (Edit; сначала Read файла)
@@ -408,12 +408,12 @@ import { normGenre } from './show-filter.js';
 
 - [ ] **Step 5: Тест проходит, латинские тесты апстрима не сдвинулись**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/push.sh && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh test genre-cyrillic.test.ts && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh test show-filter.test.ts && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh test blocklist-rules.test.ts`
+Run: `bash <tmp>/sw-genre-tools/push.sh && bash <tmp>/sw-genre-tools/sw-remote.sh test genre-cyrillic.test.ts && bash <tmp>/sw-genre-tools/sw-remote.sh test show-filter.test.ts && bash <tmp>/sw-genre-tools/sw-remote.sh test blocklist-rules.test.ts`
 Expected: `genre-cyrillic.test.ts: all assertions passed`, `show-filter.test.ts` без ✗, `blocklist-rules.test.ts: all assertions passed`.
 
 - [ ] **Step 6: Checkpoint**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh checkpoint "Genre matching: letters of any script"`
+Run: `bash <tmp>/sw-genre-tools/sw-remote.sh checkpoint "Genre matching: letters of any script"`
 
 ---
 
@@ -430,7 +430,7 @@ Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh checkpoint "Genre matching: let
 - Modify: `controller/src/music/tag-library/flags.ts` (≈ 120–122), `controller/src/music/analyze-library.ts` (≈ 135–137)
 - Modify: `controller/src/routes/library.ts` (`LibrarySong` ≈ 45–47, retag ≈ 744–750, manual-tag ≈ 913–920)
 
-(Все пути — внутри `C:\AI\tmp\sw-genre\`.)
+(Все пути — внутри `<tmp>\sw-genre\`.)
 
 **Interfaces:**
 - Consumes: ничего.
@@ -487,7 +487,7 @@ process.exit(0);
 
 - [ ] **Step 2: Убедиться, что тест падает**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/push.sh && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh test library-path.test.ts`
+Run: `bash <tmp>/sw-genre-tools/push.sh && bash <tmp>/sw-genre-tools/sw-remote.sh test library-path.test.ts`
 Expected: FAIL — `an absolute path is stored` (`undefined !== '/mnt/music/…'`).
 
 - [ ] **Step 3: Миграция 21** — в `schema.ts` заменить
@@ -807,12 +807,12 @@ export function folderRows(): Array<{ path: string | null; tagged: boolean }> {
 
 - [ ] **Step 10: Тест проходит, соседние тесты БД целы**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/push.sh && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh test library-path.test.ts && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh test airing.test.ts && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh test embedding-dim-migrate.test.ts`
+Run: `bash <tmp>/sw-genre-tools/push.sh && bash <tmp>/sw-genre-tools/sw-remote.sh test library-path.test.ts && bash <tmp>/sw-genre-tools/sw-remote.sh test airing.test.ts && bash <tmp>/sw-genre-tools/sw-remote.sh test embedding-dim-migrate.test.ts`
 Expected: `library-path.test.ts: all assertions passed`; `airing.test.ts` и `embedding-dim-migrate.test.ts` без ✗.
 
 - [ ] **Step 11: Checkpoint**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh checkpoint "library-db: absolute track path (migration 21)"`
+Run: `bash <tmp>/sw-genre-tools/sw-remote.sh checkpoint "library-db: absolute track path (migration 21)"`
 
 ---
 
@@ -926,7 +926,7 @@ console.log('folder-genres.test.ts: all assertions passed');
 
 - [ ] **Step 2: Убедиться, что тест падает**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/push.sh && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh test folder-genres.test.ts`
+Run: `bash <tmp>/sw-genre-tools/push.sh && bash <tmp>/sw-genre-tools/sw-remote.sh test folder-genres.test.ts`
 Expected: FAIL — `Cannot find module '…/src/music/folder-genres.js'`.
 
 - [ ] **Step 3: Создать `controller/src/music/folder-genres.ts`**
@@ -1136,12 +1136,12 @@ export async function save(raw: unknown): Promise<FolderGenresEntry[]> {
 
 - [ ] **Step 4: Тест проходит**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/push.sh && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh test folder-genres.test.ts`
+Run: `bash <tmp>/sw-genre-tools/push.sh && bash <tmp>/sw-genre-tools/sw-remote.sh test folder-genres.test.ts`
 Expected: `folder-genres.test.ts: all assertions passed`.
 
 - [ ] **Step 5: Checkpoint**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh checkpoint "folder-genres: table, path helpers, folder tree"`
+Run: `bash <tmp>/sw-genre-tools/sw-remote.sh checkpoint "folder-genres: table, path helpers, folder tree"`
 
 ---
 
@@ -1244,7 +1244,7 @@ console.log('folder-rules.test.ts: all assertions passed');
 
 - [ ] **Step 2: Убедиться, что тест падает**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/push.sh && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh test folder-rules.test.ts`
+Run: `bash <tmp>/sw-genre-tools/push.sh && bash <tmp>/sw-genre-tools/sw-remote.sh test folder-rules.test.ts`
 Expected: FAIL — `own folder` (`[]` вместо `['Поп']`).
 
 - [ ] **Step 3: `show-filter.ts`** (Edit, точечно)
@@ -1558,17 +1558,17 @@ import * as folderGenres from './music/folder-genres.js';
 
 - [ ] **Step 7: Тесты — новый и соседние**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/push.sh && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh test folder-rules.test.ts && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh test blocklist-rules.test.ts && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh test blocklist.test.ts && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh test library-schema.test.ts && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh test show-filter.test.ts`
+Run: `bash <tmp>/sw-genre-tools/push.sh && bash <tmp>/sw-genre-tools/sw-remote.sh test folder-rules.test.ts && bash <tmp>/sw-genre-tools/sw-remote.sh test blocklist-rules.test.ts && bash <tmp>/sw-genre-tools/sw-remote.sh test blocklist.test.ts && bash <tmp>/sw-genre-tools/sw-remote.sh test library-schema.test.ts && bash <tmp>/sw-genre-tools/sw-remote.sh test show-filter.test.ts`
 Expected: `folder-rules.test.ts: all assertions passed`; в остальных — ни одного ✗.
 
 - [ ] **Step 8: Перегенерировать зеркало схем**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh gen-schemas`
-Expected: `GEN_OK`. Затем `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh ourdiff` — в списке есть `web/lib/schemas.generated.ts`.
+Run: `bash <tmp>/sw-genre-tools/sw-remote.sh gen-schemas`
+Expected: `GEN_OK`. Затем `bash <tmp>/sw-genre-tools/sw-remote.sh ourdiff` — в списке есть `web/lib/schemas.generated.ts`.
 
 - [ ] **Step 9: Checkpoint**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh checkpoint "Folder rule and folder-genre fallback"`
+Run: `bash <tmp>/sw-genre-tools/sw-remote.sh checkpoint "Folder rule and folder-genre fallback"`
 
 ---
 
@@ -1644,25 +1644,25 @@ router.put('/library/folder-genres', requireAdmin, async (req, res) => {
 
 - [ ] **Step 2: Линт (eslint + tsc)**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/push.sh && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh lint`
+Run: `bash <tmp>/sw-genre-tools/push.sh && bash <tmp>/sw-genre-tools/sw-remote.sh lint`
 Expected: `LINT_OK` (либо ровно те ошибки, что в `base.lint`). Ошибки типов в правленых файлах — чинить здесь же.
 
 - [ ] **Step 3: Полный набор против эталона**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh suite`
+Run: `bash <tmp>/sw-genre-tools/sw-remote.sh suite`
 Expected: после строки `new against baseline:` — пусто, затем `SUITE_DONE`. Любая новая строка `✖` — разобрать до следующей задачи.
 
 - [ ] **Step 4: Checkpoint**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh checkpoint "Routes: folder tree and folder genres"`
+Run: `bash <tmp>/sw-genre-tools/sw-remote.sh checkpoint "Routes: folder tree and folder genres"`
 
 ---
 
 ### Task 7: Веб — модуль дерева папок
 
 **Files:**
-- Create: `C:\AI\tmp\sw-genre\web\lib\folderTree.ts`
-- Test: `C:\AI\tmp\sw-genre\web\lib\folderTree.test.ts` (Create)
+- Create: `<tmp>\sw-genre\web\lib\folderTree.ts`
+- Test: `<tmp>\sw-genre\web\lib\folderTree.test.ts` (Create)
 
 **Interfaces:**
 - Consumes: формат ответа `GET /library/folders` (задача 6).
@@ -1783,7 +1783,7 @@ process.exit(failures ? 1 : 0);
 
 - [ ] **Step 2: Убедиться, что тест падает**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/push.sh && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh wtest folderTree.test.ts`
+Run: `bash <tmp>/sw-genre-tools/push.sh && bash <tmp>/sw-genre-tools/sw-remote.sh wtest folderTree.test.ts`
 Expected: FAIL — `Cannot find module './folderTree'`.
 
 - [ ] **Step 3: Создать `web/lib/folderTree.ts`**
@@ -1883,20 +1883,20 @@ export function displayPath(root: FolderNode, path: string): string {
 
 - [ ] **Step 4: Тест проходит**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/push.sh && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh wtest folderTree.test.ts`
+Run: `bash <tmp>/sw-genre-tools/push.sh && bash <tmp>/sw-genre-tools/sw-remote.sh wtest folderTree.test.ts`
 Expected: все строки `✓`, в конце `all passed`.
 
 - [ ] **Step 5: Checkpoint**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh checkpoint "web: folder tree module"`
+Run: `bash <tmp>/sw-genre-tools/sw-remote.sh checkpoint "web: folder tree module"`
 
 ---
 
 ### Task 8: Веб — дерево в редакторе правила
 
 **Files:**
-- Create: `C:\AI\tmp\sw-genre\web\components\admin\library\FolderTree.tsx`
-- Modify: `C:\AI\tmp\sw-genre\web\components\admin\library\BlockRulesCard.tsx` (импорты ≈ 10–33, `FIELD_OPTIONS` ≈ 47–55, `ValuesInput` ≈ 89, состояние ≈ 157–160, загрузка словарей ≈ 185–208, строка правила ≈ 355, ветка значений ≈ 468)
+- Create: `<tmp>\sw-genre\web\components\admin\library\FolderTree.tsx`
+- Modify: `<tmp>\sw-genre\web\components\admin\library\BlockRulesCard.tsx` (импорты ≈ 10–33, `FIELD_OPTIONS` ≈ 47–55, `ValuesInput` ≈ 89, состояние ≈ 157–160, загрузка словарей ≈ 185–208, строка правила ≈ 355, ветка значений ≈ 468)
 
 **Interfaces:**
 - Consumes: задача 6 — `GET /library/folders`; задача 7 — `buildFolderTree`, `filterTree`, `displayPath`, `FolderNode`, `FolderStat`; `RuleField` с `'folder'` из перегенерированного зеркала (задача 5).
@@ -2107,7 +2107,7 @@ import { buildFolderTree, displayPath, type FolderNode, type FolderStat } from '
 
 - [ ] **Step 6: Перенести и зафиксировать** (линт веба — в конце задачи 9, одним прогоном)
 
-Run: `bash /c/AI/tmp/sw-genre-tools/push.sh && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh checkpoint "web: Folder rule with a folder tree"`
+Run: `bash <tmp>/sw-genre-tools/push.sh && bash <tmp>/sw-genre-tools/sw-remote.sh checkpoint "web: Folder rule with a folder tree"`
 Expected: `applied <N> files`, строка коммита.
 
 ---
@@ -2115,8 +2115,8 @@ Expected: `applied <N> files`, строка коммита.
 ### Task 9: Веб — карточка «Folder genres»
 
 **Files:**
-- Create: `C:\AI\tmp\sw-genre\web\components\admin\library\FolderGenresCard.tsx`
-- Modify: `C:\AI\tmp\sw-genre\web\components\admin\library\tabs\BlockedTabContainer.tsx` (импорт ≈ 6, разметка ≈ 61)
+- Create: `<tmp>\sw-genre\web\components\admin\library\FolderGenresCard.tsx`
+- Modify: `<tmp>\sw-genre\web\components\admin\library\tabs\BlockedTabContainer.tsx` (импорт ≈ 6, разметка ≈ 61)
 
 **Interfaces:**
 - Consumes: задача 6 — `GET /library/folders`, `PUT /library/folder-genres`; `GET /library/genres` (апстрим); задача 7 — `buildFolderTree`, `FolderNode`, `FolderStat`; задача 8 — `FolderTree`, `ValuesInput`.
@@ -2328,12 +2328,12 @@ export function FolderGenresCard({ onChanged }: { onChanged?: () => void }) {
 
 - [ ] **Step 3: Линт веба (eslint + tsc) и тест дерева**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/push.sh && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh wlint && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh wtest folderTree.test.ts`
+Run: `bash <tmp>/sw-genre-tools/push.sh && bash <tmp>/sw-genre-tools/sw-remote.sh wlint && bash <tmp>/sw-genre-tools/sw-remote.sh wtest folderTree.test.ts`
 Expected: `WLINT_OK` и `all passed`. Первый `wlint` ставит зависимости веба — несколько минут. Ошибки линта в новых или правленых файлах — исправить в зеркале, `push.sh`, повторить.
 
 - [ ] **Step 4: Checkpoint**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh checkpoint "web: Folder genres card"`
+Run: `bash <tmp>/sw-genre-tools/sw-remote.sh checkpoint "web: Folder genres card"`
 
 ---
 
@@ -2352,12 +2352,12 @@ Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh checkpoint "web: Folder genres 
 
 - [ ] **Step 1: Собрать патчи и проверить наложение на чистый клон**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh mkpatch`
+Run: `bash <tmp>/sw-genre-tools/sw-remote.sh mkpatch`
 Expected: список путей против `genre-base` — ровно файлы этого плана: 15 файлов `controller/src/…` (из них `A` — `music/folder-genres.ts`), 4 теста `controller/scripts/…` (`A`), `web/lib/folderTree.ts` и `.test.ts` (`A`), `web/components/admin/library/FolderTree.tsx` и `FolderGenresCard.tsx` (`A`), `BlockRulesCard.tsx`, `tabs/BlockedTabContainer.tsx`, `web/lib/schemas.generated.ts` (`M`); затем `controller files: <N>`, `web files: <M>`, `PATCH_CHECK_OK`. Лишний путь (кэш, лог, `node_modules`) — стоп: убрать его в клоне и повторить.
 
 - [ ] **Step 2: Забрать патчи в репозиторий**
 
-Run: `scp -P <ssh-port> -i <ssh-key> <ssh-user>@<station-host>:/tmp/sw-genre-tools/out-controller.patch /c/AI/projects/music/station/docs/controller-changes.md && scp -P <ssh-port> -i <ssh-key> <ssh-user>@<station-host>:/tmp/sw-genre-tools/out-web.patch /c/AI/projects/music/station/docs/web-changes.md && grep -c "^diff --git" /c/AI/projects/music/station/docs/controller-changes.md /c/AI/projects/music/station/docs/web-changes.md`
+Run: `scp -P <ssh-port> -i <ssh-key> <ssh-user>@<station-host>:/tmp/sw-genre-tools/out-controller.patch <repo>/station/docs/controller-changes.md && scp -P <ssh-port> -i <ssh-key> <ssh-user>@<station-host>:/tmp/sw-genre-tools/out-web.patch <repo>/station/docs/web-changes.md && grep -c "^diff --git" <repo>/station/docs/controller-changes.md <repo>/station/docs/web-changes.md`
 Expected: числа совпадают с `controller files` / `web files` из шага 1.
 
 - [ ] **Step 3: Стартовые JSON**
@@ -2463,10 +2463,10 @@ Navidrome: аватар → Players → `sub-wave [node]` → Report Real Path.
 
 - [ ] **Step 6: Коммит только своих путей**
 
-Run: `git -C C:/AI/projects/music status --short`
+Run: `git -C <repo> status --short`
 Expected: среди изменённых — ровно четыре своих файла и новый каталог `station/deploy/blocking/`; чужие грязные файлы (см. Global Constraints) не трогались.
 
-Сообщение — файлом `C:\AI\tmp\sw-genre-tools\commit-patches.txt`:
+Сообщение — файлом `<tmp>\sw-genre-tools\commit-patches.txt`:
 
 ```text
 Станция: блокировка по жанру папки и правило Folder — патчи
@@ -2480,8 +2480,8 @@ Expected: среди изменённых — ровно четыре своих
 Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
 ```
 
-Run: `git -C C:/AI/projects/music add -- station/docs/controller-changes.md station/docs/web-changes.md station/docs/controller-changes.md station/docs/web-changes.md station/deploy/blocking`
-Run: `git -C C:/AI/projects/music commit -F C:/AI/tmp/sw-genre-tools/commit-patches.txt -- station/docs/controller-changes.md station/docs/web-changes.md station/docs/controller-changes.md station/docs/web-changes.md station/deploy/blocking`
+Run: `git -C <repo> add -- station/docs/controller-changes.md station/docs/web-changes.md station/docs/controller-changes.md station/docs/web-changes.md station/deploy/blocking`
+Run: `git -C <repo> commit -F <tmp>/sw-genre-tools/commit-patches.txt -- station/docs/controller-changes.md station/docs/web-changes.md station/docs/controller-changes.md station/docs/web-changes.md station/deploy/blocking`
 Expected: один коммит, `git show --stat HEAD` — только эти пути.
 
 ---
@@ -2489,13 +2489,13 @@ Expected: один коммит, `git show --stat HEAD` — только эти 
 ### Task 11: Navidrome, контроллер, сверка
 
 **Files:**
-- Create: `C:\AI\tmp\sw-genre-tools\navidrome_real_path.py` (одноразовый, не в репозитории)
+- Create: `<tmp>\sw-genre-tools\navidrome_real_path.py` (одноразовый, не в репозитории)
 
 **Interfaces:**
-- Consumes: задача 10 (патчи в репозитории = клон на Debian), `NAVIDROME_ADMIN_PASS` из `c:/AI/projects/_boss/secrets/vault.env`.
+- Consumes: задача 10 (патчи в репозитории = клон на Debian), `NAVIDROME_ADMIN_PASS` из `<_boss>/secrets/vault.env`.
 - Produces: флаг Report Real Path у плеера `sub-wave [node]`; живой контроллер с правкой; `withoutPath = 0`.
 
-- [ ] **Step 1: Скрипт флага Navidrome** — `C:\AI\tmp\sw-genre-tools\navidrome_real_path.py`:
+- [ ] **Step 1: Скрипт флага Navidrome** — `<tmp>\sw-genre-tools\navidrome_real_path.py`:
 
 ```python
 """Report Real Path для плеера станции в Navidrome (sub-wave [node]).
@@ -2513,7 +2513,7 @@ import urllib.request
 
 BASE = "http://<station-host>:4533"
 PLAYER = "sub-wave [node]"
-VAULT = r"C:\AI\projects\_boss\secrets\vault.env"
+VAULT = r"<_boss>\secrets\vault.env"
 
 
 def vault(key, default=None):
@@ -2563,27 +2563,27 @@ print("path as the station sees it:", song.get("path"))
 
 - [ ] **Step 2: Включить флаг и проверить путь**
 
-Run (PowerShell): `$env:PYTHONIOENCODING='utf-8'; & 'C:\Program Files\Python314\python.exe' C:\AI\tmp\sw-genre-tools\navidrome_real_path.py`
+Run (PowerShell): `$env:PYTHONIOENCODING='utf-8'; & 'C:\Program Files\Python314\python.exe' <tmp>\sw-genre-tools\navidrome_real_path.py`
 Expected: `reportRealPath: True` и `path as the station sees it: <music-mount>/…`. Путь не абсолютный — стоп: флаг не применился к нужному плееру; включить руками (аватар → Players → `sub-wave [node]` → Report Real Path) и повторить скрипт. Старому контроллеру абсолютный путь безвреден: `MUSIC_LIBRARY_PATH` не задан, воспроизведение идёт потоком.
 
 - [ ] **Step 3: Сверить живой контроллер с клоном**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh livediff`
+Run: `bash <tmp>/sw-genre-tools/sw-remote.sh livediff`
 Expected: отличаются **только** файлы этого плана: `music/show-filter.ts`, `music/subsonic.ts`, `music/blocklist-rules.ts`, `schemas/blocklist.ts`, `music/library-db/{schema,types,rows,tracks,queries}.ts`, `music/library.ts`, `music/analyze-library.ts`, `music/tag-library/flags.ts`, `routes/library.ts`, `server.ts` и `Only in CLONE…: folder-genres.ts`; затем `LIVEDIFF_DONE`. Любой другой файл — стоп: на проде правка, которой нет в клоне; сборка её откатит (случай 22.09 в README контроллера).
 
 - [ ] **Step 4: Собрать и поднять контроллер**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh build-controller`
+Run: `bash <tmp>/sw-genre-tools/sw-remote.sh build-controller`
 Expected: хэш образа и `CONTROLLER_UP`. Прежний образ остался под тегом `subwave-controller:1.8.0-ru-pre-genre`.
 
 - [ ] **Step 5: Здоровье и настройки**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh health && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh persona`
+Run: `bash <tmp>/sw-genre-tools/sw-remote.sh health && bash <tmp>/sw-genre-tools/sw-remote.sh persona`
 Expected: контейнеры `sub-wave*` в `Up`, ошибок за 5 минут нет; строка персоны та же, что до выкатки (имя, голос, `gainDb.remote`).
 
 - [ ] **Step 6: Сверка с Navidrome — заполнить пути**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh reconcile && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh folders`
+Run: `bash <tmp>/sw-genre-tools/sw-remote.sh reconcile && bash <tmp>/sw-genre-tools/sw-remote.sh folders`
 Expected: `RECONCILE_DONE`, затем `withoutPath: 0` и строки:
 - `…/Music/Сборки: total=866`;
 - `…/Unsorted/!Помойка русская: total=242 untagged=237`;
@@ -2602,7 +2602,7 @@ Expected: `RECONCILE_DONE`, затем `withoutPath: 0` и строки:
 ### Task 12: Веб, стартовое наполнение, приёмка
 
 **Files:**
-- Create: `C:\AI\tmp\sw-genre-tools\tmp-chanson.json`, `tmp-pop.json` (одноразовые)
+- Create: `<tmp>\sw-genre-tools\tmp-chanson.json`, `tmp-pop.json` (одноразовые)
 - Modify (только если свободны): `station/docs/deploy.md`, `CLAUDE.md`, `FINDINGS.md`
 
 **Interfaces:**
@@ -2611,20 +2611,20 @@ Expected: `RECONCILE_DONE`, затем `withoutPath: 0` и строки:
 
 - [ ] **Step 1: Собрать и поднять веб**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh build-web`
-Expected: хэш образа и `WEB_UP`. Падение на `Turbopack is not supported … swc-linux-x64-musl` — битый кэш слоя (README веб-патча): `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh build-web-nocache`.
+Run: `bash <tmp>/sw-genre-tools/sw-remote.sh build-web`
+Expected: хэш образа и `WEB_UP`. Падение на `Turbopack is not supported … swc-linux-x64-musl` — битый кэш слоя (README веб-патча): `bash <tmp>/sw-genre-tools/sw-remote.sh build-web-nocache`.
 
 - [ ] **Step 2: Копия состояния перед наполнением**
 
-Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh backup-state`
+Run: `bash <tmp>/sw-genre-tools/sw-remote.sh backup-state`
 Expected: `backed up …` или `no … yet` для `blocklist.json` и `folder-genres.json`.
 
 - [ ] **Step 3: Наполнение**
 
-Run: `scp -P <ssh-port> -i <ssh-key> /c/AI/projects/music/station/deploy/blocking/rule-sborki.json /c/AI/projects/music/station/deploy/blocking/folder-genres.json <ssh-user>@<station-host>:/tmp/sw-genre-tools/`
-Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh api POST /library/blocklist/rules /tmp/sw-genre-tools/rule-sborki.json`
+Run: `scp -P <ssh-port> -i <ssh-key> <repo>/station/deploy/blocking/rule-sborki.json <repo>/station/deploy/blocking/folder-genres.json <ssh-user>@<station-host>:/tmp/sw-genre-tools/`
+Run: `bash <tmp>/sw-genre-tools/sw-remote.sh api POST /library/blocklist/rules /tmp/sw-genre-tools/rule-sborki.json`
 Expected: JSON с `rule` (`field: "folder"`) и `purged` — сколько треков `Сборок` снято из очереди.
-Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh api PUT /library/folder-genres /tmp/sw-genre-tools/folder-genres.json`
+Run: `bash <tmp>/sw-genre-tools/sw-remote.sh api PUT /library/folder-genres /tmp/sw-genre-tools/folder-genres.json`
 Expected: `entries` из пяти папок.
 
 - [ ] **Step 4: Засечь время выкатки**
@@ -2634,27 +2634,27 @@ Run: `ssh -p <ssh-port> -i <ssh-key> <ssh-user>@<station-host> 'date -u +%Y-%m-%
 
 - [ ] **Step 5: Счётчики правил**
 
-`C:\AI\tmp\sw-genre-tools\tmp-chanson.json` — правило-щуп, привязанное к несуществующей передаче: счётчик `matchCount` считается, а эфир оно не трогает (`active: false`, в очереди ничего не снимается):
+`<tmp>\sw-genre-tools\tmp-chanson.json` — правило-щуп, привязанное к несуществующей передаче: счётчик `matchCount` считается, а эфир оно не трогает (`active: false`, в очереди ничего не снимается):
 
 ```json
 { "label": "tmp Шансон", "field": "genre", "values": ["Шансон"], "showIds": ["__acceptance__"] }
 ```
 
-`C:\AI\tmp\sw-genre-tools\tmp-pop.json`:
+`<tmp>\sw-genre-tools\tmp-pop.json`:
 
 ```json
 { "label": "tmp Поп", "field": "genre", "values": ["Поп"], "showIds": ["__acceptance__"] }
 ```
 
-Run: `scp -P <ssh-port> -i <ssh-key> /c/AI/tmp/sw-genre-tools/tmp-chanson.json /c/AI/tmp/sw-genre-tools/tmp-pop.json <ssh-user>@<station-host>:/tmp/sw-genre-tools/`
-Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh api POST /library/blocklist/rules /tmp/sw-genre-tools/tmp-chanson.json && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh api POST /library/blocklist/rules /tmp/sw-genre-tools/tmp-pop.json && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh rules`
+Run: `scp -P <ssh-port> -i <ssh-key> <tmp>/sw-genre-tools/tmp-chanson.json <tmp>/sw-genre-tools/tmp-pop.json <ssh-user>@<station-host>:/tmp/sw-genre-tools/`
+Run: `bash <tmp>/sw-genre-tools/sw-remote.sh api POST /library/blocklist/rules /tmp/sw-genre-tools/tmp-chanson.json && bash <tmp>/sw-genre-tools/sw-remote.sh api POST /library/blocklist/rules /tmp/sw-genre-tools/tmp-pop.json && bash <tmp>/sw-genre-tools/sw-remote.sh rules`
 Expected:
 - `'Сборки — дубли' folder=['<music-mount>/Сборки'] matchCount=866 active=True`;
 - `'tmp Шансон' genre=['Шансон'] matchCount=42 active=False`;
 - `'tmp Поп' genre=['Поп'] matchCount=748 active=False` (511 по тегу + 237 по жанру папки).
 
 Удалить оба щупа по их `id` из вывода:
-Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh api DELETE /library/blocklist/rules/<id-tmp-Шансон> && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh api DELETE /library/blocklist/rules/<id-tmp-Поп> && bash /c/AI/tmp/sw-genre-tools/sw-remote.sh rules`
+Run: `bash <tmp>/sw-genre-tools/sw-remote.sh api DELETE /library/blocklist/rules/<id-tmp-Шансон> && bash <tmp>/sw-genre-tools/sw-remote.sh api DELETE /library/blocklist/rules/<id-tmp-Поп> && bash <tmp>/sw-genre-tools/sw-remote.sh rules`
 Expected: осталось одно правило — «Сборки — дубли».
 
 - [ ] **Step 6: Глазами — владелец**
@@ -2663,12 +2663,12 @@ Expected: осталось одно правило — «Сборки — дуб
 
 - [ ] **Step 7: Эфир без `Сборок`** (не раньше чем через 3 часа после `T0`)
 
-Run: `bash /c/AI/tmp/sw-genre-tools/sw-remote.sh aired <T0>`
+Run: `bash <tmp>/sw-genre-tools/sw-remote.sh aired <T0>`
 Expected: `plays` > 0, `from_sborki` = 0, `no_path` = 0.
 
 - [ ] **Step 8: Документация в занятых файлах**
 
-Run: `git -C C:/AI/projects/music status --short -- station/docs/deploy.md CLAUDE.md FINDINGS.md`
+Run: `git -C <repo> status --short -- station/docs/deploy.md CLAUDE.md FINDINGS.md`
 
 Если файл **свободен** (нет в выводе) — внести правку и закоммитить его отдельным коммитом с явным путём; если **занят** — не трогать, а текст ниже отдать владельцу в итоговом отчёте.
 
