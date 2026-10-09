@@ -169,7 +169,7 @@ python3 onboard.py --persona p_ru --from /tmp/freq.json
 | Поле | Значение | Почему так |
 |---|---|---|
 | Navidrome URL | `http://<station-host>:4533` | LAN-адрес хоста, **не** `127.0.0.1`: контроллер работает в контейнере, и петлевой адрес указывал бы внутрь него |
-| Navidrome user / pass | учётка Navidrome из менеджера секретов | та же учётка, что у Subsonic API |
+| Navidrome user / pass | учётка Navidrome из менеджера секретов | та же учётка, что у Subsonic API. Заданные в `.env` стека `NAVIDROME_*` главнее мастера: контроллер читает их через `env_file`, и правка в мастере при них не действует — менять в `.env` (их же читает комната) |
 | LLM | провайдер `openai-compatible`, база `http://<station-host>:4000/v1`, модель — **имя роли** `chat`, ключ шлюза | шлюз LiteLLM; сверено с живой станцией 2026-09-21: `/api/doctor` отвечает `openai-compatible:chat · reachable`, `0/20 failed`, `1/3002 calls errored` |
 | TTS | см. ниже | |
 | Выравнивание громкости | `loudness.targetLufs = -14`, `maxBoostDb = 6`, `source = replaygain-then-measured` | ReplayGain в тегах коллекции нет, поэтому работает второй источник — `library.db`. Его наполняет наш нормализатор (`python station/loudness/run.py`, замер по файлу целиком, [loudness/](../loudness/README.md)); без него у всех треков `loudness_lufs` пуст и выравнивания нет вовсе |
@@ -199,9 +199,12 @@ Chatterbox отвечает по схеме OpenAI (`POST /v1/audio/speech`), п
 голос — `en_GB-alan-medium`, у Kokoro 54 голоса без русского, и при остановленном мостике
 ведущий читал русский текст английским голосом. Каталог `/opt/piper/voices` вынесен на
 хост томом ([`docker-compose.override.yml`](../deploy/docker-compose.override.yml)), в него доложен
-`ru_RU-dmitri-medium`, выбор — `PIPER_VOICE` в `.env`. Деградация проверена: поток не
-прерывается, ведущий продолжает говорить по-русски. Подробности — в
-[`tts-bridge/README.md`](../tts-bridge/README.md).
+`ru_RU-dmitri-medium`, позже заменённый женским `ru_RU-irina-medium` под голос ведущей;
+выбор — `PIPER_VOICE` в `.env`. Деградация проверена: поток не прерывается, ведущий
+продолжает говорить по-русски. Подробности — в
+[`tts-bridge/README.md`](../tts-bridge/README.md). С запретом подмены движка
+([controller-changes.md](controller-changes.md), «Запрет подмены движка TTS») при
+выключенном запасном TTS Piper не звучит вовсе: пока движок ведущей недоступен, она молчит.
 
 ## Встраивания: у станции их два потребителя, а настройка одна
 
