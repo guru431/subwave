@@ -55,6 +55,7 @@
 ## Как тестировать
 
 ```bash
+pip install --group station/pyproject.toml:test   # зависимости набора, pip ≥ 25.1
 cd station && python -m pytest          # быстрый набор станции
 bash station/run-tests.sh --patch       # тесты наших фич контроллера в образе
 bash station/run-tests.sh               # весь набор контроллера
