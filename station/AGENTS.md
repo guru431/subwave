@@ -2,7 +2,10 @@
 
 Репозиторий — форк perminder-klair/subwave. Корневые `AGENTS.md`, `CLAUDE.md`,
 `.claude/skills/` — апстрима: их не правим, они описывают кодовую базу апстрима.
-Наше — только `station/`, `.claude/rules/radio.md` и блок в конце `.gitignore`.
+Исключение — настоящая ошибка апстрима, на которой встаёт CI-гейт публикации:
+`.claude/skills/subwave-llm-bench/scripts/assess-models.sh` (SC2259, подробно — в
+`.claude/rules/radio.md`). Наше — только `station/`, `.claude/rules/radio.md` и блок
+в конце `.gitignore`.
 
 Ключевые файлы:
 - `station/README.md` — что добавляет форк, раскладка.

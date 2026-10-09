@@ -141,7 +141,7 @@ POST /speak   →  {"text": "...", "voice": "..."}  →  тело ответа =
 ```
 
 Chatterbox отвечает по схеме OpenAI (`POST /v1/audio/speech`), поэтому между ними стоит
-мостик из этого репозитория — [`tts-bridge/bridge.py`](../tts-bridge/bridge.py), 90 строк на
+мостик из этого репозитория — [`tts-bridge/bridge.py`](../tts-bridge/bridge.py) на
 стандартной библиотеке. Server URL в админке — адрес мостика на gpu-host.
 
 Движки запасного TTS встроены в образ контроллера, ставить их не нужно. Сайдкар
