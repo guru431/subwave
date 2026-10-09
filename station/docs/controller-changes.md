@@ -451,7 +451,8 @@ requestPath: true })` в `runRequestViaAgent`. Это тот приём, кот�
 ## Окно артиста в агентном пути
 
 `C08` · [dj-agent/artist-guard.ts](../../controller/src/broadcast/dj-agent/artist-guard.ts),
-[dj-agent.ts](../../controller/src/broadcast/dj-agent.ts) `pickViaAgent`
+[dj-agent.ts](../../controller/src/broadcast/dj-agent.ts) `pickViaAgent`,
+[queue.ts](../../controller/src/broadcast/queue.ts) `queuedArtistRoots`
 
 Жалоба была «за день много раз Агата Кристи и Наутилус», и разбор журналов станции
 (v1.8, 19–22.09) показал, что дело не в коллекции:
@@ -474,10 +475,15 @@ requestPath: true })` в `runRequestViaAgent`. Это тот приём, кот�
 апстримного `runArtistGuard`, в точку выбора, а не в инструменты, поэтому #618 не
 возвращается:
 
-- `artistWindowRoots(queue.recentArtistsSince(windows.artistHours), neighbourRoots)`
-  — ключи окна: сырые имена из журнала проигрываний, приведённые к ведущему артисту
-  (#1251: `X feat. Y` — это X), плюс уже стоящие в очереди несыгранные треки — при
-  `queue.lookahead = 5` пик ложится в хвост и выйдет в эфир после них;
+- `artistWindowRoots(queue.recentArtistsSince(windows.artistHours), neighbourRoots,
+  queue.queuedArtistRoots())` — ключи окна: сырые имена из журнала проигрываний,
+  приведённые к ведущему артисту (#1251: `X feat. Y` — это X), плюс **вся** очередь
+  несыгранного — при `queue.lookahead = 5` пик ложится в хвост и выйдет в эфир
+  после неё. Именно вся: `neighbourRoots` (`neighbourArtistRoots(artistVarietyWindow)`)
+  берёт только хвост `upcoming.slice(-n)`, а при окне 0 — ничего, и при
+  `lookahead` глубже окна голова очереди выпадала из окна артиста — добор мог
+  выбрать артиста, который уже стоит в очереди. `queuedArtistRoots()` читает весь
+  `upcoming`, как `recentAlbumKeys`; мягкие слоты апстрима по-прежнему смотрят хвост;
 - `runArtistGuard` получает их необязательными `windowRoots`/`windowHours`; без этих
   полей поведение апстрима не меняется ни в чём;
 - причина `window` старше мягкой `recent` (но не `onair` — совпадения с якорем пика)
@@ -514,7 +520,12 @@ inside the artist window, and the empty pool rescue lets it stand» (было а
 **Проверено.** `scripts/artist-guard-run.test.ts` — пять тестов окна (перевыбор,
 спасение пулом при исчерпании, артист якоря не возвращается, сорванный перевыбор
 идёт в пул, окно старше слотов; RED → GREEN при переносе),
-`scripts/artist-guard.test.ts` — ключи `artistWindowRoots`. При переносе —
+`scripts/artist-guard.test.ts` — ключи `artistWindowRoots` и `queuedArtistRoots` (вся
+очередь, голова тоже), `scripts/artist-window-deep-queue.test.ts` — настоящий путь
+`runTrackEvent` → `pickViaAgent` → `runArtistGuard` (подделан только
+`pickerAgent.run`): очередь из десяти, артист на первой позиции, окно слотов 5 и 0 —
+пик того же артиста попадает в окно (RED → GREEN: страж молчал, пик вставал в
+очередь). При переносе —
 `run-tests.sh --src`, `artist-guard*`, `picker*`, `pair-drain*`, `album*`, `request*`
 (130/130).
 

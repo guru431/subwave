@@ -410,8 +410,10 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, pickAn
   // rule — see ArtistGuardDeps.windowRoots. The agent tools carry no artist
   // filter (#618), so without it one band aired every 40–60 minutes on a
   // catalogue with a few deep shelves. Requests take runRequestViaAgent and stay
-  // outside the window.
-  const windowRoots = artistWindowRoots(queue.recentArtistsSince(windows.artistHours), neighbourRoots);
+  // outside the window. The whole queue is in it, not just the spacing tail:
+  // everything queued airs before this pick does.
+  const windowRoots = artistWindowRoots(
+    queue.recentArtistsSince(windows.artistHours), neighbourRoots, queue.queuedArtistRoots());
   const guarded = await runArtistGuard<any>({
     song, object, pickAnchor,
     seen: extras.seen,

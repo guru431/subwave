@@ -4248,6 +4248,21 @@ class Queue {
     return out;
   }
 
+  // Fork: the LEAD-artist keys of EVERYTHING queued and unaired — the queued
+  // half of the hours artist window (dj-agent/artist-guard.ts
+  // artistWindowRoots). neighbourArtistRoots takes only the last `n` queued
+  // (and none at n = 0), which is right for slot spacing and wrong for the
+  // window: with queue.lookahead deeper than artistVarietyWindow the head of
+  // the queue fell out of it. Whole queue, as recentAlbumKeys reads it.
+  queuedArtistRoots(): Set<string> {
+    const out = new Set<string>();
+    for (const item of this.upcoming) {
+      const key = artistRootKey({ artist: item?.track?.artist });
+      if (key) out.add(key);
+    }
+    return out;
+  }
+
   // Lowercased artist names heard in the last `hours` hours — used by the
   // picker to block recently-heard artists. 2h is a sane default; raising it
   // narrows the pool fast on a small library.

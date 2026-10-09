@@ -366,4 +366,21 @@ assert.equal(queue.neighbourArtistRoots(3).size, 0, 'an artist-less play adds no
   assert(!roots.has(''), 'an empty name adds no key');
 }
 
+// The WHOLE queue joins the window, not only the spacing tail: with
+// queue.lookahead deeper than the spacing window the head would fall outside.
+{
+  setPlays([]);
+  (queue as any).upcoming = [
+    { track: { id: 'H', title: 'Head', artist: 'Marvin Gaye & Tammi Terrell' } },
+    { track: { id: 'U', title: 'Untagged', artist: '' } },
+    { track: { id: 'T', title: 'Tail', artist: 'The Clash' } },
+  ];
+  const queued = queue.queuedArtistRoots();
+  assert.deepEqual([...queued].sort(), ['marvin gaye', artistRootKey('The Clash')].sort(),
+    'every queued item keys onto its lead act; an untagged one adds nothing');
+  assert(!queue.neighbourArtistRoots(1).has('marvin gaye'), 'control: spacing sees only the tail');
+  assert(artistWindowRoots([], queue.neighbourArtistRoots(1), queued).has('marvin gaye'),
+    'the window takes the head of the queue as well');
+}
+
 console.log('artist-guard checks passed');
