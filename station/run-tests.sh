@@ -158,7 +158,10 @@ sudo docker run --rm --name "$name" --memory 1500m --memory-swap 1500m \
 pid=$!
 start=$SECONDS
 killed=
-while kill -0 "$pid" 2>/dev/null; do
+# Жив ли прогон — по /proc, а не `kill -0`: $pid — процесс sudo, он принадлежит
+# root, и `kill -0` отвечает «нет прав» — цикл кончался с первой же проверки, а
+# сторож памяти и потолок времени не работали вовсе (как в tools/guarded.sh).
+while [ -e "/proc/$pid" ]; do
   avail=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
   if [ -z "$killed" ] && [ "$avail" -lt "$MIN_AVAIL" ]; then
     echo "TESTS_ENV на хосте станции MemAvailable ${avail} МБ — прогон снят сторожем"

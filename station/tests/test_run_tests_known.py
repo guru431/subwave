@@ -69,6 +69,18 @@ def test_src_run_knows_only_what_the_image_lacks(tmp_path):
                    "jingle-play.test.ts": False, READS_ABSENT: False}
 
 
+def test_remote_watchdog_polls_proc_not_kill_0():
+    """$pid удалённой части — процесс `sudo docker run`, он принадлежит root.
+    `kill -0` ему отвечает «нет прав», цикл сторожа кончался с первой проверки —
+    ни сторожа памяти, ни потолка времени. Проверка на хосте — руками:
+    `sudo sleep 30 & kill -0 $!; echo $?` даёт 1."""
+    text = SCRIPT.read_text(encoding="utf-8")
+    remote = re.search(r"<<'EOF'\n(.*?)^EOF$", text, re.M | re.S).group(1)
+    code = [ln for ln in remote.splitlines() if not ln.lstrip().startswith("#")]
+    assert not [ln for ln in code if "kill -0" in ln]
+    assert 'while [ -e "/proc/$pid" ]; do' in remote
+
+
 def test_every_entry_names_an_existing_test():
     entries = re.findall(r'^\s*"([^"$]+)"\s*$', _known_block(), re.M)
     assert entries
