@@ -149,6 +149,13 @@ def check_subscription(raw) -> tuple[dict | None, str | None]:
         return None, "ключи подписки не в base64url"
     if len(p256dh) != 65 or p256dh[0] != 4 or len(auth) != 16:
         return None, "ключи подписки неверной длины"
+    try:
+        # Ключ не на кривой ронял бы шифрование исключением на каждой
+        # рассылке, а исключение — сбой на стороне комнаты (код 0), подписку
+        # оно не стирает: такую нельзя и принять
+        ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), p256dh)
+    except ValueError:
+        return None, "ключ подписки — не точка P-256"
     return {"endpoint": endpoint, "p256dh": b64u(p256dh), "auth": b64u(auth)}, None
 
 
@@ -159,6 +166,8 @@ def send(subscription: dict, payload: dict, vapid: Vapid, subject: str,
     201 — принято; 404 и 410 — подписки больше нет, её надо забыть; прочее —
     временный отказ. Сетевой сбой возвращается кодом 0, а не исключением:
     рассылка по списку не должна обрываться на первом недоступном адресате.
+    Код 0 — сбой на стороне комнаты, отказом подписки он не считается
+    (`Store.push_result`).
     """
     body = encrypt(json.dumps(payload, ensure_ascii=False).encode("utf-8"),
                    subscription["p256dh"], subscription["auth"])

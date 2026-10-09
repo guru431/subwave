@@ -24,15 +24,17 @@ CREATE INDEX IF NOT EXISTS messages_at ON messages (at);
 CREATE INDEX IF NOT EXISTS messages_listener ON messages (listener_id, at);
 
 -- подписки Web Push: адрес push-сервиса браузера и ключи шифрования.
--- `name` — имя слушателя на момент подписки, по нему ловится упоминание
+-- `name` — имя слушателя на момент подписки, по нему ловится упоминание;
+-- `last_success_at` — последний 2xx push-сервиса (NULL — успеха ещё не было)
 CREATE TABLE IF NOT EXISTS push_subscriptions (
-  endpoint    TEXT PRIMARY KEY,
-  p256dh      TEXT NOT NULL,
-  auth        TEXT NOT NULL,
-  listener_id TEXT NOT NULL,
-  name        TEXT NOT NULL,
-  created_at  TEXT NOT NULL,
-  failures    INTEGER NOT NULL DEFAULT 0
+  endpoint        TEXT PRIMARY KEY,
+  p256dh          TEXT NOT NULL,
+  auth            TEXT NOT NULL,
+  listener_id     TEXT NOT NULL,
+  name            TEXT NOT NULL,
+  created_at      TEXT NOT NULL,
+  failures        INTEGER NOT NULL DEFAULT 0,
+  last_success_at TEXT
 );
 
 -- дизлайки слушателей: одна отметка слушателя на цель. target — song_id у
@@ -63,9 +65,12 @@ CREATE TABLE IF NOT EXISTS dislike_decisions (
 );
 """
 
-# Подряд столько временных отказов push-сервиса — и подписка забывается: так
-# выглядит браузер, который удалили, не отписавшись.
+# Подписка забывается по отказам, только если их подряд не меньше
+# PUSH_FAILURES_MAX И успеха не было дольше PUSH_STALE_DAYS: так выглядит
+# браузер, который удалили, не отписавшись. Одного счётчика мало — пачка 5xx
+# за вечер означает беду push-сервиса, а не смерть подписки.
 PUSH_FAILURES_MAX = 5
+PUSH_STALE_DAYS = 30
 PUSH_GONE = (404, 410)
 
 
@@ -81,7 +86,8 @@ def _iso_ms(moment: datetime) -> str:
 
 
 class Store:
-    def __init__(self, path: str, retention_days: int = 14):
+    def __init__(self, path: str, retention_days: int = 14,
+                 now: datetime | None = None):
         # check_same_thread=False: сервер — ThreadingHTTPServer, соединение одно
         # на процесс. Блокировка — потому что рассылка push идёт фоновым
         # потоком: пара «запрос + commit» из двух потоков иначе может сойтись
@@ -89,9 +95,27 @@ class Store:
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
+        self._migrate(now or datetime.now(timezone.utc))
         self.db.commit()
         self.retention_days = retention_days
         self.lock = threading.Lock()
+
+    def _migrate(self, now: datetime) -> None:
+        """Довести базу прежней схемы. `CREATE TABLE IF NOT EXISTS` заводит
+        новые таблицы сам, а новую колонку в старой таблице — нет.
+
+        `last_success_at` у подписок, заведённых до неё, ставится временем
+        этого старта: о прошлых успехах ничего не известно, и отсчёт от даты
+        подписки стёр бы давние подписки первым же отказом.
+        """
+        columns = {r["name"] for r in self.db.execute(
+            "PRAGMA table_info(push_subscriptions)")}
+        if "last_success_at" not in columns:
+            # Колонка и её заполнение — одной транзакцией: упади процесс между
+            # ними, следующий старт увидел бы колонку и не заполнил её вовсе
+            self.db.execute("BEGIN")
+            self.db.execute("ALTER TABLE push_subscriptions ADD COLUMN last_success_at TEXT")
+            self.db.execute("UPDATE push_subscriptions SET last_success_at = ?", (_iso(now),))
 
     def close(self) -> None:
         self.db.close()
@@ -218,21 +242,38 @@ class Store:
                 "FROM push_subscriptions").fetchall()
         return [dict(r) for r in rows]
 
-    def push_result(self, endpoint: str, status: int) -> None:
-        """Учесть ответ push-сервиса: 404/410 — подписки больше нет, успех
-        обнуляет счётчик, прочий отказ его растит до PUSH_FAILURES_MAX."""
+    def push_result(self, endpoint: str, status: int,
+                    now: datetime | None = None) -> None:
+        """Учесть ответ push-сервиса.
+
+        404/410 — подписки больше нет, она забывается сразу. Успех обнуляет
+        счётчик отказов и помечает время. 0 — сбой на стороне комнаты (сеть,
+        DNS, таймаут; см. push.send): подписка тут ни при чём, и он не
+        считается вовсе — иначе пять сообщений в чате во время обрыва стёрли
+        бы все подписки разом. Прочий отказ (429, 5xx, …) растит счётчик, а
+        подписку забывает, только если отказов подряд не меньше
+        PUSH_FAILURES_MAX и успеха (или, пока его не было, подписки) нет
+        дольше PUSH_STALE_DAYS.
+        """
+        if status == 0:
+            return
+        moment = now or datetime.now(timezone.utc)
         with self.lock:
             if status in PUSH_GONE:
                 self.db.execute("DELETE FROM push_subscriptions WHERE endpoint = ?",
                                 (endpoint,))
             elif 200 <= status < 300:
-                self.db.execute("UPDATE push_subscriptions SET failures = 0 "
-                                "WHERE endpoint = ?", (endpoint,))
+                self.db.execute("UPDATE push_subscriptions SET failures = 0, "
+                                "last_success_at = ? WHERE endpoint = ?",
+                                (_iso(moment), endpoint))
             else:
                 self.db.execute("UPDATE push_subscriptions SET failures = failures + 1 "
                                 "WHERE endpoint = ?", (endpoint,))
-                self.db.execute("DELETE FROM push_subscriptions WHERE endpoint = ? "
-                                "AND failures >= ?", (endpoint, PUSH_FAILURES_MAX))
+                self.db.execute(
+                    "DELETE FROM push_subscriptions WHERE endpoint = ? AND failures >= ? "
+                    "AND COALESCE(last_success_at, created_at) <= ?",
+                    (endpoint, PUSH_FAILURES_MAX,
+                     _iso(moment - timedelta(days=PUSH_STALE_DAYS))))
             self.db.commit()
 
     def set_dislike(self, row: dict, cap: int, now: datetime | None = None) -> str:

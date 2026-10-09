@@ -8,8 +8,10 @@
 import importlib.util
 import json
 import os
+import sqlite3
 import sys
 import threading
+from datetime import datetime, timedelta, timezone
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -139,6 +141,16 @@ def test_subscription_with_broken_keys_is_refused():
     assert push.check_subscription(bad)[0] is None
 
 
+def test_subscription_with_a_key_off_the_curve_is_refused():
+    # 65 байт с 0x04 впереди, но не точка P-256: шифрование на таком ключе
+    # падает исключением, а исключение рассылки (код 0) подписку не стирает —
+    # значит, её нельзя и принять
+    bad = _subscription()
+    bad["keys"]["p256dh"] = push.b64u(b"\x04" + b"\x00" * 64)
+    sub, problem = push.check_subscription(bad)
+    assert sub is None and problem
+
+
 def test_send_reports_the_push_service_answer():
     vapid = push.Vapid(ec.generate_private_key(ec.SECP256R1()))
     ua, p256dh, auth = _browser_keys()
@@ -262,20 +274,74 @@ def test_delivery_runs_on_one_thread_however_many_messages(store):
     assert sent == ["первое", "сообщение 5"]
 
 
-def test_gone_subscription_is_forgotten_and_flaky_one_after_five_failures(store):
-    gone = _subscribe(store, "a", "Аня")
-    flaky = _subscribe(store, "b", "Боря")
-    store.push_result(gone, 410)
-    assert [s["endpoint"] for s in store.subscriptions()] == [flaky]
-    for _ in range(store_mod.PUSH_FAILURES_MAX - 1):
-        store.push_result(flaky, 503)
-    assert store.subscriptions()
-    store.push_result(flaky, 201)          # успех обнуляет счётчик
-    for _ in range(store_mod.PUSH_FAILURES_MAX - 1):
-        store.push_result(flaky, 503)
-    assert store.subscriptions()
-    store.push_result(flaky, 503)
+T0 = datetime(2026, 10, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+
+def _subscribe_at(store, listener, now):
+    sub, _ = push.check_subscription(_subscription(f"{FCM}{listener}"))
+    store.subscribe(sub, listener, listener, now=now)
+    return sub["endpoint"]
+
+
+def test_gone_subscription_is_forgotten_at_once(store):
+    gone = _subscribe_at(store, "a", T0)
+    kept = _subscribe_at(store, "b", T0)
+    store.push_result(gone, 410, now=T0)
+    assert [s["endpoint"] for s in store.subscriptions()] == [kept]
+    store.push_result(kept, 404, now=T0)
     assert store.subscriptions() == []
+
+
+def test_network_failure_on_our_side_never_erases_subscriptions(store):
+    # код 0 — URLError, OSError, таймаут: обрыв интернета или DNS у комнаты.
+    # Прежде пять таких отказов подряд стирали подписку, то есть пять
+    # сообщений в чате во время обрыва — все подписки разом
+    flaky = _subscribe_at(store, "a", T0)
+    for day in range(60):
+        store.push_result(flaky, 0, now=T0 + timedelta(days=day))
+    assert [s["endpoint"] for s in store.subscriptions()] == [flaky]
+
+
+def test_refusals_erase_only_a_subscription_without_success_for_a_month(store):
+    flaky = _subscribe_at(store, "a", T0)
+    # пачка отказов в первый же день — временная беда push-сервиса, а не смерть
+    for _ in range(store_mod.PUSH_FAILURES_MAX * 3):
+        store.push_result(flaky, 503, now=T0 + timedelta(hours=1))
+    assert store.subscriptions()
+    store.push_result(flaky, 201, now=T0 + timedelta(days=10))    # жива
+    late = T0 + timedelta(days=10 + store_mod.PUSH_STALE_DAYS + 1)
+    # успеха нет больше месяца, но отказов ещё мало — рано
+    for _ in range(store_mod.PUSH_FAILURES_MAX - 1):
+        store.push_result(flaky, 429, now=late)
+    assert store.subscriptions()
+    store.push_result(flaky, 500, now=late)
+    assert store.subscriptions() == []
+
+
+def test_database_from_before_success_times_keeps_its_subscriptions(tmp_path):
+    # room.db на станции заведён без времени последнего успеха: колонка
+    # появляется сама, а старые строки получают отсрочку от первого старта,
+    # а не стираются первым же отказом из-за давней даты подписки
+    path = tmp_path / "room.db"
+    db = sqlite3.connect(path)
+    db.execute("CREATE TABLE push_subscriptions (endpoint TEXT PRIMARY KEY, "
+               "p256dh TEXT NOT NULL, auth TEXT NOT NULL, listener_id TEXT NOT NULL, "
+               "name TEXT NOT NULL, created_at TEXT NOT NULL, "
+               "failures INTEGER NOT NULL DEFAULT 0)")
+    db.execute("INSERT INTO push_subscriptions VALUES (?, 'k', 'a', 'l1', 'Аня', ?, ?)",
+               (FCM, (T0 - timedelta(days=90)).isoformat(), store_mod.PUSH_FAILURES_MAX))
+    db.commit()
+    db.close()
+    s = store_mod.Store(str(path), now=T0)
+    try:
+        s.push_result(FCM, 503, now=T0 + timedelta(days=1))
+        assert [x["endpoint"] for x in s.subscriptions()] == [FCM]
+        s.push_result(FCM, 503, now=T0 + timedelta(days=store_mod.PUSH_STALE_DAYS + 1))
+        assert s.subscriptions() == []
+    finally:
+        s.close()
+    # повторный старт колонку не заводит заново и не падает
+    store_mod.Store(str(path), now=T0).close()
 
 
 def _turn(text, aired, kind="chat"):
