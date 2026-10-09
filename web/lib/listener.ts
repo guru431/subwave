@@ -34,6 +34,11 @@ function randomId(): string {
 
 const EMPTY: Listener = { id: '', name: '', lastSeenId: 0, notify: false };
 
+// Запасной id вкладки, когда хранилище запрещено: один на всю её жизнь. Новый на
+// каждый вызов делал каждый запрос новым слушателем — комната не узнавала 👎
+// после следующего опроса, а частотный лимит считал каждый запрос первым.
+let spareId: string | null = null;
+
 export function listener(): Listener {
   if (typeof window === 'undefined') return EMPTY;
   try {
@@ -58,7 +63,8 @@ export function listener(): Listener {
   } catch {
     // Приватное окно и запрет на хранилище — не повод ломать плеер: чат в этой
     // вкладке будет работать до перезагрузки, под случайным id.
-    return { ...EMPTY, id: randomId() };
+    spareId ??= randomId();
+    return { ...EMPTY, id: spareId };
   }
 }
 
