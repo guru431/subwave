@@ -32,6 +32,7 @@ import { useTuneInGate } from '@/components/player/useTuneInGate';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useCoverColors } from '@/hooks/useCoverColors';
 import { useDynamicStyle } from '@/hooks/useDynamicStyle';
+import { useHeldWhileHidden } from '@/hooks/useHeldWhileHidden';
 import { cn } from '@/lib/cn';
 import { useStationClient } from '@/lib/stationClient';
 import type { SkinProps } from '@/components/skins/types';
@@ -224,6 +225,11 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
   // Отметки «не нравится» перечитываются на смене трека: ключ — текущая песня
   // и голова истории (прозвучавшее уехало в ленту).
   const dislikeWindowKey = `${nowPlaying?.subsonic_id ?? ''}|${state.history?.[0]?.subsonic_id ?? ''}`;
+  // Fork (W14): the stage draws what was last seen while the page is hidden,
+  // so its keyed exits can't pile up where no frame ever finishes them (see
+  // useHeldWhileHidden). The lock screen reads the live feed in PlayerCore.
+  const stageNowPlaying = useHeldWhileHidden(nowPlaying);
+  const stageTrackStartedAt = useHeldWhileHidden(trackStartedAt);
   const [tickerOn, setTickerOn] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -315,8 +321,8 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
       />
 
       <CenterStage
-        nowPlaying={nowPlaying}
-        trackStartedAt={trackStartedAt}
+        nowPlaying={stageNowPlaying}
+        trackStartedAt={stageTrackStartedAt}
         llmTokens={llmTokens}
         feed={boothFeed}
         djLineOn={tickerOn}
