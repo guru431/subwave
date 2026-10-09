@@ -18,7 +18,7 @@ from f5_worker import BROADCAST, CLONE, QueueTimeout
 MAX_TEXT_CHARS = 20000
 
 
-def before_accent(text: str) -> str:
+def before_accent(text: str, log=print) -> str:
     """Текст до RUAccent: латиница из PRONUNCIATION и числа — словами (числительному
     тоже нужны ударения). Имена словаря коллекции с цифрами числа не трогают — их
     после RUAccent заменит cyrillize. Тем же путём реплику размечает
@@ -26,7 +26,13 @@ def before_accent(text: str) -> str:
     text = f5_text.respell(text)
     _, names = f5_text.DICTIONARY.current()
     # ключи словаря — латиница: без неё искать нечего, а регулярка на тысячи имён дорогая
-    return f5_numbers.normalize(text, keep=names if re.search(r"[A-Za-z]", text) else None)
+    keep = names if re.search(r"[A-Za-z]", text) else None
+    try:
+        return f5_numbers.normalize(text, keep=keep)
+    except Exception as e:                 # noqa: BLE001 — реплика важнее чисел
+        # 500 здесь — потерянная реплика: подмена движка запрещена (C05)
+        log(f"numbers failed, text left as is: {type(e).__name__}: {e}")
+        return text
 
 
 class ServiceError(Exception):
@@ -104,7 +110,7 @@ class Service:
             raise ServiceError(400, "текст обязателен и должен быть непустой строкой")
         if len(text) > MAX_TEXT_CHARS:
             raise ServiceError(413, f"текст длиннее {MAX_TEXT_CHARS} символов")
-        marked = f5_text.cyrillize(self.accentizer.apply(before_accent(text.strip())))
+        marked = f5_text.cyrillize(self.accentizer.apply(before_accent(text.strip(), self.log)))
         if not marked.strip():
             # иначе нарезка не даёт ни куска, и ответ 200 несёт WAV без отсчётов
             raise ServiceError(400, "после разметки ударений от текста ничего не осталось")

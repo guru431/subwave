@@ -270,6 +270,29 @@ def test_half_written_file_keeps_the_previous_dictionary(two_copies):
     assert d.current()[0]["sting"] == "Стинг-дописан"
 
 
+@pytest.mark.parametrize("content", ['[]', '{"words": ["sting"], "phrases": {}}',
+                                     '{"words": {"sting": 5}, "phrases": {}}'],
+                         ids=["list", "words-list", "value-not-string"])
+def test_dictionary_of_the_wrong_shape_keeps_the_previous_one(two_copies, content):
+    # TypeError на JSON не той формы не ловился: «[]» ронял бы перечитывание в потоке
+    # синтеза, а значение-число — уже подстановку в cyrillize
+    volume, image = two_copies
+    clock = Clock()
+    logs = []
+    d = T.Dictionary(volume, fallback=image, check_every=30.0, clock=clock, log=logs.append)
+    volume.write_text(content, encoding="utf-8")
+    os.utime(volume, ns=(volume.stat().st_atime_ns, volume.stat().st_mtime_ns + 10 ** 9))
+    clock.now += 30
+    assert d.current()[0]["sting"] == "Ст+инг-том" and logs
+
+
+def test_dictionary_of_the_wrong_shape_at_start_falls_back_to_the_image_copy(two_copies):
+    volume, image = two_copies
+    volume.write_text('{"words": {"sting": 5}, "phrases": {}}', encoding="utf-8")
+    d = T.Dictionary(volume, fallback=image, log=lambda *_: None)
+    assert d.current()[0]["sting"] == "Стинг"
+
+
 def test_removed_volume_file_falls_back_to_the_image_copy(two_copies):
     volume, image = two_copies
     clock = Clock()

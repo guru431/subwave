@@ -235,6 +235,22 @@ class StrictAccent(FakeAccent):
         return text if "+" in text else super().apply(text)
 
 
+def test_numbers_failure_keeps_the_line(voices, monkeypatch):
+    """Сбой нормализации чисел давал 500, а подмена движка запрещена (C05): реплика
+    пропадала. Лучше цифры в эфире, чем тишина."""
+    import f5_numbers
+
+    def broken(text, keep=None):
+        raise ValueError("сломалось")
+
+    monkeypatch.setattr(f5_numbers, "normalize", broken)
+    logs, eng = [], FakeEngine()
+    r = S.Service(eng, voices, "ru-host", FakeAccent(), W.Worker(), queue_wait=1.0,
+                  log=logs.append).speak("В 1969 году.")
+    assert r.wav[:4] == b"RIFF" and eng.calls[0][3] == "В 1969 году."
+    assert any("numbers failed" in line and "сломалось" in line for line in logs)
+
+
 def test_plus_between_numbers_does_not_switch_the_accent_off(voices):
     """«1+1» становилось «один+один», а «+о» RUAccent принимает за ручное ударение и
     оставляет без разметки всю реплику."""
