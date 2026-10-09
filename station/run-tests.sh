@@ -220,6 +220,15 @@ while IFS= read -r key; do
   [ -n "$key" ] || continue
   if is_known "$key"; then known=$((known + 1)); else new+=("$key"); fi
 done < <(failures all)
+# Сверка разбора со счётчиком сводки: падение, которое failures() не узнал
+# (другой формат строки, обрыв вывода), иначе не попало бы ни в известные, ни в
+# новые — и прогон вышел бы чистым. Считаются строки списка до sort -u: два
+# теста с одним именем — два падения.
+listed=$(awk '/^✖ failing tests:/ { on = 1; next } on && /^✖ / { n++ } END { print n + 0 }' "$out")
+failed=$(count fail)
+if [ "$listed" -lt "$failed" ]; then
+  new+=("сводка: ℹ fail $failed, а в списке failing tests разобрано $listed")
+fi
 
 echo
 [ "$known" -gt 0 ] && echo "Известных падений (среда образа, апстрим): $known"
