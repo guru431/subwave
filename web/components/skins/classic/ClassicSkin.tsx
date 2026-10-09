@@ -236,9 +236,12 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
   // so its keyed exits can't pile up where no frame ever finishes them (see
   // useHeldWhileHidden). The lock screen reads the live feed in PlayerCore.
   // The booth drawer's rows exit the same popLayout way, one per new turn.
+  // `offline` too: it is part of the title block's key, so a flapping stream
+  // left a copy per flip. Transport and overlay keep the live flag.
   const stageNowPlaying = useHeldWhileHidden(nowPlaying);
   const stageTrackStartedAt = useHeldWhileHidden(trackStartedAt);
   const stageBoothFeed = useHeldWhileHidden(boothFeed);
+  const stageOffline = useHeldWhileHidden(offline);
   const [tickerOn, setTickerOn] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -336,7 +339,7 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
         feed={boothFeed}
         djLineOn={tickerOn}
         boothBuddyOn={state.ui?.boothBuddy === true}
-        offline={offline}
+        offline={stageOffline}
         upNext={upNext}
         onOpenBooth={openBooth}
         onOpenTimeline={openTimeline}

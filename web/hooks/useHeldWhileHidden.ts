@@ -19,8 +19,13 @@ import { useEffect, useRef, useState } from 'react';
 export function useHeldWhileHidden<T>(value: T): T {
   const latestRef = useRef(value);
   useEffect(() => { latestRef.current = value; }, [value]);
-  // Boxed, so a held null is told apart from "not holding".
-  const [held, setHeld] = useState<{ value: T } | null>(null);
+  // Boxed, so a held null is told apart from "not holding". A mount in an
+  // already-hidden tab starts holding: the visibilitychange that would arm it
+  // has already fired. No document on the server, and the first render returns
+  // `value` either way, so hydration agrees.
+  const [held, setHeld] = useState<{ value: T } | null>(() =>
+    typeof document !== 'undefined' && document.hidden ? { value } : null,
+  );
   useEffect(() => {
     const onVisibility = () => setHeld(document.hidden ? { value: latestRef.current } : null);
     document.addEventListener('visibilitychange', onVisibility);
