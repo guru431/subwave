@@ -11,12 +11,18 @@ HTTP — сторож опрашивает их из задачи планиро
 |---|---|---|
 | мостик TTS | `TTS_BRIDGE_URL/health` | не `200 {"ok": true}` дольше 15 минут подряд — ведущая молчит |
 | эфир | `WATCH_STATION_URL/api/state` | `musicStarved: true` (аварийная петля) или нет ответа |
+| поток | `WATCH_STATION_URL/api/now-playing` | `streamOnline` не true, нет трека или трек идёт дольше длины + 5 мин (без длины — 20 мин) — микшер стоит |
 | комната | `WATCH_STATION_URL/room/health` | не 200 |
 | контроллер | `WATCH_STATION_URL/api/health` | не 200 |
 
 Мостик получает 15 минут: F5 на хосте GPU поднимается не мгновенно, а без Docker до
-логона там нет и мостика — короткий провал не повод будить владельца. Остальное —
-сразу: аварийная петля и упавший контроллер слышны слушателям уже сейчас.
+логона там нет и мостика — короткий провал не повод будить владельца. Поток — со
+второго запуска подряд (перезапуск контроллера). Остальное — сразу: аварийная петля
+и упавший контроллер слышны слушателям уже сейчас.
+
+Поток проверяется отдельно, потому что упавший микшер не виден ни в одной другой
+проверке: `music-starved.json` перестаёт обновляться, через 60 с контроллер отвечает
+«не голодает», `/api/health` — константа, комната жива.
 
 Сообщение — одно на переходе в сбой и одно о восстановлении, без повторов каждые
 5 минут; состояние между запусками — в `WATCH_STATE_FILE`. Недоставленное
@@ -48,10 +54,17 @@ REQUIRED = ("TTS_BRIDGE_URL", "WATCH_STATION_URL")
 TIMEOUT = 15
 # telegram-send.sh повторяет недоставленное с паузами 30 и 90 с
 NOTIFY_TIMEOUT = 300
-# сколько секунд сбой должен длиться, прежде чем о нём сообщить
-GRACE = {"bridge": 15 * 60}
+# сколько секунд сбой должен длиться, прежде чем о нём сообщить. Поток — со
+# второго запуска подряд: после перезапуска контроллера статус Icecast до 15 с
+# не опрошен, и streamOnline в это время false
+GRACE = {"bridge": 15 * 60, "stream": 4 * 60}
 LABELS = {"bridge": "мостик TTS (ведущая молчит)", "air": "эфир",
-          "room": "комната (чат)", "api": "контроллер"}
+          "stream": "поток (эфир стоит)", "room": "комната (чат)", "api": "контроллер"}
+# Трек «стоит», если с его начала прошло больше длины + запас: стык, джингл,
+# пауза ведущей между песнями идут без нового now-playing. Без длины — порог
+# по возрасту начала.
+STALE_MARGIN = 5 * 60
+STALE_NO_DURATION = 20 * 60
 
 
 def _unquote(value: str) -> str:
@@ -104,7 +117,37 @@ def _http_problem(code, body) -> str:
     return f"HTTP {code}{tail}"
 
 
-def check(cfg: dict[str, str], get=fetch) -> dict[str, str | None]:
+def _stream_problem(code, body, err, now: float) -> str | None:
+    """Эфир по самому потоку, а не по флагам микшера.
+
+    Упавший broadcast не виден ни в одной другой проверке: music-starved.json
+    перестаёт обновляться, и через 60 с контроллер отвечает «не голодает»,
+    /api/health — константа, комната жива. Видно две вещи: Icecast без
+    источника (`streamOnline`) и трек, который «играет» дольше своей длины —
+    `nowPlaying.timestamp` пишет radio.liq в начале каждого трека.
+    """
+    if err:
+        return f"/api/now-playing не отвечает ({err})"
+    if code != 200 or not isinstance(body, dict):
+        return "/api/now-playing: " + _http_problem(code, body)
+    if body.get("streamOnline") is not True:
+        return "Icecast без источника — микшер не вещает"
+    track = body.get("nowPlaying")
+    started = track.get("timestamp") if isinstance(track, dict) else None
+    if not isinstance(started, (int, float)):
+        return "нет текущего трека — микшер не пишет now-playing"
+    duration = track.get("duration")
+    known = isinstance(duration, (int, float)) and duration > 0
+    age = now - started
+    if age <= (duration + STALE_MARGIN if known else STALE_NO_DURATION):
+        return None
+    name = " — ".join(str(track[k]) for k in ("artist", "title") if track.get(k))
+    return (f"трек «{name}» начался {round(age / 60)} мин назад"
+            + (f" при длине {round(duration / 60)} мин" if known else "")
+            + " — микшер стоит")
+
+
+def check(cfg: dict[str, str], now: float, get=fetch) -> dict[str, str | None]:
     """Имя проверки → None (в порядке) или текст сбоя."""
     station = cfg["WATCH_STATION_URL"].rstrip("/")
     out = {}
@@ -126,6 +169,8 @@ def check(cfg: dict[str, str], get=fetch) -> dict[str, str | None]:
             if isinstance(since, (int, float)) else "")
     else:
         out["air"] = None
+
+    out["stream"] = _stream_problem(*get(station + "/api/now-playing"), now)
 
     for name, path in (("room", "/room/health"), ("api", "/api/health")):
         code, body, err = get(station + path)
@@ -236,8 +281,8 @@ def main(argv=None, now=time.time, get=fetch, environ=os.environ,
     cfg = load_config(environ, env_file)
     state_path = Path(cfg["WATCH_STATE_FILE"])
     old = load_state(state_path)
-    results = check(cfg, get)
     t = now()
+    results = check(cfg, t, get)
     new, alerts, recovered = step(results, old, t)
     text = render(alerts, recovered)
     delivered = True
