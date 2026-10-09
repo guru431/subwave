@@ -143,6 +143,19 @@ def test_numero_date_ranges_and_percent_adjectives(text, expected):
     assert N.normalize(text) == expected
 
 
+@pytest.mark.parametrize("text,expected", [
+    ("В 19.00 начнётся шоу.", "В девятнадцать ноль ноль начнётся шоу."),
+    ("Встаём в 7.15 утра, эфир до 23.05.", "Встаём в семь пятнадцать утра, эфир до двадцать "
+     "три ноль пять."),
+    ("Концерт 15.10.2026, прошивка 1.2.3.", "Концерт 15.10.2026, прошивка 1.2.3."),
+    ("Счёт 2.50, а число пи — 3.14.", "Счёт 2.50, а число пи — 3.14."),
+], ids=["v-19-00", "daypart", "date-and-version", "not-time"])
+def test_dot_is_never_a_decimal_point(text, expected):
+    """Дробь — через запятую. «в 19.00» читалось «девятнадцать целых ноль сотых», а
+    «15.10.2026» — «…сотых.2026»: точка между цифрами — время, дата или версия."""
+    assert N.normalize(text) == expected
+
+
 @pytest.mark.parametrize("text", [
     "Maroon 5 и «2 Minutes to Midnight».",
     "Blink-182, U2 и Sum 41 подряд.",

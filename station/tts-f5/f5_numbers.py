@@ -29,8 +29,19 @@ from num2words import num2words
 _CYR = "А-Яа-яЁё"
 _LETTER = f"A-Za-z{_CYR}"
 # «300 000» — одно число: разряды через пробел, неразрывный или узкий неразрывный. Длиннее
-# 15 цифр — не число, а мусор: его оставляет как есть и предел int() на 4300 цифр не роняет
-_NUM = r"\d{1,3}(?:[ \N{NO-BREAK SPACE}\N{NARROW NO-BREAK SPACE}]\d{3}){1,4}(?!\d)|\d{1,15}(?:[.,]\d{1,3})?(?!\d)"
+# 15 цифр — не число, а мусор: его оставляет как есть и предел int() на 4300 цифр не роняет.
+# Дробь — только через запятую: точка между цифрами — время, дата или версия (_DOT_CHAIN)
+_NUM = r"\d{1,3}(?:[ \N{NO-BREAK SPACE}\N{NARROW NO-BREAK SPACE}]\d{3}){1,4}(?!\d)|\d{1,15}(?:,\d{1,3})?(?!\d)"
+# «19.00», «15.10.2026», «1.2.3»: время в однозначном окружении («в 19.00», «7.15 утра»)
+# читается как время, прочее уходит в F5 цифрами, как до f5_numbers
+_DOT_CHAIN = re.compile(r"(?<![\w.,])\d+(?:\.\d+)+(?!\w)")
+_DOT_TIME = re.compile(r"([01]?\d|2[0-3])\.([0-5]\d)")
+_TIME_PREPS = {"в", "во", "к", "ко", "до", "с", "со", "после", "около"}
+_DAYPART = re.compile(r"\s+(?:утра|дня|вечера|ночи)(?!\w)")
+# Спрятанный фрагмент — знак из дополнительной области частного использования: его
+# не тронет ни одна регулярка, а после проходов он возвращается как был
+_HIDDEN = 0xF0000
+_HIDDEN_RE = re.compile("[\U000F0000-\U000FFFFD]")
 _SIGN = {"+": "плюс", "-": "минус", "−": "минус"}
 # знак — только приклеенный к числу и после пробела или начала: «−3°», не «3-5%»
 _SIGNED = r"(?:(?<![^\s(«„\"])([+\-−]))?"
@@ -308,6 +319,13 @@ def _clock(m) -> str:
     return f"{_cardinal(hours)} {said}"
 
 
+def _dot_chain(m, hide) -> str:
+    time = _DOT_TIME.fullmatch(m.group())
+    if time and (_word_before(m) in _TIME_PREPS or _DAYPART.match(_after(m))):
+        return _clock(time)
+    return hide(m)
+
+
 def _gender(num: str, case: str, after: str) -> str:
     """Род количественного 1 и 2 — по окончанию следующего слова: «1 песня», «2 минуты»."""
     if not num.isdigit():
@@ -339,10 +357,17 @@ def normalize(text: str) -> str:
     количественными."""
     if not re.search(r"\d", text):
         return text
+    hidden = []
+
+    def hide(m):
+        hidden.append(m.group())
+        return chr(_HIDDEN + len(hidden) - 1)
+
+    text = _DOT_CHAIN.sub(lambda m: _dot_chain(m, hide), text)
     for pattern, fn in ((_NUMERO, _numero), (_PERCENT_ADJ, _percent_adj),
                         (_MEASURE, _measure), (_MONEY, _money), (_SPEED, _speed),
                         (_YEAR_WORD, _year_word), (_SUFFIX, _suffix), (_DATE_RANGE, _date_range),
                         (_DATE, _date), (_BARE_YEAR, _bare_year), (_CLOCK, _clock),
                         (_COUNT, _count)):
         text = pattern.sub(fn, text)
-    return text
+    return _HIDDEN_RE.sub(lambda m: hidden[ord(m.group()) - _HIDDEN], text)
