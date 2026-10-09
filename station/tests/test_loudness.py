@@ -289,7 +289,7 @@ CFG = {"GPU_SSH": "gpu@10.0.0.5", "STATION_SSH": "op@10.0.0.10", "SSH_PORT": "22
 def test_orchestrator_measures_first_and_applies_second():
     seen = []
 
-    def runner(cmd, timeout=None):
+    def runner(cmd, timeout=None, ok_codes=(0,)):
         seen.append(cmd)
         if "measure.py --root" in cmd[-1]:
             return 'ход замера\n{"files": 3, "measured": 1}\n'
@@ -310,6 +310,71 @@ def test_orchestrator_measures_first_and_applies_second():
                                "--cache /mnt/data/loudness/loudness.json "
                                "--library-db /srv/radio/state/library.db --dry-run")
     assert seen[1][1:3] == ["-p", "2222"]
+
+
+# --- частичный обход: замеры записываются, ошибка не глотается ---------------
+#
+# Любая ошибка обхода (недоступная ветвь, файл исчез между os.walk и stat) давала
+# measure.py код 1, и run.py выходил до apply: замеры посчитаны, кэш безопасен
+# (чистка при walk_errors отключена), а `loudness_lufs` новых треков не пишется.
+# Постоянная ошибка обхода молча выключала запись насовсем.
+
+STATS = {"files": 3, "measured": 1, "errors": 0, "removed": 0, "cached": 3,
+         "seconds": 0.1}
+APPLIED = {"tracks": 3, "updated": 1, "unchanged": 2, "no_measurement": 0,
+           "unknown_id": 0, "dry_run": False}
+
+
+def _fake_hosts(monkeypatch, measure_code: int, walk_errors: int) -> list:
+    """Подмена subprocess.run под настоящим _run: коды выхода как у хостов."""
+    seen = []
+
+    def fake(cmd, **kw):
+        seen.append(cmd[-1])
+        out = ""
+        code = 0
+        if "measure.py --root" in cmd[-1]:
+            out = json.dumps({**STATS, "walk_errors": walk_errors}) + "\n"
+            code = measure_code
+        elif "apply.py" in cmd[-1] and Path(cmd[0]).stem.lower() == "ssh":
+            out = json.dumps(APPLIED) + "\n"
+        return run_mod.subprocess.CompletedProcess(cmd, code, stdout=out)
+    monkeypatch.setattr(run_mod.subprocess, "run", fake)
+    return seen
+
+
+def test_partial_walk_exit_code_is_distinct(monkeypatch, capsys):
+    monkeypatch.setattr(measure, "run", lambda *a, **k: {**STATS, "walk_errors": 2})
+    assert measure.main(["--root", "r", "--cache", "c"]) == measure.PARTIAL_EXIT
+    assert json.loads(capsys.readouterr().out)["walk_errors"] == 2
+    # run.py держит копию числа: скрипты копируются на хосты поодиночке
+    assert run_mod.MEASURE_PARTIAL_EXIT == measure.PARTIAL_EXIT != 1
+
+
+def test_partial_walk_still_applies(monkeypatch):
+    seen = _fake_hosts(monkeypatch, measure.PARTIAL_EXIT, walk_errors=2)
+    measured, applied = run_mod.run(CFG)
+    assert measured["walk_errors"] == 2
+    assert applied == APPLIED
+    assert any("apply.py --cache" in c for c in seen)
+
+
+def test_crashed_measure_does_not_apply(monkeypatch):
+    # код 1 — упавший замер (нет диска, чужой кэш): итогу не верим, apply не идёт
+    seen = _fake_hosts(monkeypatch, 1, walk_errors=0)
+    with pytest.raises(SystemExit):
+        run_mod.run(CFG)
+    assert not any("apply.py --cache" in c for c in seen)
+
+
+def test_main_warns_and_fails_after_partial_walk(monkeypatch, capsys):
+    monkeypatch.setattr(run_mod, "load_config", lambda: CFG)
+    monkeypatch.setattr(run_mod, "run", lambda cfg, dry_run, workers: (
+        {**STATS, "walk_errors": 2}, APPLIED))
+    assert run_mod.main([]) != 0
+    captured = capsys.readouterr()
+    assert "записано 1" in captured.out          # итог apply напечатан
+    assert "обход" in captured.err
 
 
 def test_config_from_env_file_with_environment_on_top(tmp_path):

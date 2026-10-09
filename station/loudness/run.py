@@ -34,6 +34,9 @@ ENV_FILE = HERE.parent / ".env"
 # первый прогон по всей коллекции идёт ~15 минут, ежедневный — секунды
 MEASURE_TIMEOUT_SEC = 3 * 3600
 STEP_TIMEOUT_SEC = 120
+# measure.py PARTIAL_EXIT: обход неполный, но итог годен — запись в базу станции
+# идёт, а ошибка сообщается после неё. Копия: скрипты едут на хосты поодиночке
+MEASURE_PARTIAL_EXIT = 3
 KEYS = (
     "GPU_SSH",                  # user@host GPU-хоста: там коллекция и ffmpeg
     "STATION_SSH",              # user@host хоста станции
@@ -81,14 +84,14 @@ def _scp(cfg: dict, local: Path, host: str, remote: str) -> list[str]:
             *SSH_OPTS, str(local), f"{host}:{remote}"]
 
 
-def _run(cmd: list[str], timeout: int = STEP_TIMEOUT_SEC) -> str:
+def _run(cmd: list[str], timeout: int = STEP_TIMEOUT_SEC, ok_codes=(0,)) -> str:
     """Шаг на удалённом хосте. Ход замера идёт в stderr и виден сразу."""
     try:
         p = subprocess.run(cmd, stdout=subprocess.PIPE, text=True, encoding="utf-8",
                            errors="replace", timeout=timeout)
     except subprocess.TimeoutExpired:
         raise SystemExit(f"{' '.join(cmd[:2])} … не завершился за {timeout} с")
-    if p.returncode != 0:
+    if p.returncode not in ok_codes:
         raise SystemExit(f"{cmd[0]} {cmd[-1]!r} завершился с кодом {p.returncode}: "
                          f"{p.stdout.strip()[-500:]}")
     return p.stdout
@@ -105,10 +108,12 @@ def run(cfg: dict, dry_run: bool = False, workers: int = 8, runner=_run) -> tupl
     gpu, station = cfg["GPU_SSH"], cfg["STATION_SSH"]
     measure_remote = cfg["LOUDNESS_MEASURE_REMOTE"]
     runner(_scp(cfg, HERE / "measure.py", gpu, measure_remote.replace("\\", "/")))
+    # неполный обход — не повод не писать то, что измерено: одна недоступная
+    # ветвь иначе навсегда выключала бы запись громкости новых треков
     measured = _last_json(runner(
         _ssh(cfg, gpu, f"python {measure_remote} --root {cfg['LOUDNESS_GPU_MUSIC_ROOT']} "
                        f"--cache {cfg['LOUDNESS_GPU_CACHE']} --workers {workers}"),
-        timeout=MEASURE_TIMEOUT_SEC))
+        timeout=MEASURE_TIMEOUT_SEC, ok_codes=(0, MEASURE_PARTIAL_EXIT)))
     apply_dir = cfg["LOUDNESS_APPLY_DIR"]
     # каталог на хосте станции принадлежит root: заводится через sudo, но на
     # пользователя ssh — иначе scp следующей строкой не сможет в него писать
@@ -135,6 +140,14 @@ def main(argv=None) -> int:
           f"без изменений {applied['unchanged']}, без замера {applied['no_measurement']}, "
           f"неизвестных id {applied['unknown_id']}"
           + (" [холостой прогон, база не тронута]" if applied["dry_run"] else ""))
+    if measured.get("walk_errors"):
+        # после записи, а не вместо неё: ночная задача должна упасть, но
+        # измеренное уже в базе станции
+        print(f"обход коллекции неполный: {measured['walk_errors']} ошибок "
+              "(недоступная ветвь или файл, исчезнувший во время обхода) — "
+              "замеры записаны, чистка кэша пропущена; подробности — в выводе "
+              "measure.py выше", file=sys.stderr)
+        return 1
     return 0
 
 
