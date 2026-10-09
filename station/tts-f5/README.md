@@ -98,8 +98,12 @@ Compose слота — у пульта: `llm_routers/gpu-ctl/deploy/compose/tts.
 аренда слота `tts`; заголовки `X-TTS-*` ответа он отдаёт станции как есть). Код — `station/tts-bridge/bridge.py`, на gpu-host его побайтовая копия в
 `<gpu-ssd>\LLM\docker\tts-bridge\`; контейнер создаёт [tts-bridge-run.ps1](tts-bridge-run.ps1)
 (запускать на gpu-host, `-Root <каталог мостика> -Source <bridge.py>`): `UPSTREAM=http://host.docker.internal:4126`,
-`GPU_CTL_SLOT=tts`, токен пульта — из окружения старого `chatterbox-bridge`. Старый
-мостик на Chatterbox остановлен, а не удалён — это откат до этапа 5а спеки.
+`GPU_CTL_SLOT=tts`. Токен пульта — `-Token` или `$env:GPU_CTL_TOKEN`, иначе из окружения
+живого `tts-bridge`, затем старого `chatterbox-bridge`. Токен и образ скрипт проверяет до
+того, как снимет живой мостик, а после `docker run` ждёт `/health` (`-HealthWaitSec`,
+120 с) и при неудаче бросает исключение: без мостика эфир молчит, код 0 тут лгал бы.
+Ответ 503 значит «мостик жив, F5 за ним не готов». Старый мостик на Chatterbox
+остановлен, а не удалён — это откат до этапа 5а спеки.
 
 ## Сборка
 
