@@ -1065,9 +1065,21 @@ git merge vX.Y.Z
    [test_upstream_pins.py](../tests/test_upstream_pins.py) падает, пока
    `station/deploy/caddy/Caddyfile` не равен новому `docker/Caddyfile` плюс блок
    `/room/*`, а `UPSTREAM_BASE`, `IMAGE` и теги `controller`/`web` в override не
-   догнали версию из `.release-please-manifest.json` — то есть до шага 7 он красный
+   догнали версию из `.release-please-manifest.json` — то есть до шага 8 он красный
    намеренно.
-7. **Образы и выкатка.** Собрать `subwave-controller:X.Y.Z-ru` и
+7. **Маршруты `/api/` и Apache.** Белый список публичных `/api/` в
+   [apache-fm.conf.example](../deploy/apache-fm.conf.example) сверить с маршрутами
+   нового апстрима: новый маршрут, который зовёт плеер или слушатель без пароля, —
+   в список, иначе снаружи он молча закрыт; маршрут, который правит станцию, в список
+   не попадает. Новые и переименованные маршруты:
+   ```bash
+   git diff v<прежняя> vX.Y.Z -- controller/src/routes controller/src/server.ts \
+     | grep -E "^[-+].*\.(get|post|put|patch|delete|use)\(\s*'/"
+   ```
+   Строка без `requireAdmin` — кандидат в публичные. Список и регистр (`(?i)`) сверяет `station/tests/test_apache_rule.py`; изменённый
+   конфиг на хосте — по правилам из [.claude/rules/radio.md](../../.claude/rules/radio.md)
+   (бэкап, `apache2ctl configtest`, `graceful`).
+8. **Образы и выкатка.** Собрать `subwave-controller:X.Y.Z-ru` и
    `subwave-web:X.Y.Z-ru` ([web-changes.md](web-changes.md)), сменить теги в
    [docker-compose.override.yml](../deploy/docker-compose.override.yml) и
    `SUBWAVE_VERSION` в `.env` стека, обновить на хосте `docker-compose.yml` из форка
