@@ -227,6 +227,70 @@ def test_every_message_wakes_everyone_but_its_author(store):
     assert [who for who, _ in sent] == ["petya"]
 
 
+class _Accepted:
+    status = 201
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_subscription_with_a_broken_key_already_in_the_base_is_forgotten(store):
+    # подписки, заведённые до проверки ключа в check_subscription, уже лежат в
+    # базе. Шифрование на них падает исключением, исключение — код 0, а код 0
+    # отказом не считается: без отдельного разбора они не удалялись бы никогда
+    good = _subscribe(store, "anya", "Аня")
+    _, _, auth = _browser_keys()
+    store.subscribe({"endpoint": f"{FCM}broken", "auth": auth,
+                     "p256dh": push.b64u(b"\x04" + b"\x00" * 64)}, "petya", "Петя")
+    posted = []
+    vapid = push.Vapid(ec.generate_private_key(ec.SECP256R1()))
+    n = notify.Notifier(
+        store, vapid, "https://fm.example.org", wake=Inline(),
+        sender=lambda sub, payload, v, subject: push.send(
+            sub, payload, v, subject,
+            opener=lambda req, timeout=None: posted.append(req.full_url) or _Accepted()))
+    assert n.on_message("boris", "Борис", "привет") == 2
+    assert posted == [good]
+    assert [s["endpoint"] for s in store.subscriptions()] == [good]
+
+
+def test_our_own_failure_does_not_erase_a_sound_subscription(store):
+    # исключение рассылки при исправном ключе — ошибка комнаты, а не подписки
+    endpoint = _subscribe(store, "anya", "Аня")
+
+    def boom(*_):
+        raise RuntimeError("ошибка на нашей стороне")
+
+    n = notify.Notifier(store, vapid=None, subject="s", wake=Inline(), sender=boom)
+    for _ in range(store_mod.PUSH_FAILURES_MAX + 1):
+        n.on_message("petya", "Петя", "раз")
+    assert [s["endpoint"] for s in store.subscriptions()] == [endpoint]
+
+
+def test_bookkeeping_failure_does_not_cut_the_rest_of_the_batch(store):
+    # исключение push_result (база занята, диск) обрывало остаток пачки: те,
+    # кто стоял в ней дальше, не получали ничего
+    first = _subscribe(store, "anya", "Аня")
+    second = _subscribe(store, "boris", "Борис")
+    sent, counted = [], []
+    real = store.push_result
+
+    def flaky(endpoint, status, now=None):
+        if endpoint == first:
+            raise sqlite3.OperationalError("database is locked")
+        counted.append(endpoint)
+        real(endpoint, status, now=now)
+
+    store.push_result = flaky
+    n = notify.Notifier(store, vapid=None, subject="s", wake=Inline(),
+                        sender=lambda sub, *_: sent.append(sub["endpoint"]) or 201)
+    assert n.on_message("petya", "Петя", "раз") == 2
+    assert sent == [first, second] and counted == [second]
+
+
 def test_messages_waiting_for_delivery_collapse_into_the_latest(store):
     # в шторке у чата одна карточка (тег и Topic `subwave-chat`), поэтому
     # неотправленное заменяется новым: очередь не длиннее числа подписок,

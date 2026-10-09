@@ -143,20 +143,33 @@ def check_subscription(raw) -> tuple[dict | None, str | None]:
     if parts.scheme != "https" or not any(host == h or host.endswith("." + h)
                                           for h in PUSH_HOSTS):
         return None, "адрес подписки — не push-сервис браузера"
+    p256dh, auth = keys.get("p256dh", ""), keys.get("auth", "")
+    problem = key_problem(p256dh, auth)
+    if problem:
+        return None, problem
+    return {"endpoint": endpoint, "p256dh": b64u(unb64u(p256dh)),
+            "auth": b64u(unb64u(auth))}, None
+
+
+def key_problem(p256dh, auth) -> str | None:
+    """Почему этими ключами подписки не зашифровать — или None, если можно.
+
+    Одна проверка на два места: приём подписки (`check_subscription`) и
+    разбор исключения рассылки (`notify.Notifier.drain`). Битый ключ —
+    постоянная беда самой подписки, а не временный сбой комнаты: шифрование
+    на нём падает исключением на каждой рассылке.
+    """
     try:
-        p256dh, auth = unb64u(keys.get("p256dh", "")), unb64u(keys.get("auth", ""))
+        ua_public, secret = unb64u(p256dh), unb64u(auth)
     except (ValueError, TypeError):
-        return None, "ключи подписки не в base64url"
-    if len(p256dh) != 65 or p256dh[0] != 4 or len(auth) != 16:
-        return None, "ключи подписки неверной длины"
+        return "ключи подписки не в base64url"
+    if len(ua_public) != 65 or ua_public[0] != 4 or len(secret) != 16:
+        return "ключи подписки неверной длины"
     try:
-        # Ключ не на кривой ронял бы шифрование исключением на каждой
-        # рассылке, а исключение — сбой на стороне комнаты (код 0), подписку
-        # оно не стирает: такую нельзя и принять
-        ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), p256dh)
+        ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), ua_public)
     except ValueError:
-        return None, "ключ подписки — не точка P-256"
-    return {"endpoint": endpoint, "p256dh": b64u(p256dh), "auth": b64u(auth)}, None
+        return "ключ подписки — не точка P-256"
+    return None
 
 
 def send(subscription: dict, payload: dict, vapid: Vapid, subject: str,
