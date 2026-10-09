@@ -19,7 +19,8 @@
 
 ## Ветки и апстрим
 - `main` — апстрим + `station/` + наши фичи коммитами `feat|fix(controller|web): …`,
-  у каждой — раздел в `station/docs/controller-changes.md` / `web-changes.md`.
+  у каждой — раздел в `station/docs/controller-changes.md` / `web-changes.md`. Фикс
+  фичи правит её раздел там же, а не только `port-X.Y.md`.
 - `ru-1.8.0` — эталон нарезки, не меняется.
 - Новая версия апстрима — `git merge vX.Y.Z` в `main` (не rebase: ветка опубликована),
   вердикты по фичам — `station/docs/port-X.Y.md`, эталон `KNOWN` в
@@ -69,7 +70,6 @@
   `f5_accent`), потом F5. Без `ruaccent/dictionary/accents.sqlite` служба не стартует.
 
 **Эфир**
-- «Ведущий молчит» после пересборки — счётчик подводок: он сбрасывается при рестарте контроллера.
 - Повтор артиста настройкой не лечится: окно держит страж в `pickViaAgent`, заказы вне окна.
 - Пустые `moods`/`energy`/векторы в `library.db` сужают пул сильнее окна повторов.
 - Ловушки кода — очередь и подводки (придержанный слив, `writeSeamLink`, `linkClockAt`, окна

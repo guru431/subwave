@@ -59,6 +59,31 @@ export function pickLinkInterval() {
   return 1 + Math.floor(Math.random() * 9);
 }
 
+// Fork: the longest interval pickLinkInterval can draw at a frequency — the
+// clamp for a countdown restored across a restart. Kept in step with the
+// ranges above by scripts/link-countdown-restore.test.ts, which samples them.
+export function linkIntervalMax(f: string = settings.effectiveFrequency()) {
+  if (f === 'silent')     return Infinity;
+  if (f === 'quiet')      return 20;
+  if (f === 'chatty')     return 5;
+  if (f === 'aggressive') return 3;
+  return 15;
+}
+
+// Fork: the link countdown (`Queue.tracksUntilLink`) as recovered from
+// queue.json. The class field is drawn at import, BEFORE settings.load(), so
+// without this every restart counted down a default-frequency interval instead
+// of the persona's — up to an hour of air before the first link. A saved count
+// is clamped into the CURRENT frequency's range (the persona may have changed
+// while the controller was down; ≤ 0 already means "due"); a silent persona,
+// an absent field (a snapshot from before this), Infinity (written as null)
+// and junk all take a fresh draw.
+export function restoredLinkInterval(stored: unknown, fresh: number = pickLinkInterval()) {
+  if (!Number.isFinite(fresh)) return fresh;
+  if (typeof stored !== 'number' || !Number.isFinite(stored)) return fresh;
+  return Math.min(Math.max(Math.floor(stored), 0), linkIntervalMax());
+}
+
 // How many consecutive reconcile checks may report an EMPTY dj_queue (while the
 // controller still holds sent items) before we treat those items as genuinely
 // gone and clear them. A single empty read is ambiguous — a just-sent pick may
@@ -229,6 +254,27 @@ export function topUpDepth(opts: { lookahead: number; queued: number; sameShow: 
   if (missing <= 0) return 0;
   if (!opts.sameShow) return queued === 0 ? 1 : 0;
   return missing;
+}
+
+// Fork (C01 + C03): whether an unsent auto-pick has been pushed out of the show
+// it was chosen for. Show keys are show-boundary.showKeyAt's.
+//
+// Only a pick chosen for the show ON AIR NOW counts. Such a pick can only move
+// LATER into another show — a request or block inserted ahead of it — and that
+// is the harm: the incoming show airing the outgoing show's music after its
+// mic-pass. A pick chosen for the NEXT show (the look-ahead) that drifts back
+// across the change — a skip, a cancel — airs a little early, which the
+// look-ahead allows by design and the boundary handoff already plans around;
+// dropping it there would put an outgoing-show pick right after a handoff.
+// No stamp (a queue.json from before it) or no forecast → keep.
+export function pickOutlivedShow(
+  pickedForShow: unknown,
+  liveShow: string,
+  forecastShow: string | null,
+): boolean {
+  if (typeof pickedForShow !== 'string' || !pickedForShow) return false;
+  if (forecastShow == null) return false;
+  return pickedForShow === liveShow && forecastShow !== pickedForShow;
 }
 
 // Seconds from NOW until the pick being made will start airing — the lead the

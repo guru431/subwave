@@ -42,9 +42,15 @@ export function artistGuardCause(
 // picker — so they are keyed onto the lead act here (#1251: a collaboration must
 // not walk past the window). `neighbourRoots` (queue.neighbourArtistRoots) adds
 // the queued-and-unaired tracks, which have no play row yet but will air before
-// this pick does.
-export function artistWindowRoots(recentArtists: Iterable<string>, neighbourRoots: Set<string>): Set<string> {
-  const out = new Set(neighbourRoots);
+// this pick does. That set holds only the queue's TAIL (the spacing window), so
+// `queuedRoots` (queue.queuedArtistRoots) brings in the rest of the queue: with
+// queue.lookahead deeper than the spacing window, the head would fall outside.
+export function artistWindowRoots(
+  recentArtists: Iterable<string>,
+  neighbourRoots: Set<string>,
+  queuedRoots: Iterable<string> = [],
+): Set<string> {
+  const out = new Set([...neighbourRoots, ...queuedRoots]);
   for (const artist of recentArtists) {
     const key = artistRootKey(artist);
     if (key) out.add(key);

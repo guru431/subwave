@@ -118,6 +118,8 @@ import {
   pickLeadSec,
   topUpDepth,
   pickLinkInterval,
+  pickOutlivedShow,
+  restoredLinkInterval,
   playAlreadyRecorded,
   shouldDropCrossSessionLink,
   shouldDropObsoleteHostSpeech,
@@ -406,6 +408,8 @@ class Queue {
   senderBusy = false;          // drain-to-Liquidsoap mutex
   pendingForceDrain = false;   // a forced drain arrived while senderBusy — re-run on release
   pendingForceItem: QueueItem | null = null;   // Fork: the item that pending force must reach (clip-as-track)
+  _drainingItem: QueueItem | null = null;      // Fork: the item the drain has captured but not yet marked sent — see requestInsertIndex
+  _jumpSeq = 0;                                // Fork: requests/block members pushed so far — a pick cycle that saw one rechecks its pick (dropStalePicks)
   pickerBusy = false;          // prevent concurrent LLM picks
   autoPick = true;             // toggle: should we ask Ollama for next track when idle
   // How many picked-but-unplayed tracks may sit in Liquidsoap's dj_queue.
@@ -566,6 +570,9 @@ class Queue {
           // every upgrade.
           tracksSinceJingle: this._tracksSinceJingle,
           lastRotateJingle: this._lastRotateJingle,
+          // Fork: the link countdown, for the same reason (see recover()).
+          // A silent persona's Infinity is written as null and redrawn.
+          tracksUntilLink: this.tracksUntilLink,
           savedAt: new Date().toISOString(),
         }, null, 2));
       } catch (err) {
@@ -597,8 +604,10 @@ class Queue {
   // key differs and the watcher reconciles normally (see onTrackStarted, which
   // drops any upcoming items Liquidsoap consumed while the controller was down).
   recover() {
+    let storedLinkCount: unknown;
     if (existsSync(config.queue.file)) try {
       const stored = JSON.parse(readFileSync(config.queue.file, 'utf8'));
+      storedLinkCount = stored.tracksUntilLink;
       // Drop anything queued long enough ago that Liquidsoap has certainly
       // played past it — guards against a stale snapshot from a long downtime
       // resurrecting tracks as permanent "Up next" zombies.
@@ -637,6 +646,10 @@ class Queue {
     } catch (err) {
       console.error('[queue] recover failed:', (err as Error).message);
     }
+    // Fork: the link countdown. The field initialiser ran at import, before
+    // settings.load(), and drew a default-frequency interval; this runs after
+    // it, so a fresh draw here is the persona's. Clamped, not trusted.
+    this.tracksUntilLink = restoredLinkInterval(storedLinkCount);
     this.recoverPauseTalk();
     if (existsSync(config.queue.recentPlaysFile)) {
       try {
@@ -911,7 +924,11 @@ class Queue {
   // the line if the real seam lands too far from it — the forecast is made from
   // the on-air track's remaining play and goes badly wrong when the pick misses
   // that seam and auto.m3u fills the slot.
-  async push({ track, requestedBy = null, operator = false, block = null, intent = null, introScript = null, introLabelChecked = false, introKind = 'dj-speak', introPersona = null, introHostSpeech = null, aiPicked = false, allowDuplicate = false, linkPrev = null, linkClockAt = null }: {
+  //
+  // Fork: `pickShowAt` is the look-ahead moment an auto-pick's rules were
+  // resolved at (runPickCycle's `showAt`; null → now, as pickViaAgent reads
+  // it). It is stamped as `pickedForShow` — see dropStalePicks.
+  async push({ track, requestedBy = null, operator = false, block = null, intent = null, introScript = null, introLabelChecked = false, introKind = 'dj-speak', introPersona = null, introHostSpeech = null, aiPicked = false, allowDuplicate = false, linkPrev = null, linkClockAt = null, pickShowAt = null }: {
     track: Track;
     requestedBy?: string | null;
     operator?: boolean;
@@ -926,6 +943,7 @@ class Queue {
     allowDuplicate?: boolean;
     linkPrev?: { id?: string | null; title?: string | null; artist?: string | null } | null;
     linkClockAt?: Date | number | null;
+    pickShowAt?: Date | null;
   }) {
     // The blocklist is absolute — even explicit manual queueing is refused
     // until the entry is unblocked — so it sits above `allowDuplicate`. Every
@@ -980,6 +998,9 @@ class Queue {
         ? introHostSpeech?.showKey ?? session.getSession()?.key ?? null
         : null,
       aiPicked,
+      pickedForShow: aiPicked
+        ? showBoundary.showKeyAt((pickShowAt ?? new Date()).getTime())
+        : undefined,
       block: block ?? undefined,
       // Only stamp a back-announce target when there's actually an intro/link to
       // air against it; a bare track carries no claim about what preceded it.
@@ -1021,6 +1042,14 @@ class Queue {
     if (!block) {
       this.log('queued', `${track.title} — ${track.artist}`, { requestedBy, queueDepth: this.upcoming.length, position });
     }
+    // Fork: what jumped in pushed every auto-pick behind it later — recheck
+    // them against the show change before anything drains. Synchronous, so the
+    // drain kicked below cannot hand a stale pick over first; and only items
+    // BEHIND this one can go, so `position` stays true.
+    if (jumpsAhead) {
+      this._jumpSeq++;
+      this.dropStalePicks();
+    }
     this.warnIfSwallowedByCrossfade(item);
     this.persist();
     this.drainToLiquidsoap();  // fire-and-forget
@@ -1034,13 +1063,88 @@ class Queue {
   // the queue) was stamped against. Splitting such a pair airs that track's
   // transition into the wrong song, so the request waits one slot more.
   // -1 = append.
+  //
+  // The item the drain is handing over counts as sent: it was captured before
+  // the drain's awaits (render, loudness, bed, writeHandoff) and goes to
+  // Liquidsoap whatever is inserted meanwhile. A request put in front of it
+  // would sit unsent AHEAD of a sent track — DRAIN_AHEAD never passes it, and
+  // onTrackStarted would have consumed it with the head.
   requestInsertIndex(): number {
-    const first = this.upcoming.findIndex(i => !i.sent && i.aiPicked);
+    const first = this.upcoming.findIndex(i => !this.handedOver(i) && i.aiPicked);
     if (first < 0) return -1;
-    const before = first > 0 ? this.upcoming[first - 1].sent : !!this.current;
-    const paired = !!this.upcoming[first].stemSeam || (this.pairDrainActive() && before);
-    if (!paired) return first;
-    return this.upcoming.findIndex((i, k) => k > first && !i.sent && i.aiPicked);
+    if (!this.pairedWithPredecessor(first)) return first;
+    return this.upcoming.findIndex((i, k) => k > first && !this.handedOver(i) && i.aiPicked);
+  }
+
+  // Fork: given to Liquidsoap, or on its way there (the drain's captured item).
+  handedOver(i: QueueItem): boolean {
+    return !!i.sent || i === this._drainingItem;
+  }
+
+  // Fork: upcoming[idx] is PAIRED with what plays before it — see
+  // requestInsertIndex. Neither a request nor dropStalePicks splits a pair.
+  pairedWithPredecessor(idx: number): boolean {
+    const before = idx > 0 ? this.handedOver(this.upcoming[idx - 1]) : !!this.current;
+    return !!this.upcoming[idx]?.stemSeam || (this.pairDrainActive() && before);
+  }
+
+  // Fork (C01 + C03): take off every unsent auto-pick that a request or block
+  // has pushed out of the show it was chosen for (queue/pure.ts
+  // pickOutlivedShow). The top-up stops at a show boundary only for NEW picks;
+  // a long studio block jumping ahead of lookahead-1 picks shortly before a
+  // changeover otherwise carries them into the next show, where they air after
+  // the incoming host's greeting. Nothing replaces them here: the next show's
+  // tracks come from the ordinary top-up / empty-queue pick, under its rules.
+  //
+  // Run after a request or block member jumps in (push) and after a pick cycle
+  // that saw one (runPickCycle) — the only things that move an unsent pick
+  // LATER. Not at the drain: a pick dropped there costs its replacement the
+  // runway, and drift that small is what the pick's own look-ahead absorbs.
+  //
+  // Never touched: requests and block members (they are not auto-picks),
+  // handed-over items, a pick paired with what plays before it, the armed
+  // boundary handoff's final outgoing track (the sign-off and greeting wait for
+  // it — show-boundary-handoffs.md), and items without a stamp. The forecast is
+  // airForecastSec, the one the block's runsPastShowChange warning reads, read
+  // at the pick's own attribution moment (+ PICK_SHOW_LOOKAHEAD_SEC).
+  dropStalePicks(): number {
+    const now = Date.now();
+    const live = showBoundary.showKeyAt(now);
+    const finalTrack = session.boundaryHandoffAwaitsTrack()
+      ? this.upcoming.find(i => !i.sent && session.boundaryHandoffReadyForTrack(i.track)) ?? null
+      : null;
+    const dropped: QueueItem[] = [];
+    let into: string | null = null;
+    for (let k = 0; k < this.upcoming.length;) {
+      const item = this.upcoming[k];
+      if (item.aiPicked && !item.requestedBy && !item.block && !this.handedOver(item)
+          && item !== finalTrack && !this.pairedWithPredecessor(k)) {
+        const sec = this.airForecastSec(item);
+        const forecast = sec == null
+          ? null
+          : showBoundary.showKeyAt(now + (sec + PICK_SHOW_LOOKAHEAD_SEC) * 1000);
+        if (pickOutlivedShow(item.pickedForShow, live, forecast)) {
+          this.upcoming.splice(k, 1);
+          dropped.push(item);
+          into ??= forecast;
+          continue;   // the next item has moved into slot k, one track earlier
+        }
+      }
+      k++;
+    }
+    if (!dropped.length) return 0;
+    const showName = (key: string | null) => {
+      if (!key || key === 'default') return 'default programming';
+      const id = key.replace(/^show:/, '');
+      return `"${(settings.get().shows || []).find((s: { id: string; name?: string }) => s.id === id)?.name || id}"`;
+    };
+    this.log('scheduler',
+      `Dropped ${dropped.length} auto-pick${dropped.length === 1 ? '' : 's'} chosen for ${showName(live)} — `
+      + `what was queued ahead now carries ${dropped.length === 1 ? 'it' : 'them'} into ${showName(into)}: `
+      + dropped.map(i => `"${i.track.title} — ${i.track.artist}"`).join(', '),
+      { dropped: dropped.map(i => i.track.id ?? null), from: live, into });
+    this.persist();
+    return dropped.length;
   }
 
   // A request the MIXER will silently eat (#1594). Log only — nothing is
@@ -1904,6 +2008,9 @@ class Queue {
               remainingSec: this.remainingUntilItemAirs(item),
             });
         if (action === 'hold') break;
+        // Fork: from here to `sent` the item is on its way to Liquidsoap — a
+        // request pushed during the awaits below must queue behind it.
+        this._drainingItem = item;
 
         // Render the track's intro/link WAV ahead of time but DON'T air it here
         // — airing now would play it over whatever's currently on-air, one (or
@@ -2131,6 +2238,7 @@ class Queue {
           }
         }
         item.sent = true;
+        this._drainingItem = null;
         this.persist();  // record the sent flag — these are now live in dj_queue
 
         // `sent` means "handed over", NOT "playable": Liquidsoap drops a
@@ -2145,6 +2253,7 @@ class Queue {
       }
     } finally {
       this.senderBusy = false;
+      this._drainingItem = null;
       if (this.pendingForceDrain) {
         this.pendingForceDrain = false;
         // Fork: a pending clip-as-track item still queued is the furthest
@@ -3281,12 +3390,20 @@ class Queue {
       // `idx > 0` means Liquidsoap already consumed those items — only possible
       // after a controller restart that missed their transitions. Splicing them
       // here keeps recovered zombies from lingering in "Up next" forever.
-      const consumed = this.upcoming.splice(0, idx + 1);
-      if (idx > 0) {
-        this.log('scheduler',
-          `Dropped ${idx} queue item(s) Liquidsoap played during the downtime`);
+      // Fork: only HANDED-OVER items ahead are consumed. An unsent one never
+      // reached Liquidsoap, so it cannot have played — dropping it would lose
+      // a request the listener has already been given a position for.
+      const item = this.upcoming[idx];
+      let played = 0;
+      for (let k = idx; k >= 0; k--) {
+        if (k < idx && !this.upcoming[k].sent) continue;
+        this.upcoming.splice(k, 1);
+        if (k < idx) played++;
       }
-      const item = consumed[consumed.length - 1];
+      if (played > 0) {
+        this.log('scheduler',
+          `Dropped ${played} queue item(s) Liquidsoap played during the downtime`);
+      }
       const source = item.aiPicked ? 'ai' : 'request';
       this.current = { ...item, startedAt: new Date().toISOString(), source };
       // A timed-out intro pre-render is keyed by the queued item. The current
@@ -3555,6 +3672,7 @@ class Queue {
     }
     this.pickerBusy = true;
     const queuedBefore = this.upcoming.length;
+    const jumpsBefore = this._jumpSeq;
     (async () => {
       try {
         // The pick made now airs when the track it FOLLOWS ends, so near a show
@@ -3661,6 +3779,11 @@ class Queue {
         this.log('error', `DJ track event failed: ${(err as Error).message}`);
       } finally {
         this.pickerBusy = false;
+        // Fork: a request or block that jumped in while this pick was being
+        // made moved it later than the moment its rules were read for — the
+        // push-time recheck ran before this pick existed, so run it again.
+        // Before `grew`: a dropped pick must not chain another top-up.
+        if (this._jumpSeq !== jumpsBefore) this.dropStalePicks();
         // The top-up walks one track at a time: runPickCycle IS one agent call,
         // and the station has no other way to choose a track. The repeat fires
         // ONLY if the queue actually grew — a failed pick (LLM host down, pool
@@ -4216,6 +4339,21 @@ class Queue {
       if (p.id) seenIds.add(p.id);
       if (k) seenKeys.add(k);
       add(p.artist);
+    }
+    return out;
+  }
+
+  // Fork: the LEAD-artist keys of EVERYTHING queued and unaired — the queued
+  // half of the hours artist window (dj-agent/artist-guard.ts
+  // artistWindowRoots). neighbourArtistRoots takes only the last `n` queued
+  // (and none at n = 0), which is right for slot spacing and wrong for the
+  // window: with queue.lookahead deeper than artistVarietyWindow the head of
+  // the queue fell out of it. Whole queue, as recentAlbumKeys reads it.
+  queuedArtistRoots(): Set<string> {
+    const out = new Set<string>();
+    for (const item of this.upcoming) {
+      const key = artistRootKey({ artist: item?.track?.artist });
+      if (key) out.add(key);
     }
     return out;
   }
