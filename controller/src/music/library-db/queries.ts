@@ -59,6 +59,16 @@ export function songsByMood(mood: string): MoodPoolRecord[] {
   return rows.map(rowToMoodPool);
 }
 
+// Fork: rows with NO genre tag and a real path, in the mood-pool shape plus the
+// path — what music/folder-genre-show.ts narrows to one folder genre. `genre`
+// is generated from genres[0], so NULL is "no tag" whichever way it is stored.
+export function untaggedPathRows(): Array<MoodPoolRecord & { path: string }> {
+  const rows = requireDb().prepare(`SELECT ${MOOD_POOL_COLUMNS}, t.path
+    FROM tracks t WHERE t.genre IS NULL AND t.path LIKE '/%' ORDER BY t.rowid`)
+    .all() as Array<MoodPoolRow & { path: string }>;
+  return rows.map((r) => ({ ...rowToMoodPool(r), path: r.path }));
+}
+
 export function songsByEnergy(energy: EnergyValue): EnergyPoolRecord[] {
   if (!energy) return [];
   const rows = requireDb().prepare(`SELECT ${MOOD_POOL_COLUMNS},

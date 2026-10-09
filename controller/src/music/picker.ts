@@ -17,6 +17,7 @@ import { AIRING_RANK_WEIGHT, freshness, freshnessBiasedOrder, lastAiredMsOf, una
 import { normGenre, genreMatches, genreResolutionWarningOnce, preferGenre, preferEra, inYearRange, preferEnergy, preferEnergyStrict, preferMood, preferVocals, applyStrictLocks, hasEraBound, eraSpan, type YearRange, type VocalMode } from './show-filter.js';
 import { resolveShowPlaylistPool, resolveExcludedPlaylistIds, type PlaylistPool } from './show-playlist.js';
 import { showNoRepeatGuard } from './show-recency.js';
+import { folderGenreTracks, resolveShowGenreName } from './folder-genre-show.js';
 import * as likes from '../broadcast/likes.js';
 
 // Raw Subsonic child, slimTrack library row, or Last.fm stub. A structural
@@ -166,7 +167,7 @@ async function resolveStrictGenres(showFilter: ShowFilter): Promise<StrictGenreR
   if (!showFilter?.strict || !showFilter.genres.length) return { genres, warnings };
   for (const g of showFilter.genres) {
     try {
-      const resolved = await subsonic.resolveGenreName(g);
+      const resolved = await resolveShowGenreName(g);
       const warning = genreResolutionWarningOnce(g, resolved);
       if (warning) warnings.push(warning);
       if (resolved) genres.push(resolved);
@@ -326,7 +327,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
       if (!genreNames.length && showFilter!.genres.length) {
         for (const g of showFilter!.genres) {
           try {
-            const resolved = await subsonic.resolveGenreName(g);
+            const resolved = await resolveShowGenreName(g);
             if (resolved) genreNames.push(resolved);
           } catch {}
         }
@@ -352,6 +353,9 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
             const ranged = inYearRange(g, showFilter!.eras);
             got.push(...(ranged.length ? ranged : g));
           } catch {}
+          // Fork: the tracks this genre reaches through their folder —
+          // Navidrome's genre calls above see file tags only.
+          got.push(...shuffle(folderGenreTracks(genreName) as Candidate[]).slice(0, Math.ceil(genreSetSize / genreNames.length)));
         }
         return got;
       });

@@ -375,12 +375,14 @@ export async function resolveGenreName(name) {
 
 // Fuzzy artist resolution: search3 matches exact tokens/substrings only, so a
 // transliteration variance ("Sikandar"/"Sikander") returns zero artists.
+// Fork: letters and digits of ANY script survive — an a-z0-9 filter turned
+// "Агата Кристи" into "", and resolveArtist gave up without asking Navidrome.
 
 function normArtist(s: string): string {
   return String(s || '')
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // strip diacritics
     .toLowerCase()
-    .replace(/[^a-z0-9 ]/g, ' ')                       // punctuation → space
+    .replace(/[^\p{L}\p{N} ]/gu, ' ')                  // punctuation → space
     .replace(/\s+/g, ' ')
     .trim();
 }

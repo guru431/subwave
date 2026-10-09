@@ -1,9 +1,9 @@
 import * as library from './library.js';
 import * as settings from '../settings.js';
-import * as subsonic from './subsonic.js';
 import { applyStrictLocks, hasEraBound, type VocalMode } from './show-filter.js';
 import { applyTrackFloor } from './track-floor.js';
 import { resolveExcludedPlaylistIds, resolveShowPlaylistPool } from './show-playlist.js';
+import { resolveShowGenreName } from './folder-genre-show.js';
 
 export type Candidate = { id?: string; title?: string | null; artist?: string | null; year?: number | null; originalYear?: number | null; isCompilation?: boolean | null; yearUntrusted?: boolean | null; genres?: string[] | null; genre?: string | null; moods?: string[] | null; audioMoods?: string[] | null; energy?: string | null; vocalRanges?: unknown[] | null; duration?: number | null; durationSec?: number | null };
 type Locks = { genres: string[]; eras: Array<{ fromYear?: number | null; toYear?: number | null }>; moods: string[]; energies: string[]; vocals: VocalMode | null };
@@ -61,7 +61,7 @@ export async function diagnoseShowCandidates(show: any): Promise<ShowCandidateDi
   const warnings: string[] = [];
   const genres: string[] = [];
   for (const requested of show?.genres ?? []) {
-    try { const resolved = await subsonic.resolveGenreName(requested); if (resolved) genres.push(resolved); else warnings.push(`Genre “${requested}” is not present in the library, so it is not an active lock.`); }
+    try { const resolved = await resolveShowGenreName(requested); if (resolved) genres.push(resolved); else warnings.push(`Genre “${requested}” is not present in the library, so it is not an active lock.`); }
     catch { warnings.push(`Could not resolve genre “${requested}”; it is not counted as an active lock.`); }
   }
   const moodCovered = coverage.mood;

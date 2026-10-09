@@ -1,7 +1,9 @@
 // Folder genres — what a track WITHOUT a genre tag reads as its genre: the
 // genres the operator assigned to its folder, or to the nearest assigned
 // ancestor. show-filter.trackGenres falls back to it, so Genre and Any-tag
-// block rules and genre shows all see it; a genre tag always wins.
+// block rules and genre shows all see it; a genre tag always wins. A show's
+// genre resolves to a folder genre too, and the show-genre sources draw its
+// tracks — both in folder-genre-show.ts.
 //
 // Persisted to <stateDir>/folder-genres.json, next to blocklist.json and for
 // the same reason: NOT in library.db, so Library → Reset/Reconcile can't wipe

@@ -41,9 +41,11 @@ function throttled<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 // Normalised comparison token, same shape as show-filter.normGenre, so
-// "Dancing Queen (Remastered)" still contains "dancingqueen".
+// "Dancing Queen (Remastered)" still contains "dancingqueen". Fork: letters and
+// digits of ANY script, as normGenre — an a-z0-9 filter turned a Cyrillic title
+// into "", and the track was stamped a miss.
 function norm(s: unknown): string {
-  return String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return String(s ?? '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 }
 
 // The slice of an MB recording the resolver reads; loose because it's

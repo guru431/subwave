@@ -283,6 +283,14 @@ export function songsByMood(mood: string | null | undefined): any[] {
   return widened;
 }
 
+// Fork: library rows with no genre tag and a real path, in songsByMood's shape
+// plus `path` — the input of music/folder-genre-show.ts. Blocked tracks drop
+// here, as at every library source.
+export function untaggedPathTracks(): Array<db.MoodPoolRecord & { path: string }> {
+  if (!loaded) return [];
+  return blocklist.rejectBlocked(db.untaggedPathRows());
+}
+
 // Mean of the pace curve (0..1), null when un-analysed. Shared by slimTrack
 // and get() so both pick paths see the same scalar.
 export function paceMeanOf(pace: Array<{ value: number }> | null | undefined): number | null {

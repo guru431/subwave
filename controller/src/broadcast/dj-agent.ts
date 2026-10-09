@@ -27,7 +27,6 @@ import * as session from './session.js';
 import * as picker from '../music/picker.js';
 import { resolveShowPlaylistPool, resolveExcludedPlaylistIds } from '../music/show-playlist.js';
 import * as library from '../music/library.js';
-import * as subsonic from '../music/subsonic.js';
 import * as dj from '../llm/dj.js';
 import { energyForDaypart, getClockContext, getDateContext, getTimeContext, getFullContext } from '../context.js';
 import { linkClockAt, linkClockStampFor, seamLinkShowAt } from './queue/pure.js';
@@ -40,6 +39,7 @@ import { EXPLORE_SEED_PROBABILITY } from '../music/airing.js';
 import { ARTIST_VARIETY_WINDOW, artistWindowRoots, runArtistGuard } from './dj-agent/artist-guard.js';
 import { runAlbumGuard } from './dj-agent/album-guard.js';
 import { albumKeyFor } from '../music/album-facts.js';
+import { resolveShowGenreName } from '../music/folder-genre-show.js';
 import { hasEraBound, genreResolutionWarningOnce, type VocalMode } from '../music/show-filter.js';
 import type { TransitionEffect } from '../settings/vocab.js';
 import { djCallsAllowed } from './listeners.js';
@@ -209,7 +209,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, pickAn
     const resolved: string[] = [];
     for (const g of activeShow.genres) {
       try {
-        const r = await subsonic.resolveGenreName(g);
+        const r = await resolveShowGenreName(g);
         const warning = genreResolutionWarningOnce(g, r);
         if (warning) queue.log('picker', `Show "${activeShow?.name ?? 'auto'}": ${warning}`);
         if (r) resolved.push(r);
