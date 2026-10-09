@@ -35,6 +35,14 @@ _SIGNED = r"(?:(?<![^\s(«„\"])([+\-−]))?"
 
 PERCENT = ("процент", "процента", "процентов")
 DEGREE = ("градус", "градуса", "градусов")
+DOLLAR = ("доллар", "доллара", "долларов")
+MILE = ("миля", "мили", "миль")
+KILOMETRE = ("километр", "километра", "километров")
+# «$5 млн» — сокращение или слово → формы и род числительного перед ним
+_MAGNITUDES = {"тыс": (("тысяча", "тысячи", "тысяч"), "f"),
+               "млн": (("миллион", "миллиона", "миллионов"), "m"),
+               "млрд": (("миллиард", "миллиарда", "миллиардов"), "m")}
+_SPEEDS = {"mph": (MILE, "f"), "km/h": (KILOMETRE, "m"), "км/ч": (KILOMETRE, "m")}
 
 _MONTHS = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа",
            "сентября", "октября", "ноября", "декабря")
@@ -72,6 +80,10 @@ _ENDINGS = {
 
 _MEASURE = re.compile(rf"{_SIGNED}(?<![\w.,])({_NUM})\s*(?:(%)|°\s*(?:([CС])|([FФ]))?"
                       rf"(?![{_LETTER}]))")
+# «$» — только вплотную к числу: «Ke$ha» и «A$AP» без цифры не трогаются
+_MONEY = re.compile(rf"\$\s?({_NUM})(?:\s?(тыс\.|млн|млрд|тысяч[аи]?|миллион(?:а|ов)?"
+                    rf"|миллиард(?:а|ов)?)(?![{_LETTER}]))?|(?<![\w.,])({_NUM})\s?\$")
+_SPEED = re.compile(rf"(?<![\w.,])({_NUM})\s*(mph|km/h|км/ч)(?![{_LETTER}])", re.IGNORECASE)
 _YEAR_WORD = re.compile(r"(?<![\w.,])(\d{1,4})(?:\s*[–—-]\s*(\d{1,4}))?"
                         r"(?:\s+(год(?:ами|ах|ам|ов|ом|у|а|е|ы)?)(?!\w)|\s*(гг?\.))",
                         re.IGNORECASE)
@@ -134,13 +146,49 @@ def _latin_before(m) -> bool:
     return bool(_LATIN_BEFORE.search(_before(m)))
 
 
+def _count_case(m) -> str:
+    """Падеж количества с единицей: «до 5%» — родительный, иначе именительный."""
+    return "g" if _COUNT_CASE.get(_word_before(m)) == "g" else "n"
+
+
+def _quantity(num: str, forms, case="n", gender="m") -> str:
+    """Число с существительным: «5 процентов»; в родительном — «до одного процента»,
+    «до пяти процентов». Дробь — с родительным единственного: «2,5 процента»."""
+    noun = _form(num, forms)
+    if case == "g" and not re.search(r"[.,]", num):
+        n = int(re.sub(r"\D", "", num))
+        noun = forms[1] if n % 10 == 1 and n % 100 != 11 else forms[2]
+    return f"{_cardinal(num, case, gender)} {noun}"
+
+
 def _measure(m) -> str:
     sign, num, percent, celsius, fahrenheit = m.groups()
-    words = (f"{_SIGN[sign]} " if sign else "") + _cardinal(num)
-    if percent:
-        return f"{words} {_form(num, PERCENT)}"
+    said = _quantity(num, PERCENT if percent else DEGREE, _count_case(m))
+    if sign:
+        said = f"{_SIGN[sign]} {said}"
     scale = " по Цельсию" if celsius else " по Фаренгейту" if fahrenheit else ""
-    return f"{words} {_form(num, DEGREE)}{scale}"
+    return said + scale
+
+
+def _money(m) -> str:
+    num, magnitude, num_after = m.groups()
+    case = _count_case(m)
+    if num is None:
+        return _quantity(num_after, DOLLAR, case)       # «5$»
+    if magnitude is None:
+        return _quantity(num, DOLLAR, case)
+    key = "тыс" if magnitude.startswith("тыс") else "млн" if magnitude.startswith(("млн", "милл")) \
+        else "млрд"
+    forms, gender = _MAGNITUDES[key]
+    # точка «тыс.» бывает и концом предложения — тогда она нужна нарезке
+    end = "." if magnitude.endswith(".") and _SENTENCE_NEXT.match(_after(m)) else ""
+    return f"{_quantity(num, forms, case, gender)} долларов{end}"
+
+
+def _speed(m) -> str:
+    num, unit = m.groups()
+    forms, gender = _SPEEDS[unit.lower()]
+    return f"{_quantity(num, forms, _count_case(m), gender)} в час"
 
 
 def _range_end(start: int, end: str) -> int:
@@ -247,11 +295,13 @@ def _count(m) -> str:
 
 
 def normalize(text: str) -> str:
-    """Цифры, `%` и `°` — словами. Порядок проходов — от узкого к общему: проценты и
-    годы со словом «год» уносят свои числа раньше, чем их прочтут количественными."""
+    """Цифры, `%`, `°`, `$`, mph и км/ч — словами. Порядок проходов — от узкого к
+    общему: единицы и годы со словом «год» уносят свои числа раньше, чем их прочтут
+    количественными."""
     if not re.search(r"\d", text):
         return text
-    for pattern, fn in ((_MEASURE, _measure), (_YEAR_WORD, _year_word), (_SUFFIX, _suffix),
+    for pattern, fn in ((_MEASURE, _measure), (_MONEY, _money), (_SPEED, _speed),
+                        (_YEAR_WORD, _year_word), (_SUFFIX, _suffix),
                         (_DATE, _date), (_BARE_YEAR, _bare_year), (_CLOCK, _clock),
                         (_COUNT, _count)):
         text = pattern.sub(fn, text)

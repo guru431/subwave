@@ -177,6 +177,17 @@ def test_text_without_latin_is_untouched(dictionary):
     assert T.cyrillize("Кино, «Звезда по имени Солнце»") == "Кино, «Звезда по имени Солнце»"
 
 
+def test_ampersand_names_reach_the_shipped_dictionary(monkeypatch):
+    """Контроллер переписывал «&» в « and » при любом языке, и 76 ключей словаря с «&»
+    («al bano & romina power») не срабатывали никогда. С языком персоны «&» доходит."""
+    shipped = T.Dictionary(T.DICTIONARY_FILE, fallback=T.DICTIONARY_FILE)
+    monkeypatch.setattr(T, "DICTIONARY", shipped)
+    words, _ = shipped.current()
+    assert T.cyrillize("Это Al Bano & Romina Power.") == \
+        f"Это {words['al bano & romina power']}."
+    assert "&" not in words["al bano & romina power"]
+
+
 def test_empty_dictionary_changes_nothing(monkeypatch, tmp_path):
     # пустая альтернатива в regex совпала бы с каждой позицией строки
     path = write_dictionary(tmp_path / "empty.json", {})
