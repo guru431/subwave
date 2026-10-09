@@ -126,40 +126,36 @@ session 0) — сборка идёт временной задачей план�
     # ждать строки "exit …" в <gpu-ssd>\LLM\docker\f5-tts\build.log, затем:
     Unregister-ScheduledTask -TaskName 'TmpF5Build' -Confirm:$false
 
-### На srvllm (с 2026-10-09)
+### На srvllm (с 2026-10-09; нативно — с 2026-10-10)
 
-Служба переехала на srvllm: контейнер `f5-tts` из compose шага `interim` проекта llm_routers
-(`/opt/ai/interim/compose.yaml`, данные — `/opt/ai/interim/f5-tts/{models,ruaccent,voices}`), им
-ведёт юнит `srvllm-tts.service` контроллера карты `srvllm-slots`. Сборка — обычный `docker
-build` по SSH, Docker Desktop с его кредхелпером тут нет. Порядок выкатки 2026-10-09:
+Служба — нативный юнит `srvllm-tts.service` проекта llm_routers (шаг `tts`, волна 2а
+GPU-платформы): среда `/opt/ai/venv/f5` (Python 3.12, пакеты образа `f5-tts:local` как
+ограничения, `f5-tts==1.1.22 --no-deps`), код — копия ревизии этого репозитория в
+`/opt/srvllm-services/radio/tts-f5` (ревизия — в `/opt/srvllm-services/radio/REVISION`), данные —
+`/opt/ai/data/tts/{models,ruaccent,voices,koziev,pronunciation}`. Жизнью службы ведает контроллер
+карты `srvllm-slots` (слот `tts`, резидент; его гасит только gemma4). Образа и сборки больше
+нет: контейнеры шага `interim` удалены 2026-10-10, `f5-tts:local` остаётся лишь откатом до
+подпроекта 7 llm_routers.
 
-1. Ревизия на хост — `station/tools/push-to-station.sh` (клон `~/radio`).
-2. Контекст — копия `~/radio/station/tts-f5` плюс `ruaccent-koziev`. Венва SuperTonic на
-   srvllm нет, поэтому koziev берётся из живого образа:
-   `docker cp <контейнер из f5-tts:local>:<каталог пакета ruaccent>/koziev ruaccent-koziev`.
-3. `guarded.sh sudo docker build -t f5-tts:new --label org.opencontainers.image.revision=<sha>`
-   — не поверх `:local`, живой образ остаётся нетронутым до проверки.
-4. Аудит ударений — в самом новом образе, на процессоре: `docker run --rm --memory 3g
-   --entrypoint python3 -v …/ruaccent:/ruaccent:ro -v <контекст>/tools:/app/tools:ro -v
-   corpus.json:/corpus.json:ro f5-tts:new /app/tools/stress_audit.py /corpus.json /ruaccent`.
-   Корпус — `stress_corpus.py` по `state/logs` стека станции.
-5. Без карты — `F5_ENGINE=dry` в разовом контейнере на `127.0.0.1:14126` и `tools/smoke.py`.
-6. Смена: `f5-tts:local` → тег отката `f5-tts:pre-<дата>`, `f5-tts:new` → `f5-tts:local`, затем
-   `sudo systemctl restart srvllm-tts.service`: `compose up` юнита пересоздаёт контейнер на новом
-   образе. Ручка контроллера `/release` только снимает аренду и резидента не гасит, а
-   перезапуск того же юнита занимает ту же память карты — контроллер видит обычный прогрев.
-   Модель грузится ~16 с.
-7. Приёмка — фразы через мостик `:4124`, распознавание — служба `asr` того же хоста
-   (`:8000/v1/audio/transcriptions`, large-v3) вместо whisper-small, сравнение со старым образом
-   на тех же фразах, прослушивание владельцем; откат — обратная перестановка тегов и тот же
-   рестарт юнита.
+1. Выкатка ревизии — с work-ai: `bash llm_routers/srvllm/deploy/push-radio.sh [ревизия]` (уезжает
+   только закоммиченное, `git archive`), затем `sudo systemctl restart srvllm-tts.service`
+   (вместе с мостиком — и `srvllm-tts-bridge`). Перезапуск того же юнита занимает ту же память
+   карты — контроллер видит обычный прогрев; модель грузится ~15 с. Новые зависимости — правка
+   `requirements.txt` и `remote.sh run tts` в llm_routers.
+2. Аудит ударений — средой службы, от `aiservice`, на процессоре:
+   `sudo python3 /opt/srvllm-services/radio/tts-f5/tools/stress_corpus.py <state/logs стека станции> > /tmp/corpus.json`,
+   затем `sudo -u aiservice /opt/ai/venv/f5/bin/python /opt/srvllm-services/radio/tts-f5/tools/stress_audit.py /tmp/corpus.json /opt/ai/data/tts/ruaccent`.
+3. `tools/smoke.py --url http://localhost:4126 --voices /opt/ai/data/tts/voices`.
+4. Приёмка — фразы через мостик `:4124`, распознавание — служба `asr` того же хоста
+   (`:8000/v1/audio/transcriptions`, large-v3, `language=ru`) вместо whisper-small, порог
+   `check_speech.py` (40 % слов); прослушивание владельцем. Откат — `push-radio.sh` прежней
+   ревизии и тот же рестарт.
 
-**Словарь латиницы — на томе** `/opt/ai/interim/f5-tts/pronunciation/` (compose `interim`,
-`F5_PRONUNCIATION`, с 2026-10-09; до того служба читала копию из образа, и новый словарь доезжал
-только пересборкой). Том важнее образа, а `build.ps1` здесь нет, поэтому новый
-`pronunciation.json` кладётся туда руками и атомарно — `sudo install -m 644 pronunciation.json
-<том>/pronunciation.json.tmp && sudo mv <том>/pronunciation.json.tmp <том>/pronunciation.json`;
-служба перечитает его сама, перезапуск не нужен.
+**Словарь латиницы — на томе** `/opt/ai/data/tts/pronunciation/` (`F5_PRONUNCIATION` в
+`/etc/srvllm/services/tts.conf`). Новый `pronunciation.json` кладётся туда руками и атомарно —
+`sudo install -o aiservice -m 644 pronunciation.json <каталог>/pronunciation.json.tmp && sudo mv
+<каталог>/pronunciation.json.tmp <каталог>/pronunciation.json`; служба перечитает его сама,
+перезапуск не нужен. Без файла служба читает копию из ревизии (`tts-f5/pronunciation.json`).
 
 ## Голоса
 
@@ -211,7 +207,7 @@ ESpeech — русская модель и латиницу читает рус�
       - <gpu-ssd>\LLM\docker\f5-tts\pronunciation:/pronunciation:ro
 
 Новые исполнители в коллекции — повторить `export` и `build` и положить
-`pronunciation.json` на том службы — на srvllm `/opt/ai/interim/f5-tts/pronunciation/`
+`pronunciation.json` на том службы — на srvllm `/opt/ai/data/tts/pronunciation/`
 (раздел «На srvllm»), на gpu-host был `<gpu-ssd>\LLM\docker\f5-tts\pronunciation\` (в журнале
 службы — `pronunciation: перечитан …`). Что F5 всё ещё читает сам — раздел «ОСТАТОК» у
 `tools/stress_audit.py`: латиница и цифры после словаря и чисел. Том важнее образа,

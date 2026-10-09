@@ -3,13 +3,16 @@
 До 2026-10-09 тяжёлый синтез был вынесен на машину с картой: RTX 5060 Ti (16 ГБ), `<gpu-host>`;
 на Debian, тогдашнем хосте станции, оставалось только лёгкое и постоянно работающее.
 
-**С 2026-10-09 мостик и F5 живут на srvllm** — разделы ниже описывают прежнюю площадку. Мостик —
-контейнер `tts-bridge` шага `interim` проекта llm_routers (`/opt/ai/interim/compose.yaml`, образ
-vLLM ради Python): код — побайтовая копия `bridge.py` в `/opt/ai/interim/tts-bridge/`,
-`UPSTREAM=http://f5-tts:4126`, `GPU_CTL_URL` не задан — аренды слота нет, её код молчит.
-Выкатка — копия файла (`install` с прежними владельцем и правами) и `docker restart tts-bridge`,
-перерыв — пара секунд. Проверка — `/health` и `POST /speak` с несуществующим голосом: в ответе
-`X-TTS-Voice-Used` и `X-TTS-Fell-Back*`. Сборка и смена образа F5 —
+**С 2026-10-09 мостик и F5 живут на srvllm** — разделы ниже описывают прежнюю площадку. С
+2026-10-10 мостик — нативный юнит `srvllm-tts-bridge.service` проекта llm_routers (шаг `tts`,
+системный Python, в автозапуске): код — `/opt/srvllm-services/radio/tts-bridge/bridge.py` той же
+ревизии, что F5, `UPSTREAM=http://localhost:4126`. Перед каждой фразой мостик берёт аренду слота
+`tts` у контроллера карты `srvllm-slots` (`GPU_CTL_URL=http://localhost:8119`,
+`GPU_CTL_SLOT=tts`, клиентский токен — `/etc/srvllm/services/tts-bridge.env`): пока станция
+говорит, запрос к gemma4 получает `503 excluded_slot_busy` и ждёт, а не гасит F5 посреди эфира.
+Выкатка — с work-ai `bash llm_routers/srvllm/deploy/push-radio.sh [ревизия]` и `sudo systemctl
+restart srvllm-tts-bridge`, перерыв — пара секунд. Проверка — `/health` и `POST /speak` с
+несуществующим голосом: в ответе `X-TTS-Voice-Used` и `X-TTS-Fell-Back*`. F5 —
 [tts-f5/README.md](../tts-f5/README.md), «На srvllm».
 
 ## Что развёрнуто
