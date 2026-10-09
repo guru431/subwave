@@ -256,6 +256,27 @@ export function topUpDepth(opts: { lookahead: number; queued: number; sameShow: 
   return missing;
 }
 
+// Fork (C01 + C03): whether an unsent auto-pick has been pushed out of the show
+// it was chosen for. Show keys are show-boundary.showKeyAt's.
+//
+// Only a pick chosen for the show ON AIR NOW counts. Such a pick can only move
+// LATER into another show — a request or block inserted ahead of it — and that
+// is the harm: the incoming show airing the outgoing show's music after its
+// mic-pass. A pick chosen for the NEXT show (the look-ahead) that drifts back
+// across the change — a skip, a cancel — airs a little early, which the
+// look-ahead allows by design and the boundary handoff already plans around;
+// dropping it there would put an outgoing-show pick right after a handoff.
+// No stamp (a queue.json from before it) or no forecast → keep.
+export function pickOutlivedShow(
+  pickedForShow: unknown,
+  liveShow: string,
+  forecastShow: string | null,
+): boolean {
+  if (typeof pickedForShow !== 'string' || !pickedForShow) return false;
+  if (forecastShow == null) return false;
+  return pickedForShow === liveShow && forecastShow !== pickedForShow;
+}
+
 // Seconds from NOW until the pick being made will start airing — the lead the
 // show look-ahead adds to the wall clock (see runPickCycle).
 //

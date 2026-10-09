@@ -120,6 +120,12 @@ export interface QueueItem {
   // session — even when the same persona hosts both shows.
   introSessionKey?: string | null;
   aiPicked?: boolean;
+  // Fork: the show an auto-pick was chosen for — show-boundary.showKeyAt at the
+  // pick's look-ahead moment (`show:<id>` | 'default'). Queue.dropStalePicks
+  // takes an unsent pick off once a request or block has pushed it into
+  // another show. Absent on requests and on snapshots from before the stamp,
+  // which are never dropped.
+  pickedForShow?: string;
   linkPrev?: { id: string | null; title: string | null; artist: string | null } | null;
   // Epoch ms of the air moment this item's link was WRITTEN against — stamped
   // only when the generator actually handed the model a clock to speak
