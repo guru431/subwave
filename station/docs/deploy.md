@@ -520,3 +520,77 @@ curl -u "$ADMIN_USER:$ADMIN_PASS" -X POST http://<station-host>:7700/api/library
 Если у хоста `INPUT policy DROP`, контроллеру в контейнере нужно узкое правило на порт
 Navidrome из подсети стека (`docker network inspect <сеть стека>`), иначе проба в
 мастере молча падает по таймауту. Правило конкретной установки ведётся вне репозитория.
+
+## Бэкап и восстановление
+
+Ценное состояние станции лежит на одном диске хоста станции: решения владельца и
+подписки в `room.db`, ключ `vapid.pem` (новый ключ обесценивает все подписки браузеров
+разом), `blocklist.json`, `folder-genres.json`, `recent-plays.json`, разметка
+настроений в `library.db` (полтора часа и ~1 млн токенов на повтор). Встроенный бэкап
+апстрима (`backups`) для этого не годится и остаётся выключенным: он пишет в тот же
+`state/`, то есть на тот же диск, не берёт `blocklist.json` и `folder-genres.json`, а
+комната лежит вне `state/` целиком. Поэтому свой —
+[`station/tools/backup.sh`](../tools/backup.sh).
+
+**Что входит.** Один архив `station-backup-YYYYMMDD-HHMMSS.tar.gz`, пути — от каталога
+стека:
+
+| В архиве | Как снято |
+|---|---|
+| `.env` стека | копией, с владельцем и правами |
+| `state/library.db`, `room/room.db` | снимком SQLite (backup API): базы живые и в WAL, копия файла посреди записи — битая база |
+| `state/*.json`, `state/*.env` | копией; маркеры эфира (`*-playing.json`, `pause-talk-*.json`, `music-starved.json`) — нет, восстановленные они выдали бы вчерашний трек за текущий |
+| `room/vapid.pem` | копией |
+
+Не входят: голоса Piper (`piper-voices/` — скачиваются заново), джинглы и голоса в
+`state/` (рендерятся заново), образы (собираются из форка), compose и Caddyfile (в git).
+В архиве пароль админки, ключ шлюза LLM (в `settings.json`) и ключ VAPID — класть его
+только в **приватную** часть `<share>`; скрипт ставит архиву `600`, но на CIFS права
+задаёт монтирование.
+
+**Каждый прогон проверяет себя:** архив пишется во временный файл рядом
+(`.station-backup-….tmp`), читается списком целиком, базы из него распаковываются и
+проходят `PRAGMA integrity_check`, и только потом файл переименовывается в архив. Любой
+сбой — код ≠ 0, временный файл удалён, прежние архивы не тронуты. Ротация удаляет
+только свои архивы по якорному имени (`BACKUP_KEEP`, по умолчанию 14 последних) и свои
+недописанные `.tmp` старше часа: чужие файлы в каталоге не трогаются. Каталог архивов
+скрипт **не создаёт** — несмонтированная шара иначе молча подменилась бы локальным
+диском.
+
+**Расписание — как у нормализатора громкости:** задача планировщика на рабочей машине
+запускает `bash station/tools/backup.sh --remote`. Скрипт уезжает на хост станции по
+ssh (stdin → временный файл) и выполняется там под `sudo`; копии на хосте нет, разойтись
+с репозиторием ей не с чем. Хост, SSH и `BACKUP_*` — из `station/.env` (шаблон —
+`station/.env.example`), ненулевой код выхода увидит монитор задач. Первый раз:
+
+```bash
+# на хосте станции — каталог архивов на шаре, один раз
+sudo mkdir -p <share>/radio/backup && sudo chmod 700 <share>/radio/backup
+# с рабочей машины — пробный прогон
+bash station/tools/backup.sh --remote
+```
+
+**Восстановление.** На живом хосте — по шагам ниже; на новом — сперва раздел «Установка
+и восстановление с нуля» до `docker compose up -d`, причём `.env` берётся из архива, а
+не из шаблона.
+
+```bash
+cd <deploy-dir>/subwave
+A=<share>/radio/backup/station-backup-YYYYMMDD-HHMMSS.tar.gz
+tar -tzf "$A"                          # архив читается целиком
+sudo docker compose down               # базы не должны быть открыты
+# журналы WAL прежних баз — удалить: применённые к восстановленной базе, они её испортят
+sudo rm -f state/library.db-wal state/library.db-shm room/room.db-wal room/room.db-shm
+sudo tar -xzf "$A" -C .                # владельцы и права — как были
+sudo python3 -c 'import sqlite3, sys
+for p in sys.argv[1:]:
+    print(p, sqlite3.connect(p).execute("PRAGMA integrity_check").fetchone()[0])' \
+  state/library.db room/room.db         # обе — ok
+sudo docker compose up -d
+curl -fsS http://127.0.0.1:7700/api/health && curl -fsS http://127.0.0.1:7700/room/health
+```
+
+Мастер `/onboarding` после этого не нужен: `settings.json` и `setup-config.json`
+восстановлены. **Проверка без восстановления** — та же распаковка во временный каталог
+(`T=$(mktemp -d); tar -xzf "$A" -C "$T"`) и `integrity_check` по `$T/state/library.db` и
+`$T/room/room.db`; скрипт делает её сам при каждом прогоне.
