@@ -235,6 +235,16 @@ class StrictAccent(FakeAccent):
         return text if "+" in text else super().apply(text)
 
 
+def test_plus_between_numbers_does_not_switch_the_accent_off(voices):
+    """«1+1» становилось «один+один», а «+о» RUAccent принимает за ручное ударение и
+    оставляет без разметки всю реплику."""
+    eng = FakeEngine()
+    S.Service(eng, voices, "ru-host", StrictAccent(), W.Worker(), queue_wait=1.0,
+              log=lambda *_: None).speak("Старый замок, а 1+1 и 2 + 2 всё ещё 4.")
+    assert " ".join(c[3] for c in eng.calls) == \
+        "Старый з+амок, а один плюс один и два плюс два всё ещё четыре."
+
+
 def test_collection_dictionary_goes_after_the_accent(voices, monkeypatch, tmp_path):
     # «+» словаря, попади он к RUAccent раньше, оставил бы без ударений всю реплику
     import json

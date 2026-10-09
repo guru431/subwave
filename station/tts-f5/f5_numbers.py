@@ -125,6 +125,9 @@ _DATE = re.compile(rf"(?<![\w.,])(3[01]|[12]?\d)(\s+(?:{'|'.join(_MONTHS)}))(?!\
 _BARE_YEAR = re.compile(r"(?<![\w.,])(1[89]\d\d|20\d\d)(?:\s*[–—-]\s*(1[89]\d\d|20\d\d))?"
                         r"(?![.,]?\d)(?!\w)")
 _CLOCK = re.compile(r"(?<![\w.,:])([01]?\d|2[0-3]):([0-5]\d)(?![\w:])")
+# «1+1» — «один плюс один»: «+» перед гласной RUAccent приняла бы за ручное ударение и
+# оставила без разметки всю реплику (f5_accent.Accentizer.apply)
+_PLUS = re.compile(r"(?<=\d)\s*\+\s*(?=\d)")
 # знак — как у _MEASURE: «до -10» — «до минус десяти», а «2-3» знака не несёт
 _COUNT = re.compile(rf"{_SIGNED}(?<![\w.,])({_NUM})(?![\w])")
 
@@ -368,6 +371,7 @@ def normalize(text: str, keep: re.Pattern | None = None) -> str:
     if keep is not None:
         text = keep.sub(lambda m: hide(m) if re.search(r"\d", m.group()) else m.group(), text)
     text = _DOT_CHAIN.sub(lambda m: _dot_chain(m, hide), text)
+    text = _PLUS.sub(" плюс ", text)
     for pattern, fn in ((_NUMERO, _numero), (_PERCENT_ADJ, _percent_adj),
                         (_MEASURE, _measure), (_MONEY, _money), (_SPEED, _speed),
                         (_YEAR_WORD, _year_word), (_SUFFIX, _suffix), (_DATE_RANGE, _date_range),
