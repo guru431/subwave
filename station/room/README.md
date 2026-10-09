@@ -183,8 +183,23 @@ Navidrome ищет по всем словам запроса сразу, поэ�
 нет» и «сверка не состоялась» — разные ответы, и плеер показывает слушателю
 только первый.
 
-Учётка — **отдельная, читающая**: `subwave-room`, `isAdmin=false`. Комната
-смотрит наружу, и админский пароль Navidrome ей не нужен.
+**Учётка — та же, что у контроллера**: `NAVIDROME_USER`/`NAVIDROME_PASS` из `.env`
+стека ([`../deploy/docker-compose.override.yml`](../deploy/docker-compose.override.yml)).
+Прежде здесь была обещана отдельная читающая `subwave-room` (`isAdmin=false`, план
+2026-09-22) — в Navidrome она заведена, но комнате её не передать через эти же
+переменные: контроллер читает тот же `.env` через `env_file`, переменные
+окружения у него главнее настроек, и он ушёл бы в Navidrome под учёткой комнаты.
+А флаг Report Real Path заведён на строке плеера `sub-wave [node]` прежней учётки
+(строка плеера — на сочетание «пользователь + клиент + User-Agent»): под новой учёткой
+станция получала бы поддельные пути, и правила Folder и жанры папок ослепли бы
+([`../docs/controller-changes.md`](../docs/controller-changes.md), «Путь даёт
+флаг плеера Navidrome»). Отдельной учётке комнаты нужны свои имена —
+`ROOM_NAVIDROME_USER`/`ROOM_NAVIDROME_PASS` в override и в `main()` комнаты; пока
+их нет, комната ходит общей.
+
+Пароль наружу при этом не уходит: в запросы к Navidrome едут токен и соль
+Subsonic, тексты ошибок — только в журнал контейнера, заголовки ответа
+Navidrome — по белому списку (`PASS_HEADERS`).
 
 ## Web Push: важное — и при закрытой вкладке
 
@@ -361,9 +376,12 @@ cd <deploy-dir>/subwave && sudo docker compose up -d room
 ```
 
 Переменные (`NAVIDROME_URL`, `NAVIDROME_USER`, `NAVIDROME_PASS`, `PUSH_SUBJECT`)
-лежат в `.env` станции; потолки (`RATE_SECONDS`, `RATE_MAX`, `RATE_GLOBAL`,
-`RESOLVE_MAX`, `PUSH_PER_LISTENER`, `RETENTION_DAYS`) умолчаниями в
-[`server.py`](server.py) и [`store.py`](store.py), переопределяются в `environment:` контейнера; подключение контейнера и маршрут `/room/*` — в
+лежат в `.env` станции, и `NAVIDROME_*` — те же, что читает контроллер (почему —
+в разделе «Сверка с коллекцией»); потолки (`RATE_SECONDS`, `RATE_MAX`,
+`RATE_GLOBAL`, `RESOLVE_MAX`, `PUSH_PER_LISTENER`, `RETENTION_DAYS`) —
+умолчаниями в [`server.py`](server.py) и [`store.py`](store.py),
+переопределяются в `environment:` контейнера; подключение контейнера и маршрут
+`/room/*` — в
 [`../deploy/docker-compose.override.yml`](../deploy/docker-compose.override.yml)
 и [`../deploy/caddy/Caddyfile`](../deploy/caddy/Caddyfile); развёртывание
 целиком — [`../docs/deploy.md`](../docs/deploy.md).
