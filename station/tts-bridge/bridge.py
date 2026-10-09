@@ -40,8 +40,13 @@ GPU_CTL_TIMEOUT = float(os.environ.get("GPU_CTL_TIMEOUT", "90"))
 # мостика — 503, а аренду берёт только /speak: выгнанный пультом слот раньше будили
 # именно ошибочные /speak. Без этой страховки его поднимал бы только пульт сам.
 HEALTH_LEASE_EVERY = float(os.environ.get("HEALTH_LEASE_EVERY", "60"))
+# …и только пока станция говорит: /health контроллер спрашивает раз в 30 с и ночью
+# без слушателей, и без окна выгнанный слот будился бы круглые сутки. Окно — от
+# последнего /speak, как раньше будили только настоящие реплики.
+HEALTH_LEASE_WINDOW = float(os.environ.get("HEALTH_LEASE_WINDOW", "1800"))
 _health_lease_lock = threading.Lock()     # занят, пока идёт аренда из /health
 _health_lease_at = None                   # time.monotonic() последней такой аренды
+_last_speak_at = None                     # time.monotonic() последнего /speak
 
 # Реплика ведущего — это килобайты текста; всё, что больше, к синтезу отношения
 # не имеет, а читать его в память по чужой команде мостик не обязан
@@ -123,13 +128,16 @@ def lease_slot() -> None:
 
 def lease_after_failed_health() -> bool:
     """Аренда слота в фоне: /health отвечает сразу, а /ensure-up идёт до GPU_CTL_TIMEOUT.
-    Не чаще раза в HEALTH_LEASE_EVERY и не больше одного потока разом — контроллер
-    спрашивает /health часто. Возвращает, запущена ли аренда."""
+    Не чаще раза в HEALTH_LEASE_EVERY, не больше одного потока разом — контроллер
+    спрашивает /health часто — и только в HEALTH_LEASE_WINDOW после последнего /speak.
+    Возвращает, запущена ли аренда."""
     global _health_lease_at
+    now = time.monotonic()
+    if _last_speak_at is None or now - _last_speak_at > HEALTH_LEASE_WINDOW:
+        return False
     lock = _health_lease_lock
     if not GPU_CTL_URL or not lock.acquire(blocking=False):
         return False
-    now = time.monotonic()
     if _health_lease_at is not None and now - _health_lease_at < HEALTH_LEASE_EVERY:
         lock.release()
         return False
@@ -221,6 +229,8 @@ class Handler(BaseHTTPRequestHandler):
         if problem:
             self._send(400, json.dumps({"error": problem}).encode(), "application/json")
             return
+        global _last_speak_at
+        _last_speak_at = time.monotonic()      # станция говорит: окно аренды из /health
 
         if not _synthesis.acquire(timeout=QUEUE_WAIT):
             self._send(503, json.dumps(
