@@ -10,7 +10,7 @@ import * as settings from '../settings.js';
 import { bpmCompat, keyCompat } from './mix.js';
 import { shuffle } from '../util/shuffle.js';
 import { mapPool } from '../util/async-pool.js';
-import { artistRootKey, filterPickerCandidates, recencyWindowsForLibrary, trackKey } from './recency.js';
+import { artistKey, artistRootKey, filterPickerCandidates, recencyWindowsForLibrary, trackKey } from './recency.js';
 import { albumKeyFor } from './album-facts.js';
 import { applyTrackFloor } from './track-floor.js';
 import { AIRING_RANK_WEIGHT, freshness, freshnessBiasedOrder, lastAiredMsOf, unairedFlag, type AiredIndex } from './airing.js';
@@ -611,6 +611,19 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
   const windows = recencyWindowsForLibrary(stats.distinctArtists, librarySize);
   const { ids: recentIds, keys: recentKeys } = queue.recentlyPlayed(windows.trackHours);
   const recentArtists = queue.recentArtistsSince(windows.artistHours);
+  // Fork (C08): everything queued and unaired airs BEFORE this pick, so it is
+  // inside the artist window too — the agent path's hard window already takes
+  // the whole queue, and its pool rescue relies on this one. Raw keys match
+  // raw-to-raw like the played side; the lead-act roots keep a collaboration's
+  // lead out as well. Same relaxable set, so the cascade still never starves.
+  for (const item of queue.upcoming ?? []) {
+    const key = artistKey(item?.track ?? {});
+    if (key) recentArtists.add(key);
+  }
+  // Guarded: test stubs of the queue carry no such method.
+  if (typeof queue.queuedArtistRoots === 'function') {
+    for (const root of queue.queuedArtistRoots()) recentArtists.add(root);
+  }
   // Album cooldown: operator-set hours, not library-scaled. 0 = empty set.
   const recentAlbums = queue.recentAlbumKeys(settings.get().picker?.albumHours ?? 0);
   // Snapshot the predecessor this pick is expected to follow: the queued tail
