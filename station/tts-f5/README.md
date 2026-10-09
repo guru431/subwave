@@ -95,7 +95,7 @@ Compose слота — у пульта: `llm_routers/gpu-ctl/deploy/compose/tts.
 ## Мостик эфира
 
 Станция ходит не сюда, а в мостик `tts-bridge` на `:4124` (очередь, повторы 5xx,
-аренда слота `tts`). Код — `station/tts-bridge/bridge.py`, на gpu-host его побайтовая копия в
+аренда слота `tts`; заголовки `X-TTS-*` ответа он отдаёт станции как есть). Код — `station/tts-bridge/bridge.py`, на gpu-host его побайтовая копия в
 `<gpu-ssd>\LLM\docker\tts-bridge\`; контейнер создаёт [tts-bridge-run.ps1](tts-bridge-run.ps1)
 (запускать на gpu-host, `-Root <каталог мостика> -Source <bridge.py>`): `UPSTREAM=http://host.docker.internal:4126`,
 `GPU_CTL_SLOT=tts`, токен пульта — из окружения старого `chatterbox-bridge`. Старый

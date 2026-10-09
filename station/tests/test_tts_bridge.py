@@ -93,8 +93,8 @@ class _FakeHandler(bridge.Handler):
         self.path = "/speak"
         self.sent = []
 
-    def _send(self, code, body, ctype, close=False):
-        self.sent.append((code, body, close))
+    def _send(self, code, body, ctype, close=False, headers=None):
+        self.sent.append((code, body, close, headers or {}))
 
 
 def test_bad_request_answers_400_without_touching_gpu(monkeypatch):
@@ -161,10 +161,12 @@ def test_negative_content_length_is_refused(monkeypatch):
 # в ту же пачку и бесполезен (проверено на живом сервисе).
 
 
-def _upstream(monkeypatch, answers):
-    """Подменяет upstream списком исходов: HTTPError(код) либо байты аудио."""
+def _upstream(monkeypatch, answers, headers=None):
+    """Подменяет upstream списком исходов: HTTPError(код) либо байты аудио.
+    headers — заголовки удачного ответа сверх Content-Type."""
     import io
     seen = []
+    reply_headers = {"Content-Type": "audio/wav", **(headers or {})}
 
     def fake_urlopen(req, timeout=None):
         if "audio/speech" not in req.full_url:
@@ -177,7 +179,7 @@ def _upstream(monkeypatch, answers):
                 io.BytesIO(b'{"error":"TTS generation failed"}'))
 
         class _Resp:
-            headers = {"Content-Type": "audio/wav"}
+            headers = reply_headers
             def read(self): return outcome
             def __enter__(self): return self
             def __exit__(self, *a): return False
@@ -252,6 +254,34 @@ def test_retry_renews_the_gpu_lease(monkeypatch):
     handler = _FakeHandler(b'{"text":"\xd0\xb0"}')
     handler.do_POST()
     assert len(leased) == 2
+
+
+FELL_BACK = {"X-TTS-Voice-Used": "ru-host", "X-TTS-Fell-Back": "1",
+             "X-TTS-Fell-Back-Reason": 'unknown voice "ru-rajt"'}
+
+
+def test_voice_substitution_headers_reach_the_station(monkeypatch):
+    # контроллер видит подмену голоса только по X-TTS-Fell-Back (#238, remoteTts.ts);
+    # мостик отдавал Content-Type и Content-Length, и предупреждение молчало всегда
+    _upstream(monkeypatch, [b"WAV"], {**FELL_BACK, "Server": "uvicorn", "Date": "x"})
+    handler = _FakeHandler('{"text":"а","voice":"ru-rajt"}'.encode())
+    handler.do_POST()
+    code, body, _, headers = handler.sent[0]
+    assert code == 200 and body == b"WAV"
+    assert headers == FELL_BACK            # только три заголовка голоса, не всё подряд
+
+
+def test_voice_headers_go_out_on_the_wire():
+    import io
+    handler = bridge.Handler.__new__(bridge.Handler)
+    handler.wfile = io.BytesIO()
+    handler.request_version, handler.requestline = "HTTP/1.1", "POST /speak HTTP/1.1"
+    handler.command, handler.close_connection = "POST", False
+    handler._send(200, b"WAV", "audio/wav", headers=FELL_BACK)
+    wire = handler.wfile.getvalue().decode("latin-1")
+    assert "\r\nX-TTS-Fell-Back: 1\r\n" in wire
+    assert '\r\nX-TTS-Fell-Back-Reason: unknown voice "ru-rajt"\r\n' in wire
+    assert wire.endswith("\r\n\r\nWAV")
 
 
 def test_retries_can_be_switched_off(monkeypatch):
