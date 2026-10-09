@@ -596,6 +596,9 @@ the crates matched that», «Easy there — try again in 12s» и ещё пол�
 | `tag-library/flags.ts`, `analyze-library.ts`, `library.ts`, `routes/library.ts` | путь передаётся при записи строки (обход, ретег) и отдаётся в проекциях, включая `library.get()` |
 | [routes/library.ts](../../controller/src/routes/library.ts) | `GET /library/folders`, `GET`/`PUT /library/folder-genres`; `PUT` сразу вычищает из очереди попавшее под правила и пересобирает авто-плейлист |
 | [server.ts](../../controller/src/server.ts) | `folderGenres.load()` после `blocklist.load()` и восстановления ротации id |
+| [music/folder-genre-show.ts](../../controller/src/music/folder-genre-show.ts) (новый) | жанр передачи и жанры папок (ниже): `resolveShowGenreName`, `folderGenreTracks` |
+| `music/picker.ts`, `broadcast/scheduler.ts`, `broadcast/dj-agent.ts`, `music/show-candidates.ts` | жанр передачи разрешается через `resolveShowGenreName`; источник `show-genre` пула (§1e) и авто-плейлиста (§0) добавляет `folderGenreTracks` |
+| `music/library.ts`, `music/library-db/queries.ts` | `untaggedPathTracks` / `untaggedPathRows` — строки без тега жанра с настоящим путём, без заблокированных |
 
 Сопоставление правила Folder — по границе `/`: `…/Hits` не задевает `…/Hits 2`; трек
 без настоящего пути не подпадает ни под что (недоблокировка видна по счётчику).
@@ -650,6 +653,34 @@ Blocked появится «N tracks have no real path». Сохранённые 
 **`Other` — не жанр для станции.** Navidrome тег `Other` жанром не считает, поэтому
 треков без жанра для станции на 4 больше, чем в тегах файлов.
 
+**Жанр передачи, заданный только папкой.** Жанр передачи разрешался через
+`subsonic.resolveGenreName`, а тот знает только теги из `getGenres`. Жанр, назначенный
+лишь папке, не разрешался, и замок снимался целиком («the genre filter is OFF» —
+строгая передача играла всю библиотеку), хотя `trackGenres` жанр папки читает. Мало
+разрешить: источники передачи (`getRandomSongs`, `getSongsByGenre`) — тоже Navidrome,
+жанров папок не знают, и строгий авто-плейлист, который режет чужой жанр в каждом
+источнике, мог остаться пустым. Поэтому в `folder-genre-show.ts` две половины:
+
+- `resolveShowGenreName` — точный тег, затем точный (по `normGenre`) жанр папки, и
+  только потом поиск по подстроке среди тегов. Жанр папки считается, лишь пока его
+  читает хоть один незаблокированный трек — как тег существует, пока его несёт песня:
+  устаревшее назначение (папку переименовали, треки получили теги) не держит замок
+  над пустотой. Через него разрешают жанр передачи пул (строгий и мягкий), агент,
+  авто-плейлист и счётчик кандидатов в редакторе передачи — все одинаково.
+- `folderGenreTracks` — треки без тега, до которых жанр доходит через папку (тот же
+  `genreMatches`, что у замка, по жанрам папки из `genresForPath`). Источник
+  `show-genre` пула и авто-плейлиста кладёт их рядом с выдачей Navidrome — один и
+  тот же вызов в обоих местах (апстрим держит их «keep in step»).
+
+Заказы слушателей, инструмент агента `songsByGenre` и генератор плейлистов остаются на
+`resolveGenreName`: они берут треки у Navidrome, и имя жанра папки дало бы им пустой
+ответ (спека, §3.3). Что меняется на станции: передачи «Поп»/«Рок» (это и теги, и жанры
+папок) теперь получают треки папок и из своего источника, а не только случайно через
+другие. И если жанр папки совпадает с жанром передачи точно, а тег — лишь подстрокой
+(папка «Шансон», тег «Русский шансон»), замок встаёт на «Шансон»: он пускает и треки
+папки, и тег «Русский шансон» (уточнение), но выдача Navidrome по «Шансон» пуста, так
+что треки с тегом приходят только из других источников.
+
 Две ловушки кода. `subsonic.ts` импортирует `normGenre` из `show-filter.ts`, замыкая
 цикл импортов (`show-filter → library → blocklist → show-playlist → subsonic`):
 безопасно, только пока это поднятая функция, вызываемая во время работы, — на
@@ -663,7 +694,11 @@ GREEN; `user_version` остаётся апстримным; и базу v1.8-ф
 миграции 27…21 апстрима и ставит `user_version = 21`, после `open()` есть
 `era_untrusted`, `track_moods` и путь, RED → GREEN: без отката — `no such column:
 era_untrusted`), `scripts/folder-genres.test.ts`,
-`scripts/folder-rules.test.ts`. При переносе — `run-tests.sh --src`, `library-path`,
+`scripts/folder-rules.test.ts`, `scripts/folder-genre-show.test.ts` (жанр только у
+папки: разрешение, приоритет над подстрокой, устаревшее назначение, источник и
+`pickViaPool` строгой передачи на настоящей `library.db`; RED → GREEN: до правки
+«strict genre "Детские" not found in library — falling back to unfiltered pool» и пул
+`mood-library=7` из всей библиотеки, после — `show-genre=3` и «3/3 in-genre»). При переносе — `run-tests.sh --src`, `library-path`,
 `genre-cyrillic`, `folder*`, `blocklist*`, `show-filter*`, `library*`, `subsonic*`,
 `*genre*`, `id-adoption*`, `id-rotation*` (158/158).
 

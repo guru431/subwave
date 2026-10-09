@@ -17,6 +17,7 @@ import { normGenre, genreMatches, genreResolutionWarningOnce, inYearRange, prefe
 import { freshnessBiasedOrder } from '../music/airing.js';
 import { recencyWindowsForLibrary } from '../music/recency.js';
 import { resolveShowPlaylistPool, resolveExcludedPlaylistIds } from '../music/show-playlist.js';
+import { folderGenreTracks, resolveShowGenreName } from '../music/folder-genre-show.js';
 import { getFullContext } from '../context.js';
 import { queue } from './queue.js';
 import { createPoolBuilder } from './auto-pool.js';
@@ -172,7 +173,7 @@ async function refreshAutoPlaylistInner(canPublish: () => boolean): Promise<Refr
   const genreNames: string[] = [];
   for (const g of showGenres) {
     try {
-      const resolved = await subsonic.resolveGenreName(g);
+      const resolved = await resolveShowGenreName(g);
       const warning = genreResolutionWarningOnce(g, resolved);
       if (warning) queue.log('scheduler', `Show "${show?.name ?? 'auto'}": ${warning}`);
       if (resolved) genreNames.push(resolved);
@@ -250,6 +251,9 @@ async function refreshAutoPlaylistInner(canPublish: () => boolean): Promise<Refr
           const g = await subsonic.getSongsByGenreSampled(genreName, { count: Math.ceil(genreSetSize / genreNames.length) });
           const ranged = inYearRange(g, eras);
           got.push(...(ranged.length ? ranged : g));
+          // Fork: the tracks this genre reaches through their folder —
+          // Navidrome's genre calls above see file tags only.
+          got.push(...shuffle(folderGenreTracks(genreName)).slice(0, Math.ceil(genreSetSize / genreNames.length)));
         }
         return got;
       });
