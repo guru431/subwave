@@ -37,6 +37,10 @@ Apache. Официальная инструкция при этом требуе
 
 ## Установка и восстановление с нуля
 
+Хост станции с 2026-10 — srvllm (`/opt/ai/stacks/subwave`, контейнеры видны в Arcane), Apache и
+Navidrome — на debian. Собственные образы при переезде переносятся `docker save | docker load`;
+копия `state/` и `room/` — ежесуточно на сетевое хранилище (`srvllm-stacks-backup`).
+
 `<репозиторий>` ниже — клон форка на хосте станции, `~/radio`: его доставляет
 `station/tools/push-to-station.sh` ([controller-changes.md](controller-changes.md),
 «Доставка ревизии»), руками он не правится.

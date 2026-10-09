@@ -160,11 +160,12 @@
     # задаём: глобальный ProxyTimeout 600 относится к ожиданию данных, а не к
     # длине ответа, и поток их шлёт непрерывно. Сжимать нечем — mod_deflate тут
     # настроен только на application/json.
-    ProxyPass /stream.mp3  http://127.0.0.1:7700/stream.mp3  retry=1
-    ProxyPass /stream.opus http://127.0.0.1:7700/stream.opus retry=1
-    ProxyPass /stream.flac http://127.0.0.1:7700/stream.flac retry=1
-    ProxyPass /stream.aac  http://127.0.0.1:7700/stream.aac  retry=1
+    # <station-host> — хост станции: с 2026-10 это srvllm, Apache остался на debian (llm_routers, подпроект 3).
+    ProxyPass /stream.mp3  http://<station-host>:7700/stream.mp3  retry=1
+    ProxyPass /stream.opus http://<station-host>:7700/stream.opus retry=1
+    ProxyPass /stream.flac http://<station-host>:7700/stream.flac retry=1
+    ProxyPass /stream.aac  http://<station-host>:7700/stream.aac  retry=1
 
-    ProxyPass        /  http://127.0.0.1:7700/ retry=1
-    ProxyPassReverse /  http://127.0.0.1:7700/
+    ProxyPass        /  http://<station-host>:7700/ retry=1
+    ProxyPassReverse /  http://<station-host>:7700/
 </VirtualHost>
