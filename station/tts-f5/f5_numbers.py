@@ -351,10 +351,11 @@ def _count(m) -> str:
     return f"{_SIGN[sign]} {words}" if sign else words
 
 
-def normalize(text: str) -> str:
+def normalize(text: str, keep: re.Pattern | None = None) -> str:
     """Цифры, `%`, `°`, `$`, mph и км/ч — словами. Порядок проходов — от узкого к
     общему: единицы и годы со словом «год» уносят свои числа раньше, чем их прочтут
-    количественными."""
+    количественными. keep — фрагменты, которые числа не трогают: имена из словаря
+    коллекции («Links 2 3 4», «Song #1») читает он, а соседнее слово этого не видит."""
     if not re.search(r"\d", text):
         return text
     hidden = []
@@ -363,6 +364,8 @@ def normalize(text: str) -> str:
         hidden.append(m.group())
         return chr(_HIDDEN + len(hidden) - 1)
 
+    if keep is not None:
+        text = keep.sub(lambda m: hide(m) if re.search(r"\d", m.group()) else m.group(), text)
     text = _DOT_CHAIN.sub(lambda m: _dot_chain(m, hide), text)
     for pattern, fn in ((_NUMERO, _numero), (_PERCENT_ADJ, _percent_adj),
                         (_MEASURE, _measure), (_MONEY, _money), (_SPEED, _speed),

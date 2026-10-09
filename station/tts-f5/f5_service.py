@@ -5,6 +5,7 @@
 (−20 dBFS, PEAK_CEILING 32000), а срезанный здесь пик он бы уже не вернул.
 """
 import functools
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -19,8 +20,13 @@ MAX_TEXT_CHARS = 20000
 
 def before_accent(text: str) -> str:
     """Текст до RUAccent: латиница из PRONUNCIATION и числа — словами (числительному
-    тоже нужны ударения). Тем же путём реплику размечает tools/stress_audit.py."""
-    return f5_numbers.normalize(f5_text.respell(text))
+    тоже нужны ударения). Имена словаря коллекции с цифрами числа не трогают — их
+    после RUAccent заменит cyrillize. Тем же путём реплику размечает
+    tools/stress_audit.py."""
+    text = f5_text.respell(text)
+    _, names = f5_text.DICTIONARY.current()
+    # ключи словаря — латиница: без неё искать нечего, а регулярка на тысячи имён дорогая
+    return f5_numbers.normalize(text, keep=names if re.search(r"[A-Za-z]", text) else None)
 
 
 class ServiceError(Exception):

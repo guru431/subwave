@@ -250,6 +250,22 @@ def test_collection_dictionary_goes_after_the_accent(voices, monkeypatch, tmp_pa
     assert eng.calls[0][3] == "Старый з+амок и Д+айр Стр+ейтс."
 
 
+def test_every_dictionary_key_with_digits_survives_the_numbers(monkeypatch):
+    """Числа читаются до словаря коллекции, а «рядом латиница» смотрит на одно соседнее
+    слово: «Links 2 3 4» становилось «Линкс 2 три четыре», «Song #1» — «Song #один», и
+    ключ словаря больше не совпадал. Фрагмент, который словарь узнаёт, числа не трогают."""
+    import f5_text
+    shipped = f5_text.Dictionary(f5_text.DICTIONARY_FILE, fallback=f5_text.DICTIONARY_FILE)
+    monkeypatch.setattr(f5_text, "DICTIONARY", shipped)
+    words, _ = shipped.current()
+    keys = [k for k in words if any(ch.isdigit() for ch in k)]
+    assert len(keys) > 50
+    broken = [k for k in keys
+              if f5_text.cyrillize(S.before_accent(f"Сейчас прозвучит {k}.")) !=
+              f"Сейчас прозвучит {words[k]}."]
+    assert broken == []
+
+
 def test_sentences_are_synthesized_apart_with_a_pause(voices):
     eng = FakeEngine()
     x, sr = A.decode_wav(make(voices, eng).speak("Первая фраза тут. Вторая фраза там.").wav)
