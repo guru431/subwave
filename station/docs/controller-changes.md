@@ -214,7 +214,11 @@ v1.8 проверено на живой станции: `sent: true` ровно 
 
 **Проверено.** `scripts/queue-lookahead.test.ts` (`topUpDepth`; `pickAnchorFrame` —
 хвост считает всю очередь и следует за предыдущим элементом, голова — прежний
-ответ, RED → GREEN),
+ответ, RED → GREEN), `scripts/queue-settings-cold-load.test.ts` — холодная загрузка
+(`setCache(null)` + `load()`, как требует `controller/CLAUDE.md`): сохранённая
+глубина 5 переживает рестарт, хранимые 2.7 / 0 / 11 / `'5'` / отсутствие дают
+3 / 1 / 1 / 1 / 1, `GET /settings` отдаёт `values.queue.lookahead`; без блока
+`queue` в `load()` падают все три теста,
 `scripts/drain-force.test.ts` — настоящий слив с поддельным потребителем
 `next.txt`: `force` при отданной голове ничего не шлёт; голову, придержанную
 pair-hold (персона с `djMode`, `pairDrain` включён, преемника нет), обычный слив
