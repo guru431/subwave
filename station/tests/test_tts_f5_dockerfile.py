@@ -32,11 +32,10 @@ def test_image_installs_and_checks_num2words():
 
 
 def test_image_carries_the_pronunciation_dictionary():
-    # f5_text без файла молча работает с пустым словарём: пропуск COPY вернул бы
-    # «Даррис Тредс» в эфир без единой ошибки
-    copy = [line for line in DOCKERFILE.read_text(encoding="utf-8").splitlines()
-            if line.startswith("COPY ") and "f5_text.py" in line]
-    assert copy and "pronunciation.json" in copy[0].split()
+    # Рабочий словарь — на томе (F5_PRONUNCIATION), копия в образе — запасная: без тома
+    # f5_text молча работал бы с пустым словарём, и пропуск COPY вернул бы «Даррис
+    # Тредс» в эфир без единой ошибки
+    assert "pronunciation.json" in _copy_line()
 
 
 def test_image_puts_koziev_into_the_ruaccent_package_and_checks_it():

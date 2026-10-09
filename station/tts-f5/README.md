@@ -81,6 +81,7 @@ Python занимали 661 МБ из 0.9 ГБ RUAccent, и turbo3.1 (403 МБ) 
                     образ f5-tts:pre-stress-2026-09-23) и dictionary\accents.sqlite
                     (tools/accents_db.py), монтируются на запись
       voices\       пары <id>.wav ≤12 с + <id>.txt; источник — <share>/radio/voices/f5/, в git их нет
+      pronunciation\  pronunciation.json — рабочий словарь латиницы (F5_PRONUNCIATION)
       voices-src\   исходные записи, из которых резались эталоны
 
 Compose слота — у пульта: `llm_routers/gpu-ctl/deploy/compose/tts.yaml`; поднимает
@@ -151,8 +152,24 @@ ESpeech — русская модель и латиницу читает рус�
 в слове из двух и больше гласных, в односложном и перед «ё» — нет; одно слово на слово
 источника; `&` → «и», `feat.` → «фит»; аббревиатуры по буквам через дефис.
 
-Новые исполнители в коллекции — повторить `export` и `build` и пересобрать образ:
-словарь лежит в образе (`COPY … pronunciation.json`).
+**Словарь — на томе, пересборка не нужна.** Служба читает его из `F5_PRONUNCIATION` и
+перечитывает, когда у файла сменился mtime (stat — не чаще раза в 30 с); копия в образе
+(`COPY … pronunciation.json`) — запасная, если тома нет или файл пропал. Недописанный
+файл оставляет прежний словарь до следующей проверки. Монтируется каталог, а не файл:
+замена файла под одиночным bind-монтированием Docker Desktop контейнеру не видна.
+В compose слота (`llm_routers/gpu-ctl/deploy/compose/tts.yaml`):
+
+    environment:
+      F5_PRONUNCIATION: /pronunciation/pronunciation.json
+    volumes:
+      - <gpu-ssd>\LLM\docker\f5-tts\pronunciation:/pronunciation:ro
+
+Новые исполнители в коллекции — повторить `export` и `build` и положить
+`pronunciation.json` в `<gpu-ssd>\LLM\docker\f5-tts\pronunciation\` (в журнале службы —
+`pronunciation: перечитан …`). Что F5 всё ещё читает сам — раздел «ОСТАТОК» у
+`tools/stress_audit.py`: латиница и цифры после словаря и чисел. Том важнее образа,
+поэтому [build.ps1](build.ps1) после удачной сборки кладёт туда словарь из контекста
+сборки: иначе служба продолжила бы читать старый.
 
 ## Конфиг модели и проверка речи
 

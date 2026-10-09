@@ -235,12 +235,15 @@ class StrictAccent(FakeAccent):
         return text if "+" in text else super().apply(text)
 
 
-def test_collection_dictionary_goes_after_the_accent(voices, monkeypatch):
+def test_collection_dictionary_goes_after_the_accent(voices, monkeypatch, tmp_path):
     # «+» словаря, попади он к RUAccent раньше, оставил бы без ударений всю реплику
+    import json
+
     import f5_text
-    d = {"dire straits": "Д+айр Стр+ейтс"}
-    monkeypatch.setattr(f5_text, "DICTIONARY", d)
-    monkeypatch.setattr(f5_text, "_DICTIONARY", f5_text._dictionary_pattern(d))
+    path = tmp_path / "pronunciation.json"
+    path.write_text(json.dumps({"words": {}, "phrases": {"dire straits": "Д+айр Стр+ейтс"}},
+                               ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(f5_text, "DICTIONARY", f5_text.Dictionary(path, fallback=path))
     eng = FakeEngine()
     S.Service(eng, voices, "ru-host", StrictAccent(), W.Worker(), queue_wait=1.0,
               log=lambda *_: None).speak("Старый замок и Dire Straits.")

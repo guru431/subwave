@@ -40,8 +40,9 @@ RUN --mount=type=bind,source=ruaccent-koziev,target=/tmp/koziev \
  && test -s "$d/koziev/rupostagger/database/ruword2tags.db" \
  && python3 -c "import ruaccent.rule_accent_engine; from ruaccent.koziev.rulemma.rulemma import Lemmatizer; from ruaccent.koziev.rupostagger import RuPosTagger; Lemmatizer().load(); RuPosTagger().load(); print('koziev ok')"
 
-# pronunciation.json — словарь латиницы коллекции для f5_text; без него служба
-# стартует, но читает английские имена по-русски
+# pronunciation.json — запасная копия словаря латиницы коллекции для f5_text: рабочий
+# лежит на томе (F5_PRONUNCIATION, README). Без обоих служба стартует, но читает
+# английские имена по-русски
 COPY f5_audio.py f5_text.py f5_numbers.py f5_worker.py f5_accent.py f5_voices.py f5_engine.py f5_service.py server.py pronunciation.json /app/
 ENV PYTHONUNBUFFERED=1 \
     HF_HUB_OFFLINE=1 \
