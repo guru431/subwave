@@ -36,6 +36,12 @@ GPU_CTL_URL = os.environ.get("GPU_CTL_URL", "").rstrip("/")
 GPU_CTL_TOKEN = os.environ.get("GPU_CTL_TOKEN", "")
 GPU_CTL_SLOT = os.environ.get("GPU_CTL_SLOT", "chatterbox")
 GPU_CTL_TIMEOUT = float(os.environ.get("GPU_CTL_TIMEOUT", "90"))
+# Аренда и при неудачном /health. Гейт C05 контроллера не шлёт /speak, пока /health
+# мостика — 503, а аренду берёт только /speak: выгнанный пультом слот раньше будили
+# именно ошибочные /speak. Без этой страховки его поднимал бы только пульт сам.
+HEALTH_LEASE_EVERY = float(os.environ.get("HEALTH_LEASE_EVERY", "60"))
+_health_lease_lock = threading.Lock()     # занят, пока идёт аренда из /health
+_health_lease_at = None                   # time.monotonic() последней такой аренды
 
 # Реплика ведущего — это килобайты текста; всё, что больше, к синтезу отношения
 # не имеет, а читать его в память по чужой команде мостик не обязан
@@ -115,6 +121,30 @@ def lease_slot() -> None:
         print(f"bridge: аренда слота {GPU_CTL_SLOT} не взята: {e}", flush=True)
 
 
+def lease_after_failed_health() -> bool:
+    """Аренда слота в фоне: /health отвечает сразу, а /ensure-up идёт до GPU_CTL_TIMEOUT.
+    Не чаще раза в HEALTH_LEASE_EVERY и не больше одного потока разом — контроллер
+    спрашивает /health часто. Возвращает, запущена ли аренда."""
+    global _health_lease_at
+    lock = _health_lease_lock
+    if not GPU_CTL_URL or not lock.acquire(blocking=False):
+        return False
+    now = time.monotonic()
+    if _health_lease_at is not None and now - _health_lease_at < HEALTH_LEASE_EVERY:
+        lock.release()
+        return False
+    _health_lease_at = now
+
+    def run():
+        try:
+            lease_slot()
+        finally:
+            lock.release()
+
+    threading.Thread(target=run, daemon=True).start()
+    return True
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     timeout = READ_TIMEOUT
@@ -152,6 +182,8 @@ class Handler(BaseHTTPRequestHandler):
             ok = r.status == 200 and bool(body.get("model_loaded"))
         except (urllib.error.URLError, OSError, TimeoutError, ValueError):
             ok = False
+        if not ok:
+            lease_after_failed_health()
         self._send(200 if ok else 503,
                    json.dumps({"ok": ok}).encode(), "application/json")
 
