@@ -687,6 +687,58 @@ era_untrusted`), `scripts/folder-genres.test.ts`,
 **Проверено.** `scripts/weather-cache.test.ts`; при переносе — `run-tests.sh --src`,
 `weather*`, `*context*` (6/6).
 
+## Кириллица в именах артистов и в сверке MusicBrainz
+
+После переноса, вне таблицы · [music/subsonic.ts](../../controller/src/music/subsonic.ts)
+`normArtist`, [music/musicbrainz.ts](../../controller/src/music/musicbrainz.ts) `norm`
+
+Тот же латинский фильтр, что C12 убрала из жанров, стоял в коде апстрима ещё в двух
+местах. `normArtist` оставлял только `a-z0-9`: «Агата Кристи» становилась пустой
+строкой, и `resolveArtist()` возвращал `null`, даже не спросив Navidrome. Через него
+идут ветка «артист» каскада заказа (с «последний альбом X» и «more like this»),
+повтор по артисту в инструментах агента `searchLibrary` и `identifyRequestedTrack`,
+`recentByArtist` (агент получал ложное «нет в коллекции») и блок студии по артисту
+(`POST /dj/queue-block`). `musicbrainz.norm` так же обнулял кириллическое название и
+имя: ни одна запись MusicBrainz не проходила сверку, год оригинала у сборника не
+находился, и трек получал штамп промаха (`original_year_checked_at`).
+
+Оба фильтра — `[^\p{L}\p{N}]` с флагом `u`, как `normGenre` после C12; в
+`normArtist` пробел по-прежнему разделитель слов. Латиница не меняется (`a-z0-9` —
+подмножество), снятие диакритики в `normArtist` осталось, у кириллицы оно сводит
+«ё» к «е» и «й» к «и» — одинаково с обеих сторон. Сохранённых ключей у обеих функций
+нет: они только сравнивают на лету, поэтому старых данных правка не задевает.
+`isVariousArtistsName` (`music/recency.ts`) с тем же фильтром не тронут: он сверяет
+имя со списком латинских «Various Artists», и кириллица в нём ничего не ломает.
+Правка годится апстриму как есть (предложение не отправлялось).
+
+**После выкатки — повторить промахи MusicBrainz.** Штамп промаха не даёт трек
+переспрашивать, а сверка (Admin → Library → Reconcile with Navidrome,
+`POST /api/library/reconcile`) спрашивает MusicBrainz только о треках без штампа.
+Поэтому сначала снять штамп у кириллических промахов, затем сверка:
+
+```bash
+docker exec -w /app sub-wave-controller node -e '
+  const db = new (require("better-sqlite3"))("/var/sub-wave/library.db");
+  console.log(db.prepare(`UPDATE tracks SET original_year_checked_at = NULL
+    WHERE (is_compilation = 1 OR era_untrusted = 1) AND original_year IS NULL
+      AND original_year_checked_at IS NOT NULL
+      AND (original_year_source IS NULL OR original_year_source <> ?)
+      AND (title GLOB ? OR artist GLOB ?)`).run("manual", "*[А-яЁё]*", "*[А-яЁё]*").changes)'
+```
+
+Число в выводе — сколько треков спросят заново; MusicBrainz — 1 запрос в секунду.
+Без SQL то же делает полный перезапрос: Admin → Library → Re-scan с Re-enrich
+(`POST /api/tag-library {"reEnrich": true, "tagMoods": false, "analyze": false}`), но
+он заодно перечитывает тексты и теги Last.fm всей библиотеки. Один трек — Retag в
+его строке: ретег переспрашивает MusicBrainz и при промахе.
+
+**Проверено.** `scripts/artist-cyrillic.test.ts`: `resolveArtist` с поддельным
+`search3` — «Агата Кристи» (точно), «Агату Кристи» (падеж, через поиск по словам),
+«Би-2», неизвестное имя, «Beyoncé» → «Beyonce»; `earliestOriginalYear` с кириллическим
+названием и артистом, отказ по чужому названию и чужому артисту. RED → GREEN: до
+правки «Агата Кристи» не доходила до `search3`, «Агату Кристи» не разрешалась, год
+«Как на войне» — `null`.
+
 ## Цена форка: свой образ контроллера
 
 Стек перестал быть чисто апстримным. Контроллер — свой образ
