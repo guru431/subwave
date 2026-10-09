@@ -7,6 +7,8 @@
 // bypass this entirely. Read live, so the toggle applies on the next tick.
 
 import * as settings from '../settings.js';
+import { rescueForbidden } from '../audio/tts-fallback.js';
+import { personaEngineKnownDown } from '../audio/tts.js';
 
 // Absent/non-boolean reads as ON, so an upgrade changes nothing.
 export function voiceEnabled(): boolean {
@@ -14,8 +16,15 @@ export function voiceEnabled(): boolean {
 }
 
 // May an AUTONOMOUS talk moment start? Manual runners must NOT call this.
+//
+// Fork (C05): also no while substitution is banned and the on-air voice's
+// engine is KNOWN down — that line can only be dropped at render, so writing it
+// is the waste this gate exists to prevent. Unknown (probe not answered yet)
+// stays open. Air-time backstops for lines ALREADY rendered ask voiceEnabled()
+// instead: a WAV on disk needs no engine.
 export function autoVoiceAllowed(): boolean {
-  return voiceEnabled();
+  if (!voiceEnabled()) return false;
+  return !(rescueForbidden(settings.get()?.tts?.fallback) && personaEngineKnownDown());
 }
 
 export function voiceStatus() {

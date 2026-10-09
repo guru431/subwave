@@ -7,7 +7,7 @@ import * as kokoro from './kokoro.js';
 import { applyEdgeFades } from './wav-edges.js';
 import * as chatterbox from './chatterbox.js';
 import * as pocketTts from './pocketTts.js';
-import { heavyColdEngines, heavyEnabledEngines } from './ttsHeavyClient.js';
+import { heavyColdEngines, heavyEnabledEngines, isRemoteEnabled as isHeavySidecar } from './ttsHeavyClient.js';
 import * as remoteTts from './remoteTts.js';
 import * as gemini from './gemini.js';
 import { normalizeForSpeech } from './speech-text.js';
@@ -173,6 +173,22 @@ function fallbackChain(primary: TtsTarget): RescueSlot[] {
     (engine, cloudProvider) => engineUsable(engine, cloudProvider ?? null),
     defaultCloudProvider(),
   );
+}
+
+// Fork (C05): is the on-air persona's own engine KNOWN unable to speak right
+// now? broadcast/voice-policy.ts pairs this with rescueForbidden: with
+// substitution banned, a known-down engine means every autonomous line would be
+// written by the LLM and then dropped at render. Cache-only and synchronous —
+// it is read on the drain's hot path. "Known" is the point, so it fails open:
+// the remote engine's /health probe seeds `false` before its first answer, and
+// the tts-heavy sidecar's probe never says whether it has answered, so both read
+// as unknown here rather than as down.
+export function personaEngineKnownDown(): boolean {
+  const personaTts = djPersonaTts('dj-speak');
+  const engine = requestedEngine('dj-speak', personaTts);
+  if (engine === 'remote' && !remoteTts.availabilityKnown()) return false;
+  if ((engine === 'chatterbox' || engine === 'pocket-tts') && isHeavySidecar()) return false;
+  return !engineUsable(engine, personaCloudProvider(personaTts));
 }
 
 // Voice level trim (dB) for a segment of `kind`: per-engine gain plus the

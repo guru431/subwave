@@ -81,6 +81,13 @@ export function isAvailable(): boolean {
   return probe.get();
 }
 
+// Fork: whether isAvailable() is an observation. No URL is a known answer; with
+// one, false means nothing until the first /health probe lands (boot, or a
+// process that never called start()).
+export function availabilityKnown(): boolean {
+  return !getUrl() || probe.known();
+}
+
 export async function speak(
   text: string,
   { outPath: customPath, voice, speedScale }: { outPath?: string; voice?: string; speedScale?: number } = {},

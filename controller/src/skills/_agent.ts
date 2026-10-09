@@ -557,7 +557,13 @@ export async function agenticTick(ctx) {
       sfx: selectedSfx,
       hostSpeech,
     });
-    if (!delivery.accepted) return;
+    if (!delivery.accepted) {
+      // Fork: a line that could not render still spends the floor (not the
+      // kind's cooldown — nothing aired), or a dead TTS endpoint has the model
+      // re-asked every tick. Same rule as Queue.maybeWriteSeamLink's counter.
+      segmentState.lastAnySegment = Date.now();
+      return;
+    }
 
     // Reserve the kind as soon as it owns an air path so a held segment is not
     // generated twice. Durable "aired" facts wait for the voice lifecycle.
@@ -585,6 +591,10 @@ export async function agenticTick(ctx) {
       queue.log('scheduler', `Segment agent stayed silent — output not parseable (${err.message.slice(0, 80)})`);
     } else {
       queue.log('error', `Segment agent failed: ${err.message}`);
+      // Fork: a real failure (provider down, a co-hosted exchange that failed
+      // to render) spends the floor like a failed delivery above; silence
+      // doesn't, so the director keeps its every-tick re-ask for that.
+      segmentState.lastAnySegment = Date.now();
     }
   } finally {
     tickBusy = false;

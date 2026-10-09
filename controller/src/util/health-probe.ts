@@ -11,6 +11,9 @@ export interface CachedHealthProbe<R> {
   start(): void;
   // The last probed value, read synchronously.
   get(): R;
+  // Fork: whether any probe has completed. Until then get() is only the seed,
+  // which a caller that must fail open cannot tell from a real answer.
+  known(): boolean;
 }
 
 export interface CachedHealthProbeOptions<R> {
@@ -28,12 +31,14 @@ export interface CachedHealthProbeOptions<R> {
 export function cachedHealthProbe<R>(opts: CachedHealthProbeOptions<R>): CachedHealthProbe<R> {
   const equals = opts.equals ?? Object.is;
   let current = opts.initial;
+  let answered = false;
   let started = false;
 
   async function refresh(): Promise<R> {
     const next = await opts.probe();
     const prev = current;
     current = next;
+    answered = true;
     if (!equals(prev, next)) opts.onChange?.(next, prev);
     return next;
   }
@@ -46,5 +51,5 @@ export function cachedHealthProbe<R>(opts: CachedHealthProbeOptions<R>): CachedH
     handle.unref?.();
   }
 
-  return { refresh, start, get: () => current };
+  return { refresh, start, get: () => current, known: () => answered };
 }
