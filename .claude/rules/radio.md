@@ -29,6 +29,8 @@
 - `cd station && python -m pytest` — быстрый набор станции (~бюджет 60 с).
 - `bash station/run-tests.sh --patch` — тесты наших фич контроллера в образе на хосте
   станции; без флага — весь набор; `--src /home/<user>/radio` после `station/tools/push-to-station.sh`.
+- `npx tsx --test web/lib/*.test.ts` — тесты наших фич веба (W01–W03, W09, W11–W13), на
+  рабочей машине. Не циклом `for … || break`: он обрывает остальные файлы и выходит с 0.
 - Линтер и typecheck — на рабочей машине, не на хосте станции
   (`station/docs/controller-changes.md`, «Сборка»).
 

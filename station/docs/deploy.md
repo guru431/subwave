@@ -37,14 +37,50 @@ Apache. Официальная инструкция при этом требуе
 
 ## Установка и восстановление с нуля
 
+`<репозиторий>` ниже — клон форка на хосте станции, `~/radio`: его доставляет
+`station/tools/push-to-station.sh` ([controller-changes.md](controller-changes.md),
+«Доставка ревизии»), руками он не правится.
+
+**1. Три своих образа — до всего остального.** У `controller`, `web` и `room` в override
+стоит `pull_policy: never`: из реестра их не взять, и без них `up -d` падает
+(`controller` и `web` вдобавок пытаются собраться по `build:` апстрима из каталога стека,
+где исходников нет). Собираются из `<репозиторий>` под сторожем памяти, тег — ровно тот,
+что в `image:` у [override](../deploy/docker-compose.override.yml):
+
+| Образ | Как собрать |
+|---|---|
+| `subwave-controller:<версия>-ru` | [controller-changes.md](controller-changes.md), «Сборка образа под сторожем памяти» |
+| `subwave-web:<версия>-ru` | [web-changes.md](web-changes.md), «Сборка» |
+| `subwave-room:2` | [room/README.md](../room/README.md), «Сборка» (только `docker build`, подъём — ниже) |
+
+**2. Каталог стека.** Override ждёт рядом с собой три вещи: `caddy/Caddyfile`, каталог
+`piper-voices/` и `.env`. Без Caddyfile Docker создаст на его месте **каталог**, и Caddy
+не стартует; без `piper-voices/` том подменит `/opt/piper/voices` пустым каталогом, и у
+Piper не останется ни одного голоса. `room/` (база комнаты) и `state/` Docker заводит сам.
+
 ```bash
-mkdir -p <deploy-dir>/subwave && cd <deploy-dir>/subwave
+mkdir -p <deploy-dir>/subwave/caddy <deploy-dir>/subwave/piper-voices
+cd <deploy-dir>/subwave
 cp <репозиторий>/docker-compose.yml .                               # версия апстрима под форком
 cp <репозиторий>/station/deploy/docker-compose.override.yml .      # наши образы, голоса Piper, комната
+cp <репозиторий>/station/deploy/caddy/Caddyfile caddy/              # маршрут /room/*
 cp <репозиторий>/station/deploy/.env.example .env && chmod 600 .env
-# заполнить .env: ADMIN_PASS, PUSH_SUBJECT и прочее — из менеджера секретов
+# заполнить .env: ADMIN_PASS, PUSH_SUBJECT, NAVIDROME_* и прочее — из менеджера секретов
+
+# голоса Piper: английский — из собранного образа контроллера (контейнера ещё нет,
+# поэтому create + cp, а не exec), русский — с HuggingFace; имя — то, что в PIPER_VOICE
+cid=$(sudo docker create subwave-controller:<версия>-ru)
+sudo docker cp "$cid":/opt/piper/voices/. piper-voices/ && sudo docker rm "$cid"
+B=https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU/irina/medium
+(cd piper-voices && curl -fsSL -O "$B/ru_RU-irina-medium.onnx" -O "$B/ru_RU-irina-medium.onnx.json")
+
 sudo docker compose up -d
 ```
+
+**Восстановление, а не новая установка:** до `up -d` вернуть из резервной копии `state/`
+(настройки, `library.db`, сессия) и `room/` — в нём `vapid.pem`, и новый ключ обесценил
+бы подписки Web Push у всех слушателей разом. Пустые каталоги на их месте дают станцию,
+которая играет, но всё забыла.
 
 **`docker-compose.yml` берётся из форка, а не из `main` апстрима**, и образы апстрима
 закрепляются тегом (`SUBWAVE_VERSION` в `.env`): иначе следующий `docker compose pull`
@@ -153,7 +189,7 @@ POST /speak   →  {"text": "...", "voice": "..."}  →  тело ответа =
 ```
 
 Chatterbox отвечает по схеме OpenAI (`POST /v1/audio/speech`), поэтому между ними стоит
-мостик из этого репозитория — [`tts-bridge/bridge.py`](../tts-bridge/bridge.py), 90 строк на
+мостик из этого репозитория — [`tts-bridge/bridge.py`](../tts-bridge/bridge.py) на
 стандартной библиотеке. Server URL в админке — адрес мостика на gpu-host.
 
 Движки запасного TTS встроены в образ контроллера, ставить их не нужно. Сайдкар
@@ -391,16 +427,46 @@ OG-теги и sitemap; пока там стоял `http://<station-host>:7700`,
 не нужна — достаточно `docker compose up -d web`.
 
 **Что закрыто от интернета.** Станция открыта всем, кто знает адрес (осознанное
-решение), но правящие её пути ограничены приватными сетями:
-`/admin`, `/api/settings`, `/api/system`, `/api/debug`, `/api/doctor`, `/api/backup`,
-`/api/mcp`. У контроллера поверх этого свой `requireAdmin`, это второй рубеж:
-пароль один, лежит в `.env`, и через `/api/settings` им меняются ключ шлюза LLM и
-адрес Navidrome. `/api/onboarding` в список **не входит намеренно** —
-`/api/onboarding/status` отвечает 200 без пароля, по нему web решает, показывать ли
-мастер, и закрытый префикс сломал бы публичную страницу.
+решение): страницы плеера, поток и комната (`/room/*`). Из приватных сетей и только
+оттуда — `/admin`, `/room/admin` и **весь `/api/*`, кроме белого списка** ручек, которые
+зовут плеер и приложение: `now-playing`, `state`, `session`, `health`, `dj`, `schedule` и
+`themes` (только чтение), `request` и `request/<id>`, `like`, `beacon`,
+`onboarding/status`, `cover/<id>`, `persona-avatar/<id>`, `station-auth`,
+`listen.pls`/`listen.m3u`. У контроллера поверх этого свой `requireAdmin`, это второй
+рубеж: пароль один, лежит в `.env`, и через `/api/settings` им меняются ключ шлюза LLM и
+адрес Navidrome.
 
-Проверено подменой списка разрешённых сетей на заведомо чужой: перечисленные пути
-отдают 403, а `/`, `/manifest.webmanifest` и `/api/onboarding/status` — 200. Из дома
+**Почему белый список, а не перечень правящих путей.** До 2026-10-09 правило закрывало
+шесть префиксов (`/api/settings`, `system`, `debug`, `doctor`, `backup`, `mcp`), а
+открытыми снаружи оставались 158 из 188 ручек под `requireAdmin`. Одна неудача там
+стоит дорого: `requireAdmin` засчитывает неудачей и анонимный запрос, после 10 неудач
+закрывает вход на 15 минут — по адресу клиента, а снаружи все приходят одним адресом
+docker-шлюза (ниже). Десять анонимных запросов из интернета к `/api/stations` или
+`/api/admin-auth` закрывали владельцу админку через домен; обход был только прямым
+входом по `:7700` из LAN. Перечень правящих путей к тому же отстаёт от апстрима сам
+собой, а белый список закрывает новую ручку сразу.
+
+Список — точные пути, а не префиксы: `/api/request` префиксом пропустил бы админский
+`/api/requests`. `/api/schedule` и `/api/themes` одним путём отдают открытое чтение и
+принимают запись под `requireAdmin`, поэтому снаружи им разрешён только `GET`. Открытые
+ручки контроллера, которых в списке нет намеренно (`/api/mcp`, `/api/similar-tracks`,
+`/api/geocode`, `/api/personas`, каталоги сообщества), с причинами — в
+`NOT_FOR_LISTENERS` теста.
+
+**Список сверяется при каждом обновлении апстрима** —
+[`tests/test_apache_rule.py`](../tests/test_apache_rule.py) в быстром наборе станции.
+Он прогоняет регэкспы правила по таблице путей и вариантам регистра, собирает маршруты
+контроллера из `controller/src/routes` (каждый под `requireAdmin` обязан быть закрыт
+снаружи своим методом, каждый открытый — в списке или в исключениях с причиной) и
+вызовы `web/lib/stationClient.ts` и `app/src/lib/api.ts` (каждый обязан проходить).
+Новая ручка апстрима без `requireAdmin` роняет тест, пока её не разнесут.
+
+**Проверка на живом Apache** — после `graceful`, не одним точным путём: сузить сети в
+правиле до заведомо чужой (`Require ip 203.0.113.0/24` в обеих секциях) и пройти
+таблицу — `/admin`, `/Room/admin`, `/API/settings`, `/api/stations`, `/api/admin-auth`,
+`POST /api/stream-stop`, `PUT /api/schedule` отдают 403, а `/`,
+`/manifest.webmanifest`, `/room/messages`, `/api/now-playing`, `/API/Now-Playing`,
+`/api/onboarding/status` и `GET /api/schedule` — 200; потом сети вернуть. Из дома
 запрос по этому же имени приходит с <router> (петля на роутере) и проходит; прямой
 вход `http://<station-host>:7700/admin` от правила не зависит вовсе.
 
@@ -414,7 +480,9 @@ OG-теги и sitemap; пока там стоял `http://<station-host>:7700`,
 `X-Forwarded-*` для пиров вне своего `trusted_proxies` (там только сети Cloudflare), а
 Apache туда не входит. Следствие — таблица Listeners и per-IP лимиты контроллера
 считают всех за одного. Лечится доверием к адресу Apache в Caddyfile, но у этого свой
-риск: `:7700` открыт в LAN, и оттуда заголовок можно подделать. Оставлено как есть.
+риск: `:7700` открыт в LAN, и оттуда заголовок можно подделать. Оставлено как есть —
+кроме блокировки входа в админку, ключуемой тем же адресом: её снимает белый список
+`/api` выше.
 
 ### Как установить и почему браузер сам не предлагает
 
