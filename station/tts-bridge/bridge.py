@@ -149,7 +149,12 @@ def lease_after_failed_health() -> bool:
         finally:
             lock.release()
 
-    threading.Thread(target=run, daemon=True).start()
+    try:
+        threading.Thread(target=run, daemon=True).start()
+    except RuntimeError as e:          # «can't start new thread»: замок занят навсегда
+        lock.release()
+        print(f"bridge: аренда из /health не запущена: {e}", flush=True)
+        return False
     return True
 
 

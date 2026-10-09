@@ -428,6 +428,26 @@ def test_health_does_not_wait_for_the_lease_and_runs_one_at_a_time(monkeypatch, 
         assert finished.wait(5)
 
 
+def test_failed_thread_start_does_not_jam_the_lease(monkeypatch, health_leases):
+    # Thread.start() стоял вне try: при «can't start new thread» замок оставался занят,
+    # и аренда из /health молчала до перезапуска мостика
+    monkeypatch.setattr(bridge, "HEALTH_LEASE_EVERY", 0)
+
+    class NoThread:
+        def __init__(self, *a, **kw):
+            pass
+
+        def start(self):
+            raise RuntimeError("can't start new thread")
+
+    real_thread = bridge.threading.Thread
+    monkeypatch.setattr(bridge.threading, "Thread", NoThread)
+    assert bridge.lease_after_failed_health() is False
+    monkeypatch.setattr(bridge.threading, "Thread", real_thread)
+    assert bridge.lease_after_failed_health() is True       # тот же замок свободен
+    assert health_leases.acquire(timeout=5)
+
+
 @pytest.mark.parametrize("ago", [None, 1801.0], ids=["never-spoke", "spoke-long-ago"])
 def test_health_does_not_lease_when_the_station_is_not_speaking(monkeypatch, health_leases, ago):
     # контроллер спрашивает /health раз в 30 с и ночью без слушателей: аренда из /health
