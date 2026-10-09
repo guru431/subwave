@@ -111,9 +111,10 @@ export function usePlayer({ initialVolume = 1, opusEnabled = null }: UsePlayerOp
 
   // Restore the listener's last-used volume (#783). Effect-only, so SSR and first paint
   // stay on the default; `hydrated` keeps it from racing the persist effect below.
+  // Fork (W05): a stored mute is not restored on iOS — see loadVolumePref.
   const hydratedRef = useRef(false);
   useEffect(() => {
-    const stored = loadVolumePref();
+    const stored = loadVolumePref({ ios: isIOSDevice() });
     if (stored !== null) {
       setVolume(stored);
       preMuteVolume.current = stored > 0 ? stored : preMuteVolume.current;

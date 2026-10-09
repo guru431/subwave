@@ -8,15 +8,22 @@
 const STORAGE_KEY = 'subwave-volume';
 
 /** Null when nothing valid is stored, so the caller keeps its own default.
- *  Null on the server. */
-export function loadVolumePref(): number | null {
+ *  Null on the server.
+ *
+ *  Fork (W05): with `ios`, a stored 0 reads as null too. Volume 0 rides the
+ *  element's `muted` flag (usePlayer), and on iOS that is the ONLY thing it
+ *  does: the hardware buttons never clear `muted` and the level slider is
+ *  inert there, so a mute restored at load had no way out but finding the
+ *  mute button. A mute on iPhone now lasts the session, not the install. */
+export function loadVolumePref({ ios = false }: { ios?: boolean } = {}): number | null {
   if (typeof window === 'undefined') return null;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw === null) return null;
     const v = Number(raw);
     if (!Number.isFinite(v)) return null;
-    return Math.min(1, Math.max(0, v));
+    const clamped = Math.min(1, Math.max(0, v));
+    return ios && clamped === 0 ? null : clamped;
   } catch {
     return null;
   }
