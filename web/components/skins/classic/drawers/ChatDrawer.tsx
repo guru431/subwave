@@ -1,12 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { listener, setNotifyEnabled, LISTENER_NAME_MAX } from '@/lib/listener';
 import { askPermission, notifyState, readEnv, type NotifyState } from '@/lib/roomNotify';
-import { disablePush, enablePush } from '@/lib/roomPush';
+import { disablePush, enablePush, pushLost, watchPushLost } from '@/lib/roomPush';
 import type { FeedItem } from '@/lib/roomRules';
 
 const TEXT_MAX = 280;        // та же цифра, что у заказа (REQUEST_TEXT_MAX)
+const AT_BOTTOM_PX = 40;     // ближе к дну — читатель «внизу», лента его догоняет
 
 // Что написано вместо переключателя, когда включать нечего. Молчать нельзя:
 // невидимая причина читается как поломка.
@@ -30,7 +31,16 @@ export default function ChatDrawer({ items, send, sending }: ChatDrawerProps) {
   const [problem, setProblem] = useState<string | null>(null);
   const [notifyOn, setNotifyOn] = useState(false);
   const [state, setState] = useState<NotifyState>('ask');
+  // Подписку снял браузер (WebKit — за «тихие» push), а переподписка без жеста
+  // не удалась: галочка стоит, push мёртв. Молчать нельзя — нужно нажатие.
+  const lost = useSyncExternalStore(watchPushLost, pushLost, () => false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const feedRef = useRef<HTMLDivElement | null>(null);
+  // Был ли читатель у дна ДО новой строки: меряется на прокрутке, а новая
+  // строка удлиняет ленту без неё. Открытый ящик встаёт на последнее.
+  const atBottomRef = useRef(true);
+  // Своё только что отправленное видно, даже если человек листал историю.
+  const sentRef = useRef(false);
 
   useEffect(() => {
     const me = listener();
@@ -39,9 +49,19 @@ export default function ChatDrawer({ items, send, sending }: ChatDrawerProps) {
     setState(notifyState(readEnv()));
   }, []);
 
+  // Лента меняется и сама — строкой «сейчас играет» раз в трек, чужим
+  // сообщением, ответом ведущего. Тянуть вниз того, кто листает историю, —
+  // сбивать его с места; догоняем только стоящего у дна и только что писавшего.
   useEffect(() => {
+    if (!atBottomRef.current && !sentRef.current) return;
+    sentRef.current = false;
     bottomRef.current?.scrollIntoView({ block: 'end' });
   }, [items]);
+
+  const onFeedScroll = useCallback(() => {
+    const el = feedRef.current;
+    if (el) atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < AT_BOTTOM_PX;
+  }, []);
 
   const toggleNotify = useCallback(async () => {
     if (notifyOn) {
@@ -60,12 +80,22 @@ export default function ChatDrawer({ items, send, sending }: ChatDrawerProps) {
     if (on) void enablePush();
   }, [notifyOn]);
 
+  // То же включение, но из нажатия: подписку WebKit оформляет только по жесту.
+  const renewPush = useCallback(async () => {
+    const next = await askPermission();
+    setState(next);
+    if (next === 'ready') void enablePush();
+  }, []);
+
   const submit = useCallback(async () => {
     if (sending) return;
     const before = listener().name;
     const problemText = await send(text, name);
     setProblem(problemText);
-    if (!problemText) setText('');
+    if (!problemText) {
+      setText('');
+      sentRef.current = true;
+    }
     // По имени из подписки комната узнаёт автора на его другом устройстве:
     // сменившееся имя должно доехать и туда, иначе своё сообщение зазвенит
     const me = listener();
@@ -74,7 +104,14 @@ export default function ChatDrawer({ items, send, sending }: ChatDrawerProps) {
 
   return (
     <div className="flex h-full flex-col gap-3">
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* role=log: новые строки скринридер объявляет сам, не перебивая */}
+      <div
+        ref={feedRef}
+        onScroll={onFeedScroll}
+        role="log"
+        aria-live="polite"
+        className="min-h-0 flex-1 overflow-y-auto"
+      >
         {items.length === 0 ? (
           <div className="text-[13px] leading-relaxed text-muted">
             Пока тихо. Напишите — ведущий читает чат и отвечает в эфире.
@@ -143,6 +180,15 @@ export default function ChatDrawer({ items, send, sending }: ChatDrawerProps) {
             {sending ? 'Отправляю…' : 'Отправить'}
           </button>
         </div>
+        {notifyOn && lost && (state === 'ask' || state === 'ready') && (
+          <button
+            type="button"
+            onClick={() => void renewPush()}
+            className="self-start text-left text-[11px] text-vermilion underline"
+          >
+            Уведомления отключены — включите заново
+          </button>
+        )}
       </div>
     </div>
   );

@@ -104,11 +104,25 @@ async function networkFirst(request) {
   }
 }
 
+// WebKit — Safari и любой браузер на iOS. Узнаётся по строке агента: движка
+// service worker не сообщает. `AppleWebKit` пишут и Chromium-браузеры, но у
+// всех них есть токен `Chrome/` (Edge, Opera, Samsung — тоже), а у iOS-сборок
+// Chrome и Edge его нет (`CriOS/`, `EdgiOS/`) — они и есть WebKit. `Safari/`
+// не годится как признак: у установленного на iPhone приложения его в строке нет.
+function isWebKit(ua) {
+  return /AppleWebKit\//.test(ua) && !/\b(Chrome|Chromium|Edg)\//.test(ua);
+}
+
 // Web Push комнаты (station/room/push.py): важное в чате при закрытой вкладке.
 // Открытая и видимая вкладка скажет сама — тостом, и вторая карточка об одном
 // была бы шумом. Тег `subwave-chat` — тот же, что у уведомления страницы
 // (lib/roomNotify.ts): живая скрытая вкладка и push-сервис не выстроят в
 // шторке двух карточек об одном сообщении, вторая заменит первую.
+//
+// Кроме WebKit: push, на который не вызван showNotification, он считает тихим и
+// после нескольких таких снимает подписку — а переподписка без жеста молча не
+// удаётся. Поэтому там уведомление показывается всегда, а при видимом окне
+// сразу закрывается: о сообщении и так скажет тост.
 self.addEventListener('push', (event) => {
   let data = {};
   try {
@@ -119,35 +133,47 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     (async () => {
       const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-      if (wins.some((w) => w.visibilityState === 'visible')) return;
+      const visible = wins.some((w) => w.visibilityState === 'visible');
+      const webkit = isWebKit((self.navigator && self.navigator.userAgent) || '');
+      if (visible && !webkit) return;
+      const tag = data.tag || 'subwave-chat';
       await self.registration.showNotification(data.title || 'AI радио', {
         body: data.body || '',
-        tag: data.tag || 'subwave-chat',
+        tag,
         icon: '/icons/192',
-        badge: '/icons/192',
+        // Android красит значок по альфа-каналу: у /icons/192 подложка
+        // непрозрачна, и в строке состояния вместо знака стоял квадрат.
+        badge: '/icons/badge',
         data: { url: data.url || '/?chat=1' },
       });
+      if (!visible) return;
+      const shown = await self.registration.getNotifications({ tag });
+      for (const n of shown) n.close();
     })()
   );
 });
 
-// Нажатие на уведомление: открытая вкладка станции поднимается и открывает чат,
+// Нажатие на уведомление: открытая вкладка плеера поднимается и открывает чат,
 // иначе открывается новая — с `?chat=1`, по которому плеер откроет его сам.
+// Вкладка плеера — та, чей путь совпадает с адресом уведомления (`/`): любая
+// вкладка сайта не годится — `room:open-chat` слушает только плеер, и у
+// владельца первой оказывалась админка, где чат не открывался.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const url = new URL((event.notification.data && event.notification.data.url) || '/?chat=1',
-    self.location.origin).href;
+  const target = new URL((event.notification.data && event.notification.data.url) || '/?chat=1',
+    self.location.origin);
   event.waitUntil(
     (async () => {
       const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
       for (const w of wins) {
-        if (new URL(w.url).origin === self.location.origin && 'focus' in w) {
+        const at = new URL(w.url);
+        if (at.origin === target.origin && at.pathname === target.pathname && 'focus' in w) {
           await w.focus();
           w.postMessage({ type: 'room:open-chat' });
           return;
         }
       }
-      await self.clients.openWindow(url);
+      await self.clients.openWindow(target.href);
     })()
   );
 });

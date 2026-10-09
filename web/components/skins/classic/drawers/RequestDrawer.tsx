@@ -324,45 +324,49 @@ export default function RequestDrawer({
               </div>
             </div>
 
-            {resolved?.exact && (
-              <p className="mt-3 text-[11px] leading-relaxed text-muted">
-                Нашёл в коллекции:{' '}
-                <span className="text-ink">{resolved.exact.artist} — {resolved.exact.title}</span>
-              </p>
-            )}
-            {resolved && !resolved.exact && resolved.alternatives.length > 0 && (
-              <div className="mt-3 flex flex-col gap-1">
-                <p className="text-[11px] leading-relaxed text-muted">
-                  Точного совпадения нет. Может быть, это:
+            {/* Результат сверки скринридер объявляет сам: обёртка в DOM всегда,
+                иначе живую область, появившуюся вместе с текстом, не озвучат. */}
+            <div aria-live="polite">
+              {resolved?.exact && (
+                <p className="mt-3 text-[11px] leading-relaxed text-muted">
+                  Нашёл в коллекции:{' '}
+                  <span className="text-ink">{resolved.exact.artist} — {resolved.exact.title}</span>
                 </p>
-                {resolved.alternatives.map(c => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => {
-                      const text = `${c.artist} — ${c.title}`;
-                      setPick(bindPick(c.id, text));
-                      setRequestText(text);
-                      taRef.current?.focus();
-                    }}
-                    className={cn(
-                      'v3-focus rounded border px-2 py-1 text-left text-[11px]',
-                      songId === c.id
-                        ? 'border-vermilion text-ink'
-                        : 'border-soft-border text-muted',
-                    )}
-                  >
-                    {c.artist} — {c.title}
-                  </button>
-                ))}
-              </div>
-            )}
-            {resolved && !resolved.exact && resolved.alternatives.length === 0 && (
-              <p className="mt-3 text-[11px] leading-relaxed text-muted">
-                В коллекции такого нет. Можно всё равно отправить — ведущий читает
-                записку целиком и подберёт что-то близкое.
-              </p>
-            )}
+              )}
+              {resolved && !resolved.exact && resolved.alternatives.length > 0 && (
+                <div className="mt-3 flex flex-col gap-1">
+                  <p className="text-[11px] leading-relaxed text-muted">
+                    Точного совпадения нет. Может быть, это:
+                  </p>
+                  {resolved.alternatives.map(c => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => {
+                        const text = `${c.artist} — ${c.title}`;
+                        setPick(bindPick(c.id, text));
+                        setRequestText(text);
+                        taRef.current?.focus();
+                      }}
+                      className={cn(
+                        'v3-focus rounded border px-2 py-1 text-left text-[11px]',
+                        songId === c.id
+                          ? 'border-vermilion text-ink'
+                          : 'border-soft-border text-muted',
+                      )}
+                    >
+                      {c.artist} — {c.title}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {resolved && !resolved.exact && resolved.alternatives.length === 0 && (
+                <p className="mt-3 text-[11px] leading-relaxed text-muted">
+                  В коллекции такого нет. Можно всё равно отправить — ведущий читает
+                  записку целиком и подберёт что-то близкое.
+                </p>
+              )}
+            </div>
 
             <p className="mt-3 text-[11px] leading-relaxed text-muted">
               Опишите настроение, воспоминание, артиста. Ведущий прочтёт записку,
