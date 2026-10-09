@@ -1,9 +1,10 @@
 # Зависимости быстрого набора (PEP 735): `pip install --group test`, pip ≥ 25.1.
-# numpy — тесты службы F5 (tts-f5), starlette — разбор её формы,
-# cryptography — Web Push комнаты; тяжёлое (torch, f5_tts, fastapi, ruaccent)
-# тесты подменяют заглушками и здесь не нужно.
+# numpy — тесты службы F5 (tts-f5), starlette — разбор её формы, num2words —
+# числа словами в F5 (версия — как в tts-f5/requirements.txt), cryptography —
+# Web Push комнаты; тяжёлое (torch, f5_tts, fastapi, ruaccent) тесты подменяют
+# заглушками и здесь не нужно.
 [dependency-groups]
-test = ["pytest", "pytest-timeout", "numpy", "starlette", "cryptography"]
+test = ["pytest", "pytest-timeout", "numpy", "starlette", "num2words==0.5.14", "cryptography"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
