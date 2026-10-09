@@ -184,6 +184,18 @@ def test_feed_is_kept_for_a_week_by_default(store):
     assert [m["id"] for m in store.since(0, 10)] == [kept["id"]]
 
 
+def test_prune_on_read_runs_at_most_once_per_interval(store):
+    # путь чтения открыт наружу: DELETE с commit на каждый запрос — лишняя
+    # работа, а при сроке хранения в неделю десять минут ничего не решают
+    store.add("l1", "Аня", "древнее", now=T0 - timedelta(days=30))
+    assert store.prune_on_read(now=T0) == 1
+    store.add("l1", "Аня", "тоже древнее", now=T0 - timedelta(days=30))
+    assert store.prune_on_read(now=T0 + timedelta(minutes=1)) == 0
+    assert len(store.since(0, 10)) == 1
+    assert store.prune_on_read(now=T0 + store_mod.PRUNE_READ_EVERY) == 1
+    assert store.since(0, 10) == []
+
+
 def test_reopened_store_keeps_messages(tmp_path):
     path = str(tmp_path / "room.db")
     s = store_mod.Store(path)

@@ -12,6 +12,7 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
@@ -216,6 +217,16 @@ def test_feed_limit_is_capped_whatever_the_client_asks(room):
         code, body = call(base, path)
         assert code == 200 and len(body["messages"]) == 50
         assert body["messages"][-1]["text"] == "сообщение 59"
+
+
+def test_unread_never_serves_what_is_past_retention(room):
+    # чистка шла только при записи: тихий чат хранил старое сколь угодно
+    # долго, и ведущий получал сообщения давностью больше срока хранения
+    base, store, _ = room
+    store.add("l1", "Аня", "давнее", now=datetime(2020, 1, 1, tzinfo=timezone.utc))
+    store.add("l1", "Аня", "свежее")
+    _, body = call(base, "/unread")
+    assert [m["text"] for m in body["messages"]] == ["свежее"]
 
 
 def test_unread_returns_only_what_is_newer(room):

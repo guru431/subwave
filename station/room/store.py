@@ -76,6 +76,8 @@ PUSH_GONE = (404, 410)
 # поэтому короткая память — часть защиты; неделя — то, что нужно от чата
 # ведущему и слушателям.
 RETENTION_DAYS = 7
+# Как часто чистить ленту на пути чтения (`prune_on_read`)
+PRUNE_READ_EVERY = timedelta(minutes=10)
 
 
 def _iso(moment: datetime) -> str:
@@ -103,6 +105,7 @@ class Store:
         self.db.commit()
         self.retention_days = retention_days
         self.lock = threading.Lock()
+        self._read_pruned_at: datetime | None = None
 
     def _migrate(self, now: datetime) -> None:
         """Довести базу прежней схемы. `CREATE TABLE IF NOT EXISTS` заводит
@@ -187,6 +190,22 @@ class Store:
             cur = self.db.execute("DELETE FROM messages WHERE at <= ?", (edge,))
             self.db.commit()
         return cur.rowcount
+
+    def prune_on_read(self, now: datetime | None = None) -> int:
+        """`prune()` для пути чтения — не чаще раза в PRUNE_READ_EVERY.
+
+        Чистка шла только при записи, и тихий чат хранил старое сколь угодно
+        долго: ведущий получал сообщения давностью больше срока хранения.
+        Путь чтения открыт наружу, поэтому DELETE с commit на каждый запрос —
+        лишняя работа, а при сроке в неделю десять минут ничего не решают.
+        """
+        now = now or datetime.now(timezone.utc)
+        with self.lock:
+            if (self._read_pruned_at is not None
+                    and now - self._read_pruned_at < PRUNE_READ_EVERY):
+                return 0
+            self._read_pruned_at = now
+        return self.prune(now)
 
     def subscribe(self, sub: dict, listener_id: str, name: str,
                   now: datetime | None = None, cap: int | None = None,
