@@ -103,7 +103,12 @@ def fetch(url: str, timeout: float = TIMEOUT) -> tuple[int | None, object, str]:
         with urllib.request.urlopen(url, timeout=timeout) as r:
             code, raw = r.status, r.read()
     except urllib.error.HTTPError as e:
-        code, raw = e.code, e.read()
+        code = e.code
+        try:
+            raw = e.read()
+        except (http.client.HTTPException, OSError):
+            # тело 5xx оборвалось — код уже есть, сбой виден и без тела
+            raw = b""
     except (urllib.error.URLError, http.client.HTTPException, OSError, TimeoutError) as e:
         return None, None, f"{type(e).__name__}: {e}"
     try:
@@ -115,6 +120,16 @@ def fetch(url: str, timeout: float = TIMEOUT) -> tuple[int | None, object, str]:
 def _http_problem(code, body) -> str:
     tail = f" {json.dumps(body, ensure_ascii=False)[:120]}" if body is not None else ""
     return f"HTTP {code}{tail}"
+
+
+def _clock(epoch_ms) -> str:
+    """« с ЧЧ:ММ» по времени контроллера в мс; непригодное — пустая строка."""
+    if not isinstance(epoch_ms, (int, float)):
+        return ""
+    try:
+        return f" с {datetime.fromtimestamp(epoch_ms / 1000):%H:%M}"
+    except (OverflowError, OSError, ValueError):
+        return ""
 
 
 def _stream_problem(code, body, err, now: float) -> str | None:
@@ -163,10 +178,7 @@ def check(cfg: dict[str, str], now: float, get=fetch) -> dict[str, str | None]:
     elif code != 200 or not isinstance(body, dict):
         out["air"] = "/api/state: " + _http_problem(code, body)
     elif body.get("musicStarved") is True:
-        since = body.get("musicStarvedSince")
-        out["air"] = "музыка на аварийной петле" + (
-            f" с {datetime.fromtimestamp(since / 1000):%H:%M}"
-            if isinstance(since, (int, float)) else "")
+        out["air"] = "музыка на аварийной петле" + _clock(body.get("musicStarvedSince"))
     else:
         out["air"] = None
 
@@ -248,18 +260,31 @@ def notify(cmd: str, text: str) -> bool:
     return True
 
 
+def _valid_entry(entry) -> bool:
+    return (isinstance(entry, dict)
+            and isinstance(entry.get("since"), (int, float))
+            and not isinstance(entry.get("since"), bool)
+            and isinstance(entry.get("alerted", False), bool))
+
+
 def load_state(path: Path) -> dict:
+    """Состояние прошлых запусков; непригодное — пустое.
+
+    Испорченное состояние стоит в худшем случае повторного сообщения, а не
+    молчащего сторожа: запись без `since` или не объект иначе роняла `step`.
+    """
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
     except (OSError, ValueError) as e:
-        # испорченное состояние стоит в худшем случае повторного сообщения,
-        # а не молчащего сторожа
         print(f"{path}: состояние не прочитано ({e}) — начинаю с чистого",
               file=sys.stderr)
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict) or not all(_valid_entry(v) for v in data.values()):
+        print(f"{path}: состояние другой формы — начинаю с чистого", file=sys.stderr)
+        return {}
+    return data
 
 
 def save_state(path: Path, state: dict) -> None:

@@ -5,6 +5,7 @@
 недоставленное сообщение не теряется.
 """
 import importlib.util
+import io
 import json
 import sys
 import threading
@@ -263,6 +264,50 @@ def test_failed_notify_is_an_error_and_is_retried(station, tmp_path):
     assert watch.main([], now=lambda: T0, environ=env, env_file=absent) == 1
     state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
     assert state["room"]["alerted"] is False
+
+
+# ── сторож не падает сам ─────────────────────────────────────────────────────
+#
+# Упавший сторож молчит так же, как молчит эфир, — и в задаче планировщика это
+# лишь ненулевой код. Чтение тела ответа 5xx и состояние чужой формы роняли его.
+
+def test_unreadable_error_body_is_a_failure_not_a_crash(monkeypatch):
+    class Reset(io.BytesIO):
+        def read(self, *a):
+            raise ConnectionResetError(10054, "reset by peer")
+
+    def bad_gateway(url, timeout=None):
+        raise watch.urllib.error.HTTPError(url, 502, "Bad Gateway", {}, Reset())
+    monkeypatch.setattr(watch.urllib.request, "urlopen", bad_gateway)
+    assert watch.fetch("http://station:7700/api/health")[0] == 502
+    got = watch.check({"TTS_BRIDGE_URL": "http://b", "WATCH_STATION_URL": "http://s"}, T0)
+    assert got["api"].startswith("HTTP 502") and got["room"].startswith("HTTP 502")
+
+
+def test_absurd_starve_time_does_not_crash(station):
+    cfg, routes = station
+    routes["/api/state"] = (200, {"musicStarved": True, "musicStarvedSince": 1e30})
+    assert watch.check(cfg, T0)["air"] == "музыка на аварийной петле"
+
+
+@pytest.mark.parametrize("content", [
+    '{"room": {"alerted": true}}',              # нет since
+    '{"room": "сбой"}',                         # запись не объект
+    '{"room": {"since": "вчера", "alerted": true}}',
+    '[1, 2]',
+    'не JSON',
+])
+def test_state_of_another_shape_starts_clean(station, tmp_path, capsys, content):
+    cfg, routes = station
+    routes["/room/health"] = (502, {})
+    (tmp_path / "state.json").write_text(content, encoding="utf-8")
+    env = _env(cfg, tmp_path)
+    assert watch.main([], now=lambda: T0, environ=env,
+                      env_file=tmp_path / "absent.env") == 1
+    captured = capsys.readouterr()
+    assert "СБОЙ комната" in captured.out          # начал с чистого и сообщил
+    state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert state["room"]["since"] == T0
 
 
 # ── настройки ────────────────────────────────────────────────────────────────
