@@ -12,7 +12,8 @@ persona.language переписывает годы английскими сло
 - Порядковое с дефисом — по окончанию: «1960-х», «80-е», «1969-го», «3-й».
 - Число с месяцем — порядковое среднего рода: «9 октября» — «девятое», «с 1 по 5
   октября» — «с первого по пятое».
-- «№ 1» — «номер один»; «100%-ный» — «стопроцентный» (числа 1–100).
+- «№ 1» — «номер один»; «100%-ный» — «стопроцентный», «25-летие» — «двадцатипятилетие»
+  (числа 1–100; дальше — цифрами).
 - Год без слова «год» — по предлогу перед ним: «в 1988» — «восьмом».
 - Проценты и градусы — с согласованием: «1 процент, 2 процента, 5 процентов».
 - Прочее — количественное: род 1 и 2 — по окончанию следующего слова («1 песня»
@@ -29,8 +30,19 @@ from num2words import num2words
 _CYR = "А-Яа-яЁё"
 _LETTER = f"A-Za-z{_CYR}"
 # «300 000» — одно число: разряды через пробел, неразрывный или узкий неразрывный. Длиннее
-# 15 цифр — не число, а мусор: его оставляет как есть и предел int() на 4300 цифр не роняет
-_NUM = r"\d{1,3}(?:[ \N{NO-BREAK SPACE}\N{NARROW NO-BREAK SPACE}]\d{3}){1,4}(?!\d)|\d{1,15}(?:[.,]\d{1,3})?(?!\d)"
+# 15 цифр — не число, а мусор: его оставляет как есть и предел int() на 4300 цифр не роняет.
+# Дробь — только через запятую: точка между цифрами — время, дата или версия (_DOT_CHAIN)
+_NUM = r"\d{1,3}(?:[ \N{NO-BREAK SPACE}\N{NARROW NO-BREAK SPACE}]\d{3}){1,4}(?!\d)|\d{1,15}(?:,\d{1,3})?(?!\d)"
+# «19.00», «15.10.2026», «1.2.3»: время в однозначном окружении («в 19.00», «7.15 утра»)
+# читается как время, прочее уходит в F5 цифрами, как до f5_numbers
+_DOT_CHAIN = re.compile(r"(?<![\w.,])\d+(?:\.\d+)+(?!\w)")
+_DOT_TIME = re.compile(r"([01]?\d|2[0-3])\.([0-5]\d)")
+_TIME_PREPS = {"в", "во", "к", "ко", "до", "с", "со", "после", "около"}
+_DAYPART = re.compile(r"\s+(?:утра|дня|вечера|ночи)(?!\w)")
+# Спрятанный фрагмент — знак из дополнительной области частного использования: его
+# не тронет ни одна регулярка, а после проходов он возвращается как был
+_HIDDEN = 0xF0000
+_HIDDEN_RE = re.compile("[\U000F0000-\U000FFFFD]")
 _SIGN = {"+": "плюс", "-": "минус", "−": "минус"}
 # знак — только приклеенный к числу и после пробела или начала: «−3°», не «3-5%»
 _SIGNED = r"(?:(?<![^\s(«„\"])([+\-−]))?"
@@ -83,6 +95,7 @@ _ENDINGS = {
     "м": ("p", "m", False), "ом": ("p", "m", False), "ым": ("i", "m", False),
     "я": ("n", "f", False), "ая": ("n", "f", False),
     "ю": ("a", "f", False), "ую": ("a", "f", False), "ой": ("g", "f", False),
+    "ей": ("g", "f", False),
     "е": ("n", "n", False), "ое": ("n", "n", False), "ые": ("n", "m", True),
     "х": ("p", "m", True), "ых": ("p", "m", True),
     "ми": ("i", "m", True), "ыми": ("i", "m", True),
@@ -107,14 +120,22 @@ _YEAR_WORD = re.compile(r"(?<![\w.,])(\d{1,4})(?:\s*[–—-]\s*(\d{1,4}))?"
 _GOD_FORMS = {False: {"n": "год", "g": "года", "d": "году", "p": "году", "i": "годом"},
               True: {"n": "годы", "g": "годов", "d": "годам", "p": "годах", "i": "годами"}}
 _SENTENCE_NEXT = re.compile(r"\s*$|\s+[A-ZА-ЯЁ«\"]")
-_SUFFIX = re.compile(r"(?<![\w.,])(\d{1,15})-(" + "|".join(sorted(_ENDINGS, key=len, reverse=True))
-                     + r"|ти)(?!\w)")
+_SUFFIX = re.compile(r"(?<![\w.,])(\d{1,3}(?:[ \N{NO-BREAK SPACE}\N{NARROW NO-BREAK SPACE}]\d{3})"
+                     r"{1,4}|\d{1,15})-(" + "|".join(sorted(_ENDINGS, key=len, reverse=True))
+                     + r"|ти|мя)(?!\w)")
+# «25-летие», «2-часовой», «1-комнатная»: первая часть сложного слова — та же, что у
+# «N%-ный»; окончания порядковых _SUFFIX уже унёс
+_COMPOUND = re.compile(rf"(?<![\w.,])(\d{{1,15}})-([{_CYR}]{{3,}})")
 _DATE = re.compile(rf"(?<![\w.,])(3[01]|[12]?\d)(\s+(?:{'|'.join(_MONTHS)}))(?!\w)",
                    re.IGNORECASE)
 _BARE_YEAR = re.compile(r"(?<![\w.,])(1[89]\d\d|20\d\d)(?:\s*[–—-]\s*(1[89]\d\d|20\d\d))?"
                         r"(?![.,]?\d)(?!\w)")
 _CLOCK = re.compile(r"(?<![\w.,:])([01]?\d|2[0-3]):([0-5]\d)(?![\w:])")
-_COUNT = re.compile(rf"(?:(?<![^\s(«„\"])([+−]))?(?<![\w.,])({_NUM})(?![\w])")
+# «1+1» — «один плюс один»: «+» перед гласной RUAccent приняла бы за ручное ударение и
+# оставила без разметки всю реплику (f5_accent.Accentizer.apply)
+_PLUS = re.compile(r"(?<=\d)\s*\+\s*(?=\d)")
+# знак — как у _MEASURE: «до -10» — «до минус десяти», а «2-3» знака не несёт
+_COUNT = re.compile(rf"{_SIGNED}(?<![\w.,])({_NUM})(?![\w])")
 
 _LATIN_BEFORE = re.compile(r"[A-Za-z][\w'’&]*[ \-/]*$")
 _LATIN_AFTER = re.compile(r"^[ \-/]*[A-Za-z]")
@@ -205,19 +226,29 @@ def _numero(m) -> str:
     return f"номер {_cardinal(m.group(1))}"
 
 
+def _compound_stem(n: int) -> str | None:
+    """Первая часть сложного слова: «двадцатипяти-», «сорока-», «сто-»; вне 1–100 — None."""
+    if not 1 <= n <= 100:
+        return None
+    if n == 100:
+        return "сто"
+    if n < 20:
+        return _ADJ_UNITS[n]
+    return _ADJ_TENS[n // 10] + _ADJ_UNITS[n % 10]
+
+
 def _percent_adj(m) -> str:
     """«100%-ный» — «стопроцентный», «25%-ная» — «двадцатипятипроцентная»; вне 1–100
     остаётся как есть и читается дальше как проценты."""
-    n, ending = int(m.group(1)), m.group(2)
-    if not 1 <= n <= 100:
-        return m.group()
-    if n == 100:
-        stem = "сто"
-    elif n < 20:
-        stem = _ADJ_UNITS[n]
-    else:
-        stem = _ADJ_TENS[n // 10] + _ADJ_UNITS[n % 10]
-    return f"{stem}процент{ending}"
+    stem = _compound_stem(int(m.group(1)))
+    return f"{stem}процент{m.group(2)}" if stem else m.group()
+
+
+def _compound(m, hide) -> str:
+    """«25-летие» — «двадцатипятилетие»; вне 1–100 («200-летие») — цифрами: прочтений
+    больше одного, а «двести-летие» хуже обоих."""
+    stem = _compound_stem(int(m.group(1)))
+    return f"{stem}{m.group(2)}" if stem else hide(m)
 
 
 def _date_range(m) -> str:
@@ -265,8 +296,10 @@ def _year_word(m) -> str:
 
 def _suffix(m) -> str:
     num, ending = m.groups()
-    n = int(num)
-    decade = n >= 10 and n % 10 == 0
+    n = int(re.sub(r"\s", "", num))                      # «10 000-й»
+    decade = (n >= 10 and n % 10 == 0) or num == "00"    # «00-е» — «нулевые»
+    if ending == "мя":
+        return _cardinal(num, "i")                       # «с 2-мя хитами» — «двумя»
     if ending == "ти" or (ending in ("х", "ми") and not decade):
         return _cardinal(num, "g")                       # «из 3-х частей» — «трёх»
     case, gender, plural = _ENDINGS[ending]
@@ -308,41 +341,63 @@ def _clock(m) -> str:
     return f"{_cardinal(hours)} {said}"
 
 
-def _gender(num: str, case: str, after: str) -> str:
-    """Род количественного 1 и 2 — по окончанию следующего слова: «1 песня», «2 минуты»."""
+def _dot_chain(m, hide) -> str:
+    time = _DOT_TIME.fullmatch(m.group())
+    if time and (_word_before(m) in _TIME_PREPS or _DAYPART.match(_after(m))):
+        return _clock(time)
+    return hide(m)
+
+
+def _agree(num: str, case: str, after: str) -> tuple[str, str]:
+    """Падеж и род количественного 1 и 2 — по окончанию следующего слова: «1 песня»,
+    «2 минуты», «через 1 минуту» — винительный женского, «одну»."""
     if not num.isdigit():
-        return "m"
+        return case, "m"
     n = int(num)
     word = _WORD_AFTER.match(after)
     if not word or 11 <= n % 100 <= 14 or word.group(1).lower() in _LINKS:
-        return "m"
+        return case, "m"
     end = word.group(1).lower()[-1]
     if n % 10 == 1 and case == "n":
-        return "f" if end in "ая" else "n" if end in "оеё" else "m"
+        if end in "ую":
+            return "a", "f"
+        return case, "f" if end in "ая" else "n" if end in "оеё" else "m"
     if (n % 10 == 1 and case == "g") or (n % 10 == 2 and case == "n"):
-        return "f" if end in "ыи" else "m"
-    return "m"
+        return case, "f" if end in "ыи" else "m"
+    return case, "m"
 
 
 def _count(m) -> str:
     sign, num = m.groups()
     if _latin_before(m) or _LATIN_AFTER.match(_after(m)):
         return m.group()
-    case = _COUNT_CASE.get(_word_before(m), "n")
-    words = _cardinal(num, case, _gender(num, case, _after(m)))
+    case, gender = _agree(num, _COUNT_CASE.get(_word_before(m), "n"), _after(m))
+    words = _cardinal(num, case, gender)
     return f"{_SIGN[sign]} {words}" if sign else words
 
 
-def normalize(text: str) -> str:
+def normalize(text: str, keep: re.Pattern | None = None) -> str:
     """Цифры, `%`, `°`, `$`, mph и км/ч — словами. Порядок проходов — от узкого к
     общему: единицы и годы со словом «год» уносят свои числа раньше, чем их прочтут
-    количественными."""
+    количественными. keep — фрагменты, которые числа не трогают: имена из словаря
+    коллекции («Links 2 3 4», «Song #1») читает он, а соседнее слово этого не видит."""
     if not re.search(r"\d", text):
         return text
+    hidden = []
+
+    def hide(m):
+        hidden.append(m.group())
+        return chr(_HIDDEN + len(hidden) - 1)
+
+    if keep is not None:
+        text = keep.sub(lambda m: hide(m) if re.search(r"\d", m.group()) else m.group(), text)
+    text = _DOT_CHAIN.sub(lambda m: _dot_chain(m, hide), text)
+    text = _PLUS.sub(" плюс ", text)
     for pattern, fn in ((_NUMERO, _numero), (_PERCENT_ADJ, _percent_adj),
                         (_MEASURE, _measure), (_MONEY, _money), (_SPEED, _speed),
-                        (_YEAR_WORD, _year_word), (_SUFFIX, _suffix), (_DATE_RANGE, _date_range),
+                        (_YEAR_WORD, _year_word), (_SUFFIX, _suffix),
+                        (_COMPOUND, lambda m: _compound(m, hide)), (_DATE_RANGE, _date_range),
                         (_DATE, _date), (_BARE_YEAR, _bare_year), (_CLOCK, _clock),
                         (_COUNT, _count)):
         text = pattern.sub(fn, text)
-    return text
+    return _HIDDEN_RE.sub(lambda m: hidden[ord(m.group()) - _HIDDEN], text)

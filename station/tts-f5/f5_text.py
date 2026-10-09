@@ -66,7 +66,11 @@ def load_dictionary(path: Path) -> dict[str, str]:
     if not path.exists():
         return {}
     data = json.loads(path.read_text(encoding="utf-8"))
-    return {**data["words"], **data["phrases"]}
+    words = {**data["words"], **data["phrases"]}
+    # значение не строкой уронило бы уже подстановку в cyrillize, посреди синтеза
+    if not all(isinstance(v, str) for v in words.values()):
+        raise TypeError("значения словаря должны быть строками")
+    return words
 
 
 class Dictionary:
@@ -106,7 +110,7 @@ class Dictionary:
                 return
             try:
                 words = load_dictionary(source)
-            except (OSError, ValueError, KeyError) as e:
+            except (OSError, ValueError, KeyError, TypeError) as e:     # TypeError — не та форма
                 self.log(f"pronunciation: {source} не прочитан ({type(e).__name__}: {e})")
                 if self._stamp is not None:
                     return              # словарь есть — держим его до следующей проверки

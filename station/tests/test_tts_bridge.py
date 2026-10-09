@@ -363,6 +363,8 @@ def health_leases(monkeypatch):
     monkeypatch.setattr(bridge, "lease_slot", leased.release)
     monkeypatch.setattr(bridge, "_health_lease_lock", threading.Lock())
     monkeypatch.setattr(bridge, "_health_lease_at", None)
+    # станция говорила только что: /speak внутри окна HEALTH_LEASE_WINDOW
+    monkeypatch.setattr(bridge, "_last_speak_at", bridge.time.monotonic())
     return leased
 
 
@@ -424,6 +426,49 @@ def test_health_does_not_wait_for_the_lease_and_runs_one_at_a_time(monkeypatch, 
     finally:
         release.set()
         assert finished.wait(5)
+
+
+def test_failed_thread_start_does_not_jam_the_lease(monkeypatch, health_leases):
+    # Thread.start() стоял вне try: при «can't start new thread» замок оставался занят,
+    # и аренда из /health молчала до перезапуска мостика
+    monkeypatch.setattr(bridge, "HEALTH_LEASE_EVERY", 0)
+
+    class NoThread:
+        def __init__(self, *a, **kw):
+            pass
+
+        def start(self):
+            raise RuntimeError("can't start new thread")
+
+    real_thread = bridge.threading.Thread
+    monkeypatch.setattr(bridge.threading, "Thread", NoThread)
+    assert bridge.lease_after_failed_health() is False
+    monkeypatch.setattr(bridge.threading, "Thread", real_thread)
+    assert bridge.lease_after_failed_health() is True       # тот же замок свободен
+    assert health_leases.acquire(timeout=5)
+
+
+@pytest.mark.parametrize("ago", [None, 1801.0], ids=["never-spoke", "spoke-long-ago"])
+def test_health_does_not_lease_when_the_station_is_not_speaking(monkeypatch, health_leases, ago):
+    # контроллер спрашивает /health раз в 30 с и ночью без слушателей: аренда из /health
+    # будила бы выгнанный слот круглые сутки, хотя говорить станции некому
+    monkeypatch.setattr(bridge, "HEALTH_LEASE_WINDOW", 1800)
+    monkeypatch.setattr(bridge, "_last_speak_at",
+                        None if ago is None else bridge.time.monotonic() - ago)
+    _health_upstream(monkeypatch, ok=False)
+    assert _get_health() == 503
+    assert bridge._health_lease_at is None
+
+
+def test_speak_opens_the_health_lease_window(monkeypatch, health_leases):
+    monkeypatch.setattr(bridge, "_last_speak_at", None)
+    _upstream(monkeypatch, [b"WAV"])
+    monkeypatch.setattr(bridge, "lease_slot", health_leases.release)     # _upstream его глушит
+    _FakeHandler('{"text":"а"}'.encode()).do_POST()
+    assert health_leases.acquire(timeout=5)                              # аренда самого /speak
+    _health_upstream(monkeypatch, ok=False)
+    assert _get_health() == 503
+    assert health_leases.acquire(timeout=5)                              # и из /health — тоже
 
 
 def test_prep_voice_takes_library_url_from_environment(monkeypatch):

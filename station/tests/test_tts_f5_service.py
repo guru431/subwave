@@ -235,6 +235,32 @@ class StrictAccent(FakeAccent):
         return text if "+" in text else super().apply(text)
 
 
+def test_numbers_failure_keeps_the_line(voices, monkeypatch):
+    """Сбой нормализации чисел давал 500, а подмена движка запрещена (C05): реплика
+    пропадала. Лучше цифры в эфире, чем тишина."""
+    import f5_numbers
+
+    def broken(text, keep=None):
+        raise ValueError("сломалось")
+
+    monkeypatch.setattr(f5_numbers, "normalize", broken)
+    logs, eng = [], FakeEngine()
+    r = S.Service(eng, voices, "ru-host", FakeAccent(), W.Worker(), queue_wait=1.0,
+                  log=logs.append).speak("В 1969 году.")
+    assert r.wav[:4] == b"RIFF" and eng.calls[0][3] == "В 1969 году."
+    assert any("numbers failed" in line and "сломалось" in line for line in logs)
+
+
+def test_plus_between_numbers_does_not_switch_the_accent_off(voices):
+    """«1+1» становилось «один+один», а «+о» RUAccent принимает за ручное ударение и
+    оставляет без разметки всю реплику."""
+    eng = FakeEngine()
+    S.Service(eng, voices, "ru-host", StrictAccent(), W.Worker(), queue_wait=1.0,
+              log=lambda *_: None).speak("Старый замок, а 1+1 и 2 + 2 всё ещё 4.")
+    assert " ".join(c[3] for c in eng.calls) == \
+        "Старый з+амок, а один плюс один и два плюс два всё ещё четыре."
+
+
 def test_collection_dictionary_goes_after_the_accent(voices, monkeypatch, tmp_path):
     # «+» словаря, попади он к RUAccent раньше, оставил бы без ударений всю реплику
     import json
@@ -248,6 +274,22 @@ def test_collection_dictionary_goes_after_the_accent(voices, monkeypatch, tmp_pa
     S.Service(eng, voices, "ru-host", StrictAccent(), W.Worker(), queue_wait=1.0,
               log=lambda *_: None).speak("Старый замок и Dire Straits.")
     assert eng.calls[0][3] == "Старый з+амок и Д+айр Стр+ейтс."
+
+
+def test_every_dictionary_key_with_digits_survives_the_numbers(monkeypatch):
+    """Числа читаются до словаря коллекции, а «рядом латиница» смотрит на одно соседнее
+    слово: «Links 2 3 4» становилось «Линкс 2 три четыре», «Song #1» — «Song #один», и
+    ключ словаря больше не совпадал. Фрагмент, который словарь узнаёт, числа не трогают."""
+    import f5_text
+    shipped = f5_text.Dictionary(f5_text.DICTIONARY_FILE, fallback=f5_text.DICTIONARY_FILE)
+    monkeypatch.setattr(f5_text, "DICTIONARY", shipped)
+    words, _ = shipped.current()
+    keys = [k for k in words if any(ch.isdigit() for ch in k)]
+    assert len(keys) > 50
+    broken = [k for k in keys
+              if f5_text.cyrillize(S.before_accent(f"Сейчас прозвучит {k}.")) !=
+              f"Сейчас прозвучит {words[k]}."]
+    assert broken == []
 
 
 def test_sentences_are_synthesized_apart_with_a_pause(voices):
