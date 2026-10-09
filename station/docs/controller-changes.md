@@ -1036,7 +1036,12 @@ git merge vX.Y.Z
    разошлось.
 6. **Проверка ветки.** `push-to-station.sh HEAD`, затем `run-tests.sh --src
    /home/<user>/radio --image "$UP"` — падения только из `KNOWN_SRC`; линтер на рабочей
-   машине — 0 ошибок.
+   машине — 0 ошибок. Быстрый набор станции (`cd station && python -m pytest`):
+   [test_upstream_pins.py](../tests/test_upstream_pins.py) падает, пока
+   `station/deploy/caddy/Caddyfile` не равен новому `docker/Caddyfile` плюс блок
+   `/room/*`, а `UPSTREAM_BASE`, `IMAGE` и теги `controller`/`web` в override не
+   догнали версию из `.release-please-manifest.json` — то есть до шага 7 он красный
+   намеренно.
 7. **Образы и выкатка.** Собрать `subwave-controller:X.Y.Z-ru` и
    `subwave-web:X.Y.Z-ru` ([web-changes.md](web-changes.md)), сменить теги в
    [docker-compose.override.yml](../deploy/docker-compose.override.yml) и
