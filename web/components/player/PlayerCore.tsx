@@ -182,6 +182,8 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
     boothFeed: feed.session.messages,
     personaAvatarUrl,
     personaName,
+    // Fork (W07): the same source as the classic header's station name.
+    stationName: typeof feed.dj?.station === 'string' ? feed.dj.station : null,
   });
 
   // useStationFeed returns a fresh object every render; its fields are
