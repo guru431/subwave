@@ -107,6 +107,39 @@ test('a pick moved later but still inside its own show stays', async () => {
   assert.deepEqual(order(), ['x1', 'b1', 'p2']);
 });
 
+// The forecast counts an UNSENT pick ahead as the drain will air it: cut at
+// the length cap and the trimmed silent tail, which are only stamped on the
+// item when it drains. Counted whole, q pushed p over the change and p was
+// dropped although it fits its own show — a wasted pick, and a model call to
+// replace it.
+const listenerRequest = (id: string, secs: number) => queue.push({ track: track(id, secs), requestedBy: 'alice' });
+
+test('an unsent pick ahead counts at its length cap, not its tagged length', async (t) => {
+  const cap = settings.get().maxTrackSeconds;
+  t.after(() => settings.update({ maxTrackSeconds: cap } as never));
+  await settings.update({ maxTrackSeconds: 200 } as never);
+  queue.upcoming = [
+    pick('x1', { sent: true, track: track('x1', 100) }),
+    pick('q', { track: track('q', 900) }),   // airs 200 s, not 900
+    pick('p'),
+  ] as never;
+  await listenerRequest('r', 30);            // p: 60+100+30+200 s (+120) — before the change
+  assert.deepEqual(order(), ['x1', 'r', 'q', 'p']);
+});
+
+test('an unsent pick ahead counts without its trimmed silent tail', async (t) => {
+  t.after(() => settings.update({ silenceTrim: { enabled: false } } as never));
+  await settings.update({ silenceTrim: { enabled: true } } as never);
+  queue.upcoming = [
+    pick('x1', { sent: true, track: track('x1', 100) }),
+    // 30 s of measured silence at the end: the drain cuts ~29.75 s of it.
+    pick('q', { track: { ...track('q', 300), leadSilenceMs: 0, tailStartMs: 270_000, tailSilenceMs: 30_000 } }),
+    pick('p'),
+  ] as never;
+  await listenerRequest('r', 30);            // p: 60+100+30+270.25 s (+120) = 580 s, before 600
+  assert.deepEqual(order(), ['x1', 'r', 'q', 'p']);
+});
+
 test('a pick chosen for the INCOMING show is never dropped for airing early', async () => {
   // Look-ahead picks for the next show are the handoff's business, not this
   // rule's: n1 was picked for the takeover yet is forecast before it (a skip or
