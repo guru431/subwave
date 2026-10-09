@@ -69,6 +69,63 @@ SETTINGS_PATCH_KEYS = (
     "beds", "silenceTrim", "ui", "privacy", "requests", "webhooks",
     "webhooksPolicy", "scrobble", "likes", "queue",
 )
+# устаревший синоним maxTrackSeconds: GET его не отдаёт, и терять тут нечего
+PATCH_ALIASES = ("maxTrackMinutes",)
+
+# Поля, которые `GET /settings` отдаёт редактированными: заданный секрет — 'set',
+# незаданный — ''. Копия перечня из getRedacted() (controller/src/settings/
+# store.ts), сверку держит test_onboard.py; `*` — любой ключ словаря. По имени
+# поля их не угадать: `sessionKey` и значения `llm.headers` под эвристику
+# SECRET_KEYS не попадают. На записи 'set' значит «оставить сохранённое» — на
+# новой станции сохранённого нет, и секрет молча теряется.
+REDACTED_PATHS = (
+    "llm.apiKey", "llm.headers.*", "llm.fallback.apiKey", "llm.fallback.headers.*",
+    "tts.cloud.apiKey", "tts.cloud.compatApiKey", "search.apiKey", "embedding.apiKey",
+    "scrobble.lastfm.apiKey", "scrobble.lastfm.apiSecret", "scrobble.lastfm.sessionKey",
+    "scrobble.listenbrainz.userToken", "privacy.password",
+)
+# редактируются, но в снимок не идут: llm.keys `POST /settings` не читает вовсе
+# (ключ активного провайдера едет в llm.apiKey), webhooks в values нет
+REDACTED_NOT_EXPORTED = ("llm.keys", "llm.keys.*", "webhooks.*.authHeader")
+# Пустой секрет в снимке. Не `***` — подставлять нечего — и не "": пустая строка
+# в llm.apiKey стирает ключ провайдера, только что записанный /onboarding/save.
+# Применение такой ключ не отправляет вовсе; вписать значение — отправит.
+EMPTY_SECRET = "<пусто>"
+
+
+def _secret_path(keys: tuple) -> bool:
+    for pattern in REDACTED_PATHS:
+        parts = pattern.split(".")
+        if len(parts) == len(keys) and all(p in ("*", k) for p, k in zip(parts, keys)):
+            return True
+    return any(s in str(keys[-1]).lower() for s in SECRET_KEYS)
+
+
+def _snapshot_secrets(value, keys: tuple = ()):
+    """Секреты снимка: заданный — `***` (подставить), пустой — EMPTY_SECRET."""
+    if isinstance(value, dict):
+        return {k: (("***" if v else EMPTY_SECRET)
+                    if isinstance(v, str) and _secret_path(keys + (k,))
+                    else _snapshot_secrets(v, keys + (k,)))
+                for k, v in value.items()}
+    if isinstance(value, list):
+        return [_snapshot_secrets(v, keys + ("*",)) for v in value]
+    return value
+
+
+def _drop_empty_secrets(value, keys: tuple = ()):
+    """(значение без пустых секретов, пути выброшенных) — их не отправляют."""
+    dropped = []
+    if isinstance(value, dict):
+        out = {}
+        for k, v in value.items():
+            if v == EMPTY_SECRET:
+                dropped.append(".".join(map(str, keys + (k,))))
+                continue
+            out[k], sub = _drop_empty_secrets(v, keys + (k,))
+            dropped += sub
+        return out, dropped
+    return value, dropped
 
 
 def env(required: tuple[str, ...] = REQUIRED) -> dict[str, str]:
@@ -79,12 +136,10 @@ def env(required: tuple[str, ...] = REQUIRED) -> dict[str, str]:
 
 
 def mask(value):
-    """Прячет секреты в выводе и в экспортируемом снимке.
+    """Прячет секреты в выводе (снимок маскирует `_snapshot_secrets`).
 
     Число, флаг и null секретом не бывают: `llm.dailyTokenCap` и
-    `llm.maxOutputTokens` попадают под «token» по имени, и звёздочки на их месте
-    делали любой снимок живой станции «замаскированным» — применить его было
-    нельзя.
+    `llm.maxOutputTokens` попадают под «token» по имени.
     """
     if isinstance(value, dict):
         return {k: ("***" if not isinstance(v, (int, float, type(None)))
@@ -155,6 +210,9 @@ def _load_snapshot(path: str):
               + ("; это ответ GET целиком (старый --export) — снимите заново"
                  if "values" in extra else ""), file=sys.stderr)
         return None
+    extra, skipped = _drop_empty_secrets(extra)
+    if skipped:
+        print("не отправляются (секрета не было): " + ", ".join(skipped))
     placeholders = [k for k, v in _flatten(extra) if v == "***"]
     if placeholders:
         print("в снимке остались замаскированные значения: "
@@ -245,13 +303,21 @@ def export_settings(e: dict[str, str], path: str) -> int:
         print("в ответе /settings нет настроек", file=sys.stderr)
         return 1
     snapshot = {k: v for k, v in values.items() if k in SETTINGS_PATCH_KEYS}
+    if isinstance(snapshot.get("llm"), dict) and "keys" in snapshot["llm"]:
+        snapshot["llm"] = {k: v for k, v in snapshot["llm"].items() if k != "keys"}
+        print("llm.keys не вошёл: POST /settings его не читает — ключ активного "
+              "провайдера едет в llm.apiKey, ключи прочих задаются в админке")
     with open(path, "w", encoding="utf-8") as out:
-        json.dump(mask(snapshot), out, ensure_ascii=False, indent=2)
+        json.dump(_snapshot_secrets(snapshot), out, ensure_ascii=False, indent=2)
         out.write("\n")
-    print(f"записано (секреты заменены на ***): {path}")
+    print(f"записано (заданные секреты — ***, пустые — {EMPTY_SECRET}): {path}")
     dropped = [k for k in values if k not in SETTINGS_PATCH_KEYS]
     if dropped:
         print("не вошли — POST /settings их не принимает: " + ", ".join(dropped))
+    absent = [k for k in SETTINGS_PATCH_KEYS if k not in values and k not in PATCH_ALIASES]
+    if absent:
+        print("не вошли — GET /settings их не отдаёт, перенести отдельным --patch: "
+              + ", ".join(absent))
     return 0
 
 
@@ -310,6 +376,9 @@ def apply_patch(e: dict[str, str], path: str, dry_run: bool = False) -> int:
     if not isinstance(patch, dict):
         print(f"{path}: патч должен быть объектом JSON", file=sys.stderr)
         return 1
+    patch, skipped = _drop_empty_secrets(patch)
+    if skipped:
+        print("не отправляются (секрета не было): " + ", ".join(skipped))
     masked = [k for k, v in _flatten(patch) if v == "***"]
     if masked:
         print("в патче остались замаскированные значения: " + ", ".join(masked)

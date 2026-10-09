@@ -219,6 +219,9 @@ def test_exported_snapshot_applies_after_secrets_are_filled(api, tmp_path):
               and c["url"].endswith("/api/settings")]
     assert len(posted) == 1
     assert set(posted[0]["payload"]) <= set(onboard.SETTINGS_PATCH_KEYS)
+    # пустые секреты (tts.cloud.*) не уезжают ни пустой строкой, ни меткой
+    assert onboard.EMPTY_SECRET not in json.dumps(posted[0]["payload"], ensure_ascii=False)
+    assert "apiKey" not in posted[0]["payload"]["tts"]["cloud"]
 
 
 def test_unknown_keys_are_named_before_anything_is_sent(api, tmp_path, capsys):
@@ -232,6 +235,99 @@ def test_unknown_keys_are_named_before_anything_is_sent(api, tmp_path, capsys):
     assert calls == []
     err = capsys.readouterr().err
     assert "minTrackSeconds" in err and "values" in err
+
+
+# ── секреты снимка: что отдаёт GET и что из этого делает POST ─────────────────
+#
+# getRedacted() (settings/store.ts) отдаёт секрет как 'set' (задан) или ''
+# (нет). На записи 'set' значит «оставить сохранённое» — на новой станции
+# сохранённого нет, и секрет молча теряется; '' в llm.apiKey стирает ключ
+# провайдера, только что записанный /onboarding/save. Маскировка по имени поля
+# пропускала sessionKey и значения llm.headers, а пустой секрет делала ***.
+
+REDACTED_TS = (Path(__file__).resolve().parents[2] / "controller" / "src"
+               / "settings" / "store.ts")
+
+
+def test_redacted_paths_match_the_controller():
+    text = REDACTED_TS.read_text(encoding="utf-8")
+    m = re.search(r"export function getRedacted\(\) \{(.*?)\n\}", text, re.S)
+    assert m, "getRedacted не найден в store.ts"
+    found = set()
+    for raw in re.findall(r"clone\.([\w.?\[\]]+?)\s*=(?!=)", m.group(1)):
+        found.add(re.sub(r"\[\w+\]", ".*", raw.replace("?", "")))
+    assert found, "разбор getRedacted ничего не нашёл"
+    ours = set(onboard.REDACTED_PATHS) | set(onboard.REDACTED_NOT_EXPORTED)
+    for path in found:
+        assert path in ours or path + ".*" in ours, f"{path}: новое редактируемое поле"
+    for path in onboard.REDACTED_PATHS:
+        assert path in found or path.removesuffix(".*") in found, f"{path}: его больше нет"
+
+
+def _export(api, tmp_path, values: dict) -> dict:
+    _, answers = api
+    answers[("GET", "/settings")] = (200, {"values": values, "defaults": {}})
+    out = tmp_path / "snapshot.json"
+    assert onboard.export_settings(ENV, str(out)) == 0
+    return json.loads(out.read_text(encoding="utf-8"))
+
+
+def test_set_secrets_outside_the_name_heuristic_are_masked(api, tmp_path):
+    data = _export(api, tmp_path, {
+        "llm": {"apiKey": "set", "headers": {"x-opencode-session": "set"}},
+        "scrobble": {"lastfm": {"username": "dj", "sessionKey": "set"}}})
+    assert data["llm"]["headers"]["x-opencode-session"] == "***"
+    assert data["scrobble"]["lastfm"]["sessionKey"] == "***"
+    assert data["scrobble"]["lastfm"]["username"] == "dj"
+
+
+def test_empty_secret_is_marked_not_masked(api, tmp_path):
+    data = _export(api, tmp_path, {"llm": {"apiKey": ""}, "privacy": {"password": ""},
+                                   "tts": {"cloud": {"apiKey": "set", "compatApiKey": ""}}})
+    assert data["llm"]["apiKey"] == onboard.EMPTY_SECRET
+    assert data["privacy"]["password"] == onboard.EMPTY_SECRET
+    assert data["tts"]["cloud"] == {"apiKey": "***", "compatApiKey": onboard.EMPTY_SECRET}
+
+
+def test_provider_key_map_is_left_out(api, tmp_path, capsys):
+    # llm.keys POST не читает вовсе: ключ активного провайдера едет в llm.apiKey
+    data = _export(api, tmp_path, {"llm": {"apiKey": "set",
+                                           "keys": {"openai-compatible": "set"}}})
+    assert "keys" not in data["llm"]
+    assert "llm.keys" in capsys.readouterr().out
+
+
+def test_empty_secret_is_not_sent_so_onboarding_key_survives(api, tmp_path):
+    calls, _ = api
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({
+        "llm": {"apiKey": onboard.EMPTY_SECRET, "reasoning": True},
+        "privacy": {"privatePlayer": False, "password": onboard.EMPTY_SECRET}},
+        ensure_ascii=False), encoding="utf-8")
+    assert onboard.run(ENV, str(settings)) == 0
+    posted = [c for c in calls if c["method"] == "POST"
+              and c["url"].endswith("/api/settings")][0]["payload"]
+    assert posted == {"llm": {"reasoning": True}, "privacy": {"privatePlayer": False}}
+
+
+def test_patch_with_empty_marker_does_not_send_it(api, tmp_path):
+    calls, answers = api
+    answers[("GET", "/settings")] = (200, {"llm": {"reasoning": True}})
+    patch = tmp_path / "p.json"
+    patch.write_text(json.dumps({"llm": {"apiKey": onboard.EMPTY_SECRET, "reasoning": True}},
+                                ensure_ascii=False), encoding="utf-8")
+    assert onboard.apply_patch(PATCH_ENV, str(patch)) == 0
+    assert calls[0]["payload"] == {"llm": {"reasoning": True}}
+
+
+def test_patch_keys_absent_from_get_are_named(api, tmp_path, capsys):
+    # skills, djSpeakClock, webhooks… GET /settings в values не отдаёт: в снимок
+    # они не попадают, и молчать об этом — значит потерять их при переносе
+    _export(api, tmp_path, {"station": "AI радио"})
+    out = capsys.readouterr().out
+    for key in ("djSpeakClock", "skills", "webhooks", "scheduleOverride"):
+        assert key in out
+    assert "maxTrackMinutes" not in out           # синоним maxTrackSeconds
 
 
 def test_missing_environment_is_named(monkeypatch):
