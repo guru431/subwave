@@ -51,6 +51,25 @@ REQUIRED = SUBWAVE_REQUIRED + (
 SECRET_KEYS = ("pass", "password", "apikey", "token", "secret")
 TIMEOUT = 30
 
+# Ключи, которые принимает `POST /settings`: копия SETTINGS_PATCH_KEYS из
+# controller/src/settings/patch-registry.ts, сверку с исходником держит
+# test_onboard.py. Маршрут отвергает весь патч (400 `unknown settings keys`),
+# если в нём есть хоть один ключ не из списка, а `GET /settings` отдаёт в
+# `values` и производные — `minTrackSeconds`, `boundaryFadeMinTrackSeconds`, —
+# записать которые нельзя. Снимок пишется только из этих ключей.
+SETTINGS_PATCH_KEYS = (
+    "jingleRatio", "jingleRotate", "crossfadeDuration", "ducking", "handover",
+    "maxTrackSeconds", "maxTrackMinutes", "archive", "backups", "stream",
+    "loudness", "weather", "station", "stationDescription", "timezone", "locale",
+    "theme", "moods", "moodSchedule", "weatherMoods", "festivals", "djPrompts",
+    "activeDjPromptId", "djPrompt", "djHouseRules", "djBehaviour", "djSpeakClock",
+    "djTalkOnlyBetweenTracks", "pauseTalkMinSeconds", "fadeAtShowEnd", "personas",
+    "shows", "schedule", "scheduleOverride", "activePersonaId", "tts", "llm",
+    "picker", "search", "embedding", "skills", "audio", "transitions", "sfx",
+    "beds", "silenceTrim", "ui", "privacy", "requests", "webhooks",
+    "webhooksPolicy", "scrobble", "likes", "queue",
+)
+
 
 def env(required: tuple[str, ...] = REQUIRED) -> dict[str, str]:
     missing = [k for k in required if not os.environ.get(k)]
@@ -60,9 +79,16 @@ def env(required: tuple[str, ...] = REQUIRED) -> dict[str, str]:
 
 
 def mask(value):
-    """Прячет секреты в выводе и в экспортируемом снимке."""
+    """Прячет секреты в выводе и в экспортируемом снимке.
+
+    Число, флаг и null секретом не бывают: `llm.dailyTokenCap` и
+    `llm.maxOutputTokens` попадают под «token» по имени, и звёздочки на их месте
+    делали любой снимок живой станции «замаскированным» — применить его было
+    нельзя.
+    """
     if isinstance(value, dict):
-        return {k: ("***" if any(s in k.lower() for s in SECRET_KEYS) else mask(v))
+        return {k: ("***" if not isinstance(v, (int, float, type(None)))
+                    and any(s in k.lower() for s in SECRET_KEYS) else mask(v))
                 for k, v in value.items()}
     if isinstance(value, list):
         return [mask(v) for v in value]
@@ -111,8 +137,40 @@ def step_ok(code: int, body) -> str | None:
     return None
 
 
+def _load_snapshot(path: str):
+    """Снимок настроек из файла либо None, если применять его нельзя.
+
+    Проверяется до первого запроса: отказ `POST /settings` пришёл бы уже после
+    /onboarding/save, и станция осталась бы настроенной наполовину.
+    """
+    with open(path, encoding="utf-8") as fh:
+        extra = json.load(fh)
+    if not isinstance(extra, dict):
+        print(f"{path}: снимок должен быть объектом JSON", file=sys.stderr)
+        return None
+    unknown = [k for k in extra if k not in SETTINGS_PATCH_KEYS]
+    if unknown:
+        print("в снимке ключи, которых POST /settings не принимает: "
+              + ", ".join(unknown) + " — станция отвергла бы снимок целиком"
+              + ("; это ответ GET целиком (старый --export) — снимите заново"
+                 if "values" in extra else ""), file=sys.stderr)
+        return None
+    placeholders = [k for k, v in _flatten(extra) if v == "***"]
+    if placeholders:
+        print("в снимке остались замаскированные значения: "
+              + ", ".join(placeholders)
+              + " — подставьте секреты перед применением", file=sys.stderr)
+        return None
+    return extra
+
+
 def run(e: dict[str, str], settings_file: str | None = None) -> int:
     base, user, password = e["SUBWAVE_URL"], e["SUBWAVE_ADMIN_USER"], e["SUBWAVE_ADMIN_PASS"]
+    extra = None
+    if settings_file:
+        extra = _load_snapshot(settings_file)
+        if extra is None:
+            return 1
     # адрес Navidrome — LAN-адрес хоста, НЕ 127.0.0.1: контроллер живёт
     # в контейнере, и петлевой адрес указывал бы внутрь него
     navidrome = {"url": e["NAVIDROME_URL"], "user": e["NAVIDROME_USER"],
@@ -144,18 +202,10 @@ def run(e: dict[str, str], settings_file: str | None = None) -> int:
         print(f"настройки не сохранены — {problem}", file=sys.stderr)
         return 1
 
-    if settings_file:
+    if extra is not None:
         # TTS, персона и шоу задаются той же формой настроек: снимок с живой
         # станции переносится целиком, чтобы их не приходилось кликать заново
         print(f"\n== применение настроек из {settings_file}")
-        with open(settings_file, encoding="utf-8") as fh:
-            extra = json.load(fh)
-        placeholders = [k for k, v in _flatten(extra) if v == "***"]
-        if placeholders:
-            print("в снимке остались замаскированные значения: "
-                  + ", ".join(placeholders)
-                  + " — подставьте секреты перед применением", file=sys.stderr)
-            return 1
         code, body = call(base, "/settings", user, password, extra)
         problem = step_ok(code, body)
         print(json.dumps(mask(body), ensure_ascii=False)[:500])
@@ -187,10 +237,21 @@ def export_settings(e: dict[str, str], path: str) -> int:
     if problem:
         print(f"настройки не прочитаны — {problem}", file=sys.stderr)
         return 1
+    # снимок — то, что примет POST: `values` без обёртки и без производных.
+    # Ответ GET целиком (с `defaults`, `navidrome`, перечнями движков) станция
+    # отвергает 400 `unknown settings keys`
+    values = _settings_values(body)
+    if not isinstance(values, dict):
+        print("в ответе /settings нет настроек", file=sys.stderr)
+        return 1
+    snapshot = {k: v for k, v in values.items() if k in SETTINGS_PATCH_KEYS}
     with open(path, "w", encoding="utf-8") as out:
-        json.dump(mask(body), out, ensure_ascii=False, indent=2)
+        json.dump(mask(snapshot), out, ensure_ascii=False, indent=2)
         out.write("\n")
     print(f"записано (секреты заменены на ***): {path}")
+    dropped = [k for k in values if k not in SETTINGS_PATCH_KEYS]
+    if dropped:
+        print("не вошли — POST /settings их не принимает: " + ", ".join(dropped))
     return 0
 
 

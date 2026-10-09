@@ -7,6 +7,7 @@
 import importlib.util
 import io
 import json
+import re
 import sys
 import urllib.error
 from pathlib import Path
@@ -97,22 +98,23 @@ def test_extra_settings_are_applied_after_save(api, tmp_path):
 
 def test_masked_snapshot_is_not_applied_silently(api, tmp_path):
     # экспортированный снимок хранит секреты как ***; применить его как есть
-    # значит записать станции заведомо неверный ключ
+    # значит записать станции заведомо неверный ключ. Отказ — до сохранения
+    # onboarding: иначе станция осталась бы настроенной наполовину
     calls, _ = api
     settings = tmp_path / "settings.json"
     settings.write_text(json.dumps({"llm": {"apiKey": "***"}}), encoding="utf-8")
     assert onboard.run(ENV, str(settings)) == 1
-    assert "/settings" not in [c["url"].split("/api")[-1] for c in calls]
+    assert calls == []
 
 
 def test_export_masks_secrets(api, tmp_path):
     _, answers = api
     answers["/settings"] = (200, {"llm": {"apiKey": "sk-real", "model": "glm"},
-                                  "navidrome": {"pass": "hunter2"}})
+                                  "privacy": {"password": "hunter2"}})
     out = tmp_path / "snapshot.json"
     assert onboard.export_settings(ENV, str(out)) == 0
     data = json.loads(out.read_text(encoding="utf-8"))
-    assert data["llm"]["apiKey"] == "***" and data["navidrome"]["pass"] == "***"
+    assert data["llm"]["apiKey"] == "***" and data["privacy"]["password"] == "***"
     assert data["llm"]["model"] == "glm"
 
 
@@ -128,6 +130,108 @@ def test_export_does_not_require_llm_and_navidrome(api, tmp_path, monkeypatch):
     out = tmp_path / "snapshot.json"
     assert onboard.main(["--export", str(out)]) == 0
     assert json.loads(out.read_text(encoding="utf-8"))["tts"]["engine"] == "remote"
+
+
+# ── снимок: GET /settings → файл → POST /settings ────────────────────────────
+#
+# `POST /settings` отвергает ВЕСЬ патч (400 `unknown settings keys`), если в нём
+# есть хоть один ключ не из SETTINGS_PATCH_KEYS. А снимок раньше писал ответ
+# GET целиком: обёртку `values`, `defaults`, `navidrome`, перечни движков — и
+# производные `minTrackSeconds`/`boundaryFadeMinTrackSeconds` внутри `values`.
+# Применить такой снимок было нельзя ни разу, причём отказ приходил уже после
+# /onboarding/save.
+
+PATCH_REGISTRY = (Path(__file__).resolve().parents[2] / "controller" / "src"
+                  / "settings" / "patch-registry.ts")
+
+
+def _live_settings_response() -> dict:
+    """Ответ `GET /settings` той формы, что отдаёт routes/settings/core.ts."""
+    values = {
+        "jingleRatio": 4, "crossfadeDuration": 6,
+        "minTrackSeconds": 12,                       # производное
+        "boundaryFadeMinTrackSeconds": 45,           # производное
+        "station": "AI радио",
+        "llm": {"provider": "openai-compatible", "model": "dj", "apiKey": "set",
+                "keys": {"openai-compatible": "set"}, "dailyTokenCap": 0,
+                "maxOutputTokens": 0, "reasoning": True},
+        "tts": {"defaultEngine": "remote", "cloud": {"apiKey": "", "compatApiKey": ""}},
+        "privacy": {"privatePlayer": False, "password": "set"},
+        "personas": [{"id": "p_ru", "name": "Ведущая"}],
+    }
+    return {"autoPick": True, "streamOnAir": True,
+            "navidrome": {"url": "http://nd:4533", "user": "subwave", "passSet": True},
+            "values": values,
+            "defaults": {"llm": {}, "tts": {}},
+            "tts": {"engines": ["piper", "remote"]},
+            "llm": {"providers": ["ollama"], "active": "openai-compatible:dj"},
+            "env": {"OPENAI_API_KEY": False}}
+
+
+def test_patch_keys_match_the_controller_registry():
+    # копия списка — чтобы снимок не зависел от node; сверка с исходником
+    # контроллера ловит дрейф после слияния апстрима сразу, а не на станции
+    text = PATCH_REGISTRY.read_text(encoding="utf-8")
+    m = re.search(r"export const SETTINGS_PATCH_KEYS = \[(.*?)\] as const;", text, re.S)
+    assert m, "SETTINGS_PATCH_KEYS не найден в patch-registry.ts"
+    body = re.sub(r"//[^\n]*", "", m.group(1))
+    upstream = re.findall(r"'([^']+)'", body)
+    assert upstream, "список ключей пуст — разбор сломался"
+    assert sorted(onboard.SETTINGS_PATCH_KEYS) == sorted(upstream)
+
+
+def test_export_writes_only_postable_keys_from_values(api, tmp_path):
+    _, answers = api
+    answers["/settings"] = (200, _live_settings_response())
+    out = tmp_path / "snapshot.json"
+    assert onboard.export_settings(ENV, str(out)) == 0
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert set(data) <= set(onboard.SETTINGS_PATCH_KEYS)
+    assert "minTrackSeconds" not in data and "boundaryFadeMinTrackSeconds" not in data
+    # llm — из values, а не одноимённый перечень провайдеров из корня ответа
+    assert data["llm"]["model"] == "dj" and "providers" not in data["llm"]
+    assert data["station"] == "AI радио"
+
+
+def test_numbers_under_token_names_are_not_masked(api, tmp_path):
+    # «token» в имени dailyTokenCap/maxOutputTokens — не секрет; звёздочки на
+    # месте числа делали любой снимок «замаскированным», и run() его не брал
+    _, answers = api
+    answers["/settings"] = (200, _live_settings_response())
+    out = tmp_path / "snapshot.json"
+    assert onboard.export_settings(ENV, str(out)) == 0
+    llm = json.loads(out.read_text(encoding="utf-8"))["llm"]
+    assert llm["dailyTokenCap"] == 0 and llm["maxOutputTokens"] == 0
+    assert llm["apiKey"] == "***"
+
+
+def test_exported_snapshot_applies_after_secrets_are_filled(api, tmp_path):
+    calls, answers = api
+    answers[("GET", "/settings")] = (200, _live_settings_response())
+    out = tmp_path / "snapshot.json"
+    assert onboard.export_settings(ENV, str(out)) == 0
+    # оператор подставляет секреты вместо ***
+    filled = out.read_text(encoding="utf-8").replace('"***"', '"secret-value"')
+    out.write_text(filled, encoding="utf-8")
+    calls.clear()
+    assert onboard.run(ENV, str(out)) == 0
+    posted = [c for c in calls if c["method"] == "POST"
+              and c["url"].endswith("/api/settings")]
+    assert len(posted) == 1
+    assert set(posted[0]["payload"]) <= set(onboard.SETTINGS_PATCH_KEYS)
+
+
+def test_unknown_keys_are_named_before_anything_is_sent(api, tmp_path, capsys):
+    # снимок старого формата (ответ GET целиком): контроллер отверг бы его
+    # 400, но уже после /onboarding/save — половина настройки легла бы
+    calls, _ = api
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"values": {}, "minTrackSeconds": 12,
+                                    "tts": {"engine": "remote"}}), encoding="utf-8")
+    assert onboard.run(ENV, str(settings)) == 1
+    assert calls == []
+    err = capsys.readouterr().err
+    assert "minTrackSeconds" in err and "values" in err
 
 
 def test_missing_environment_is_named(monkeypatch):
