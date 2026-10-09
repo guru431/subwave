@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { listener, setNotifyEnabled, LISTENER_NAME_MAX } from '@/lib/listener';
 import { askPermission, notifyState, readEnv, type NotifyState } from '@/lib/roomNotify';
-import { disablePush, enablePush, pushLost, watchPushLost } from '@/lib/roomPush';
+import { disablePush, enablePush, pushLost, renewPush, watchPushLost } from '@/lib/roomPush';
 import type { FeedItem } from '@/lib/roomRules';
 
 const TEXT_MAX = 280;        // та же цифра, что у заказа (REQUEST_TEXT_MAX)
@@ -79,13 +79,6 @@ export default function ChatDrawer({ items, send, sending }: ChatDrawerProps) {
     // push, комната без ключа) — остаются уведомления страницы, как раньше.
     if (on) void enablePush();
   }, [notifyOn]);
-
-  // То же включение, но из нажатия: подписку WebKit оформляет только по жесту.
-  const renewPush = useCallback(async () => {
-    const next = await askPermission();
-    setState(next);
-    if (next === 'ready') void enablePush();
-  }, []);
 
   const submit = useCallback(async () => {
     if (sending) return;
@@ -181,6 +174,8 @@ export default function ChatDrawer({ items, send, sending }: ChatDrawerProps) {
           </button>
         </div>
         {notifyOn && lost && (state === 'ask' || state === 'ready') && (
+          // Потеря бывает только при разрешении granted, так что спрашивать его
+          // не нужно: subscribe() зовётся прямо в нажатии — WebKit требует жеста.
           <button
             type="button"
             onClick={() => void renewPush()}

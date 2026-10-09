@@ -153,11 +153,14 @@ self.addEventListener('push', (event) => {
   );
 });
 
+// Пути, где монтируется плеер (PlayerApp: app/page.tsx и app/listen/page.tsx), —
+// только он слушает `room:open-chat` и понимает `?chat=1`.
+const PLAYER_PATHS = ['/', '/listen'];
+
 // Нажатие на уведомление: открытая вкладка плеера поднимается и открывает чат,
 // иначе открывается новая — с `?chat=1`, по которому плеер откроет его сам.
-// Вкладка плеера — та, чей путь совпадает с адресом уведомления (`/`): любая
-// вкладка сайта не годится — `room:open-chat` слушает только плеер, и у
-// владельца первой оказывалась админка, где чат не открывался.
+// Любая вкладка сайта не годится: у владельца первой оказывалась админка, где
+// чат не открывался.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const target = new URL((event.notification.data && event.notification.data.url) || '/?chat=1',
@@ -167,7 +170,7 @@ self.addEventListener('notificationclick', (event) => {
       const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
       for (const w of wins) {
         const at = new URL(w.url);
-        if (at.origin === target.origin && at.pathname === target.pathname && 'focus' in w) {
+        if (at.origin === target.origin && PLAYER_PATHS.includes(at.pathname) && 'focus' in w) {
           await w.focus();
           w.postMessage({ type: 'room:open-chat' });
           return;

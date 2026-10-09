@@ -178,6 +178,23 @@ async function main() {
     assert.deepEqual(sw.opened, [`${ORIGIN}/?chat=1`]);
   });
 
+  await test('плеер на /listen — тоже плеер, второй вкладки не будет', async () => {
+    const admin = win('/admin');
+    const player = win('/listen');
+    const sw = worker(UA.android, [admin, player]);
+    await sw.click({ url: '/?chat=1' });
+    assert.equal(admin.focused, false);
+    assert.equal(player.focused, true);
+    assert.equal(JSON.stringify(player.messages), '[{"type":"room:open-chat"}]');
+    assert.deepEqual(sw.opened, []);
+  });
+
+  await test('/listening и /listen/x — не плеер', async () => {
+    const sw = worker(UA.android, [win('/listening'), win('/listen/x')]);
+    await sw.click({ url: '/?chat=1' });
+    assert.deepEqual(sw.opened, [`${ORIGIN}/?chat=1`]);
+  });
+
   await test('плеер с чатом в адресе — тоже плеер', async () => {
     const player = win('/?chat=1#x');
     const sw = worker(UA.android, [player]);

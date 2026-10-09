@@ -65,7 +65,7 @@ function setLost(value: boolean): void {
   for (const fn of watchers) fn();
 }
 
-/** Push не оформился при включённом согласии — ящику пора сказать об этом. */
+/** Подписки нет, и браузер отказался её оформить, — ящику пора сказать об этом. */
 export function pushLost(): boolean {
   return lost;
 }
@@ -76,24 +76,31 @@ export function watchPushLost(fn: () => void): () => void {
   return () => { watchers.delete(fn); };
 }
 
-/** Подписаться — или обновить подписку: комната ловит упоминание по имени,
- *  и имя, сменённое после подписки, должно до неё доехать. Зовётся только при
- *  включённом согласии, поэтому «не вышло» в браузере с push — это потеря;
- *  браузер без push потерь не знает: у него остаются уведомления страницы. */
-export async function enablePush(): Promise<boolean> {
-  if (!pushSupported()) return false;
-  const ok = await subscribe();
-  setLost(!ok);
-  return ok;
+// Отказ самого браузера оформить подписку — WebKit без жеста отвечает
+// NotAllowedError. Остальное потерей не считается, плашка «включите заново» там
+// не поможет: AbortError — нет push-сервиса (Brave без него) или он не ответил,
+// сеть и ответы комнаты (5xx, 429) — временное.
+function refused(err: unknown): boolean {
+  return (err as { name?: unknown } | null)?.name === 'NotAllowedError';
 }
 
-async function subscribe(): Promise<boolean> {
-  if (Notification.permission !== 'granted') return false;
+// Регистрация service worker и ключ комнаты с последней попытки подписаться.
+// Потеря ставится только после отказа subscribe(), а до него ключ уже получен, —
+// поэтому к показу плашки он здесь всегда, и renewPush не ждёт сети.
+let primed: { reg: ServiceWorkerRegistration; key: string } | null = null;
+
+/** Подписаться — или обновить подписку: комната ловит упоминание по имени,
+ *  и имя, сменённое после подписки, должно до неё доехать. Потеря — только
+ *  отказ браузера при разрешении `granted` и пустом getSubscription(); браузер
+ *  без push потерь не знает: у него остаются уведомления страницы. */
+export async function enablePush(): Promise<boolean> {
+  if (!pushSupported() || Notification.permission !== 'granted') return false;
   try {
     const reg = await navigator.serviceWorker.ready;
     const res = await fetch(`${ROOM}/push/key`);
     if (!res.ok) return false;
     const { key } = (await res.json()) as { key: string };
+    primed = { reg, key };
     let sub = await reg.pushManager.getSubscription();
     // Подписка на прежний ключ комнаты мертва: push-сервис отвергнет подпись
     // сервера. Её снимают и заводят заново, а не оставляют молча не работать.
@@ -102,20 +109,55 @@ async function subscribe(): Promise<boolean> {
       sub = null;
     }
     if (!sub) {
-      sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: keyBytes(key),
-      });
+      try {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: keyBytes(key),
+        });
+      } catch (err) {
+        if (refused(err)) setLost(true);
+        return false;
+      }
     }
-    const saved = await fetch(`${ROOM}/push/subscribe`, {
-      method: 'POST',
-      headers: headers(),
-      body: JSON.stringify({ subscription: sub.toJSON() }),
-    });
-    return saved.ok;
+    setLost(false);
+    return await save(sub);
   } catch {
     return false;
   }
+}
+
+/** Переподписка из обработчика нажатия на плашку. WebKit оформляет подписку
+ *  только в жесте человека, а ожидание сети между нажатием и subscribe() (ключ
+ *  комнаты в enablePush) жест теряет. Поэтому subscribe() — первое же действие,
+ *  синхронно в нажатии, на регистрации и ключе из `primed`; в комнату подписка
+ *  уходит уже после. Без них — обычный путь. */
+export async function renewPush(): Promise<boolean> {
+  if (!primed || !pushSupported()) return enablePush();
+  let sub: PushSubscription;
+  try {
+    sub = await primed.reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: keyBytes(primed.key),
+    });
+  } catch (err) {
+    if (refused(err)) setLost(true);
+    return false;
+  }
+  setLost(false);
+  try {
+    return await save(sub);
+  } catch {
+    return false;
+  }
+}
+
+async function save(sub: PushSubscription): Promise<boolean> {
+  const saved = await fetch(`${ROOM}/push/subscribe`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({ subscription: sub.toJSON() }),
+  });
+  return saved.ok;
 }
 
 export async function disablePush(): Promise<void> {
