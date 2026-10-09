@@ -338,7 +338,7 @@ function collapseSpace(text: string): string {
 // of normalizeForDisplay(): typographic quotes and dashes remain useful in the
 // booth log, while the TTS request gets the conservative ASCII-safe form that
 // previously lived in the Fish proxy.
-function normalizeTtsPunctuation(text: string): string {
+function normalizeTtsPunctuation(text: string, english = true): string {
   let t = text
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u201c\u201d]/g, '"')
@@ -348,7 +348,9 @@ function normalizeTtsPunctuation(text: string): string {
   // En/figure dashes between digits are ranges, not pauses. Sentence dashes
   // stay intact: unlike commas, they reliably carry a natural pause in Fish
   // and other expressive engines.
-  t = t.replace(/(?<=\d)\s*[\u2012\u2013]\s*(?=\d)/g, ' to ');
+  // Fork: " to " is English; a set non-English language keeps the dash for
+  // its engine to read (station/docs/controller-changes.md).
+  if (english) t = t.replace(/(?<=\d)\s*[\u2012\u2013]\s*(?=\d)/g, ' to ');
   // Double quotes are purely display punctuation and have caused inconsistent
   // cloud-TTS phrasing; apostrophes remain for contractions and possessives.
   t = t.replace(/"/g, '');
@@ -424,13 +426,17 @@ export function normalizeForSpeech(
 ): string {
   if (!text) return text;
   let t = stripMarkup(text);
+  const lang = language.trim();
+  // Fork: one predicate for every English-word expansion below — years,
+  // ranges, ° and % (upstream gated years only).
+  const english = !lang || ENGLISH_LANGUAGE_RE.test(lang);
 
   // Keep literal bracket content in the reader-facing form, but remove the
   // cue-shaped delimiters before TTS so an expressive engine cannot interpret
   // a real title/version such as "[Untitled]" or "[Live]" as direction.
   t = literalizeBracketedSpeech(t);
 
-  t = normalizeTtsPunctuation(t);
+  t = normalizeTtsPunctuation(t, english);
 
   // --- operator corrections (settings.tts.corrections) ---
   // After markdown/entity cleanup so a rule matches the readable text the
@@ -440,16 +446,20 @@ export function normalizeForSpeech(
 
   // --- English years and decades (every engine, operator rules first) ---
   // Before currency/unit expansion: their original symbols identify quantities.
-  const lang = language.trim();
-  if (!lang || ENGLISH_LANGUAGE_RE.test(lang)) t = normalizeYears(t);
+  if (english) t = normalizeYears(t);
 
   // --- units and symbols (all keyed on an adjacent digit — conservative) ---
-  t = t.replace(/(\d)\s*°\s*F\b/g, '$1 degrees Fahrenheit');
-  t = t.replace(/(\d)\s*°\s*C\b/g, '$1 degrees Celsius');
-  // Bare degree after a number ("45° today") — after the F/C passes so only
-  // unitless degrees remain; a ° glued to any other letter is left alone.
-  t = t.replace(/(\d)\s*°(?![A-Za-z])/g, '$1 degrees');
-  t = t.replace(/(\d)\s*%/g, '$1 percent');
+  // Fork: ° and % become English words only for an English (or unset) speech
+  // language; any other keeps the symbol for its engine to read in its own
+  // language — the Russian F5 service agrees "5 процентов" itself.
+  if (english) {
+    t = t.replace(/(\d)\s*°\s*F\b/g, '$1 degrees Fahrenheit');
+    t = t.replace(/(\d)\s*°\s*C\b/g, '$1 degrees Celsius');
+    // Bare degree after a number ("45° today") — after the F/C passes so only
+    // unitless degrees remain; a ° glued to any other letter is left alone.
+    t = t.replace(/(\d)\s*°(?![A-Za-z])/g, '$1 degrees');
+    t = t.replace(/(\d)\s*%/g, '$1 percent');
+  }
   // $ only when it PRECEDES a number — "Ke$ha" has no digit after the $ and
   // survives. Four passes, most specific first:
   // 1. The model already wrote the spoken form ("$5 million dollars", "$5
