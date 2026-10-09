@@ -90,6 +90,18 @@ function rebuildIndex() {
   }
   compiledRules = compileRules(rules);
   ruleCtxCache = null;
+  revision++;
+}
+
+// Fork: changes whenever isBlocked() may answer differently — an edit (above),
+// the clock or the on-air show turning a rule on or off, a playlist rule's
+// member sets swapping — for a caller caching a blocklist-filtered read
+// (music/folder-genre-show.ts). The list is absolute: a cache that outlives a
+// block would air what the operator just refused.
+let revision = 0;
+
+export function revisionToken(): string {
+  return `${revision}|${activeCompiledRules().map((cr) => cr.rule.id).join(',')}`;
 }
 
 // The active-rule subset depends only on the station-zone clock and the on-air
@@ -137,12 +149,14 @@ export async function refreshPlaylistMembers(): Promise<void> {
   if (!ids.length) {
     playlistMembers = new Map();
     playlistMembersAt = Date.now();
+    revision++;
     return;
   }
   const members = await resolvePlaylistMemberSets(ids);
   if (generation === playlistMembersGeneration) {
     playlistMembers = members;
     playlistMembersAt = Date.now();
+    revision++;
   }
 }
 

@@ -852,7 +852,8 @@ the crates matched that», «Easy there — try again in 12s» и ещё пол�
 | [server.ts](../../controller/src/server.ts) | `folderGenres.load()` после `blocklist.load()` и восстановления ротации id |
 | [music/folder-genre-show.ts](../../controller/src/music/folder-genre-show.ts) (новый) | жанр передачи и жанры папок (ниже): `resolveShowGenreName`, `folderGenreTracks` |
 | `music/picker.ts`, `broadcast/scheduler.ts`, `broadcast/dj-agent.ts`, `music/show-candidates.ts` | жанр передачи разрешается через `resolveShowGenreName`; источник `show-genre` пула (§1e) и авто-плейлиста (§0) добавляет `folderGenreTracks` |
-| `music/library.ts`, `music/library-db/queries.ts` | `untaggedPathTracks` / `untaggedPathRows` — строки без тега жанра с настоящим путём, без заблокированных |
+| `music/library.ts`, `music/library-db/queries.ts` | `untaggedPathTracks` / `untaggedPathRows` — строки без тега жанра с настоящим путём, без заблокированных; `library.changeToken()` — обёртка над `changeToken` базы |
+| [music/blocklist.ts](../../controller/src/music/blocklist.ts) | `revisionToken()` — счётчик правок (`rebuildIndex`, смена состава плейлистов в правилах) плюс id активных правил: меняется, когда `isBlocked()` может ответить иначе |
 
 Сопоставление правила Folder — по границе `/`: `…/Hits` не задевает `…/Hits 2`; трек
 без настоящего пути не подпадает ни под что (недоблокировка видна по счётчику).
@@ -920,11 +921,23 @@ Blocked появится «N tracks have no real path». Сохранённые 
   читает хоть один незаблокированный трек — как тег существует, пока его несёт песня:
   устаревшее назначение (папку переименовали, треки получили теги) не держит замок
   над пустотой. Через него разрешают жанр передачи пул (строгий и мягкий), агент,
-  авто-плейлист и счётчик кандидатов в редакторе передачи — все одинаково.
+  авто-плейлист и счётчик кандидатов в редакторе передачи — все одинаково. Жанру
+  папки Navidrome не нужен: если `getGenres` бросает (Navidrome лежит), жанр папки
+  всё равно разрешается, а для любого другого жанра исключение пробрасывается как
+  есть — вызывающие и раньше отбрасывали жанр, на котором упало разрешение, так что
+  теговый жанр при лежащем Navidrome ведёт себя как у апстрима.
 - `folderGenreTracks` — треки без тега, до которых жанр доходит через папку (тот же
   `genreMatches`, что у замка, по жанрам папки из `genresForPath`). Источник
   `show-genre` пула и авто-плейлиста кладёт их рядом с выдачей Navidrome — один и
-  тот же вызов в обоих местах (апстрим держит их «keep in step»).
+  тот же вызов в обоих местах (апстрим держит их «keep in step»). Скан строк без тега
+  с блок-листом поверх — синхронный, на event loop, и зовётся по нескольку раз на
+  пик, поэтому он **кэширован** до изменения любого из трёх входов: записи в
+  `library.db` (`changeToken`: `data_version` чужих соединений, `total_changes()`
+  своего, смена дескриптора), таблицы жанров папок (её только заменяют целиком —
+  версия это сама ссылка) и блок-листа (`blocklist.revisionToken()`: правка,
+  включение/выключение правила по сезону или передаче, смена состава плейлиста в
+  правиле). Таймера нет намеренно: блок-лист абсолютен, кэш, переживший блок, выпустил
+  бы трек в эфир. Вызывающим отдаются копии: авто-плейлист штампует на треки `gainDb`.
 
 Заказы слушателей, инструмент агента `songsByGenre` и генератор плейлистов остаются на
 `resolveGenreName`: они берут треки у Navidrome, и имя жанра папки дало бы им пустой
@@ -952,7 +965,11 @@ era_untrusted`), `scripts/folder-genres.test.ts`,
 папки: разрешение, приоритет над подстрокой, устаревшее назначение, источник и
 `pickViaPool` строгой передачи на настоящей `library.db`; RED → GREEN: до правки
 «strict genre "Детские" not found in library — falling back to unfiltered pool» и пул
-`mood-library=7` из всей библиотеки, после — `show-genre=3` и «3/3 in-genre»). При переносе — `run-tests.sh --src`, `library-path`,
+`mood-library=7` из всей библиотеки, после — `show-genre=3` и «3/3 in-genre»; по
+ревью — жанр папки при лежащем Navidrome и кэш источника: повторный вызов не
+пересчитывается, а блок, снятие блока, новая таблица папок и запись в библиотеку его
+сбрасывают; RED → GREEN: до правки «Subsonic getGenres failed: 503» на жанре папки и
+пересчёт на каждом вызове). При переносе — `run-tests.sh --src`, `library-path`,
 `genre-cyrillic`, `folder*`, `blocklist*`, `show-filter*`, `library*`, `subsonic*`,
 `*genre*`, `id-adoption*`, `id-rotation*` (158/158).
 
