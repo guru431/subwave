@@ -84,6 +84,11 @@ function refused(err: unknown): boolean {
   return (err as { name?: unknown } | null)?.name === 'NotAllowedError';
 }
 
+// Регистрация service worker и ключ комнаты с последней попытки подписаться.
+// Потеря ставится только после отказа subscribe(), а до него ключ уже получен, —
+// поэтому к показу плашки он здесь всегда, и renewPush не ждёт сети.
+let primed: { reg: ServiceWorkerRegistration; key: string } | null = null;
+
 /** Подписаться — или обновить подписку: комната ловит упоминание по имени,
  *  и имя, сменённое после подписки, должно до неё доехать. Потеря — только
  *  отказ браузера при разрешении `granted` и пустом getSubscription(); браузер
@@ -95,6 +100,7 @@ export async function enablePush(): Promise<boolean> {
     const res = await fetch(`${ROOM}/push/key`);
     if (!res.ok) return false;
     const { key } = (await res.json()) as { key: string };
+    primed = { reg, key };
     let sub = await reg.pushManager.getSubscription();
     // Подписка на прежний ключ комнаты мертва: push-сервис отвергнет подпись
     // сервера. Её снимают и заводят заново, а не оставляют молча не работать.
@@ -114,6 +120,31 @@ export async function enablePush(): Promise<boolean> {
       }
     }
     setLost(false);
+    return await save(sub);
+  } catch {
+    return false;
+  }
+}
+
+/** Переподписка из обработчика нажатия на плашку. WebKit оформляет подписку
+ *  только в жесте человека, а ожидание сети между нажатием и subscribe() (ключ
+ *  комнаты в enablePush) жест теряет. Поэтому subscribe() — первое же действие,
+ *  синхронно в нажатии, на регистрации и ключе из `primed`; в комнату подписка
+ *  уходит уже после. Без них — обычный путь. */
+export async function renewPush(): Promise<boolean> {
+  if (!primed || !pushSupported()) return enablePush();
+  let sub: PushSubscription;
+  try {
+    sub = await primed.reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: keyBytes(primed.key),
+    });
+  } catch (err) {
+    if (refused(err)) setLost(true);
+    return false;
+  }
+  setLost(false);
+  try {
     return await save(sub);
   } catch {
     return false;

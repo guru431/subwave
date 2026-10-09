@@ -4,7 +4,9 @@
 // Запуск из корня клона:  npx tsx web/lib/roomPush.test.ts
 
 import assert from 'node:assert/strict';
-import { disablePush, enablePush, keyBytes, pushLost, sameKey, watchPushLost } from './roomPush';
+import {
+  disablePush, enablePush, keyBytes, pushLost, renewPush, sameKey, watchPushLost,
+} from './roomPush';
 
 let failures = 0;
 function test(name: string, fn: () => void) {
@@ -184,6 +186,29 @@ async function lostCases() {
     assert.equal(pushLost(), true);
     await disablePush();
     assert.equal(pushLost(), false);
+  });
+
+  await testAsync('нажатие «включите заново» — subscribe() сразу, без сети до него', async () => {
+    // переподписка при открытии плеера: WebKit без жеста отказал
+    env.subscribeError = 'NotAllowedError';
+    await enablePush();
+    assert.equal(pushLost(), true);
+    env.subscribeError = null;
+    env.fetches = [];
+    env.subscribes = 0;
+    const pending = renewPush();      // обработчик нажатия, без await
+    assert.equal(env.subscribes, 1, 'subscribe() вызван синхронно, в самом нажатии');
+    assert.deepEqual(env.fetches, [], 'до subscribe() не было ни одного запроса');
+    assert.equal(await pending, true);
+    assert.equal(pushLost(), false);
+    assert.deepEqual(env.fetches, ['/room/push/subscribe']);
+  });
+
+  await testAsync('нажатие, а браузер снова отказал — потеря остаётся', async () => {
+    env.subscribeError = 'NotAllowedError';
+    await enablePush();
+    assert.equal(await renewPush(), false);
+    assert.equal(pushLost(), true);
   });
 
   await testAsync('браузер без push — не потеря: остаются уведомления страницы', async () => {
