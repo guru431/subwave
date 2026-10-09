@@ -5,9 +5,9 @@ import io
 import sys
 from pathlib import Path
 
-import numpy as np
 import pytest
 
+np = pytest.importorskip("numpy")      # без него пропускается этот файл, а не весь набор
 F5_DIR = Path(__file__).resolve().parent.parent / "tts-f5"
 sys.path.insert(0, str(F5_DIR))
 import f5_audio as A  # noqa: E402

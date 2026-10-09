@@ -338,7 +338,7 @@ function collapseSpace(text: string): string {
 // of normalizeForDisplay(): typographic quotes and dashes remain useful in the
 // booth log, while the TTS request gets the conservative ASCII-safe form that
 // previously lived in the Fish proxy.
-function normalizeTtsPunctuation(text: string): string {
+function normalizeTtsPunctuation(text: string, english = true): string {
   let t = text
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u201c\u201d]/g, '"')
@@ -348,7 +348,9 @@ function normalizeTtsPunctuation(text: string): string {
   // En/figure dashes between digits are ranges, not pauses. Sentence dashes
   // stay intact: unlike commas, they reliably carry a natural pause in Fish
   // and other expressive engines.
-  t = t.replace(/(?<=\d)\s*[\u2012\u2013]\s*(?=\d)/g, ' to ');
+  // Fork: " to " is English; a set non-English language keeps the dash for
+  // its engine to read (station/docs/controller-changes.md).
+  if (english) t = t.replace(/(?<=\d)\s*[\u2012\u2013]\s*(?=\d)/g, ' to ');
   // Double quotes are purely display punctuation and have caused inconsistent
   // cloud-TTS phrasing; apostrophes remain for contractions and possessives.
   t = t.replace(/"/g, '');
@@ -424,13 +426,17 @@ export function normalizeForSpeech(
 ): string {
   if (!text) return text;
   let t = stripMarkup(text);
+  const lang = language.trim();
+  // Fork: one predicate for every English-word expansion below — years,
+  // ranges, °, %, $, mph, km/h and & (upstream gated years only).
+  const english = !lang || ENGLISH_LANGUAGE_RE.test(lang);
 
   // Keep literal bracket content in the reader-facing form, but remove the
   // cue-shaped delimiters before TTS so an expressive engine cannot interpret
   // a real title/version such as "[Untitled]" or "[Live]" as direction.
   t = literalizeBracketedSpeech(t);
 
-  t = normalizeTtsPunctuation(t);
+  t = normalizeTtsPunctuation(t, english);
 
   // --- operator corrections (settings.tts.corrections) ---
   // After markdown/entity cleanup so a rule matches the readable text the
@@ -440,43 +446,48 @@ export function normalizeForSpeech(
 
   // --- English years and decades (every engine, operator rules first) ---
   // Before currency/unit expansion: their original symbols identify quantities.
-  const lang = language.trim();
-  if (!lang || ENGLISH_LANGUAGE_RE.test(lang)) t = normalizeYears(t);
+  if (english) t = normalizeYears(t);
 
   // --- units and symbols (all keyed on an adjacent digit — conservative) ---
-  t = t.replace(/(\d)\s*°\s*F\b/g, '$1 degrees Fahrenheit');
-  t = t.replace(/(\d)\s*°\s*C\b/g, '$1 degrees Celsius');
-  // Bare degree after a number ("45° today") — after the F/C passes so only
-  // unitless degrees remain; a ° glued to any other letter is left alone.
-  t = t.replace(/(\d)\s*°(?![A-Za-z])/g, '$1 degrees');
-  t = t.replace(/(\d)\s*%/g, '$1 percent');
-  // $ only when it PRECEDES a number — "Ke$ha" has no digit after the $ and
-  // survives. Four passes, most specific first:
-  // 1. The model already wrote the spoken form ("$5 million dollars", "$5
-  //    dollars") — drop the symbol instead of speaking "dollars" twice.
-  t = t.replace(
-    new RegExp(`\\$(${DOLLAR_AMOUNT}${DOLLAR_MAGNITUDE})(?=\\s+dollars?\\b)`, 'gi'),
-    '$1',
-  );
-  // 2./3. Compact magnitude suffixes ("$100k", "$5M", "$2bn") — expanded here
-  //    so the letter can't glue onto "dollars" ("100 dollarsk"). Anchored on
-  //    the $ AND the suffix, so a bare "5k run" is untouched.
-  t = t.replace(new RegExp(`\\$(${DOLLAR_AMOUNT})k\\b`, 'gi'), '$1 thousand dollars');
-  t = t.replace(new RegExp(`\\$(${DOLLAR_AMOUNT})m\\b`, 'gi'), '$1 million dollars');
-  t = t.replace(new RegExp(`\\$(${DOLLAR_AMOUNT})(?:bn|b)\\b`, 'gi'), '$1 billion dollars');
-  // 4. The plain form. The trailing (?!\w) leaves any OTHER glued suffix
-  //    ("$100x") alone entirely — unspoken beats mangled.
-  t = t.replace(
-    new RegExp(`\\$(${DOLLAR_AMOUNT}${DOLLAR_MAGNITUDE})(?!\\w)`, 'gi'),
-    '$1 dollars',
-  );
-  t = t.replace(/(\d)\s*mph\b/gi, '$1 miles per hour');
-  t = t.replace(/(\d)\s*km\/h\b/gi, '$1 kilometers per hour');
-  // "&" reads as "and" everywhere — that's the spoken form even inside names
-  // ("Florence & the Machine", "R&B") — EXCEPT when it opens an entity-shaped
-  // sequence we didn't decode above ("&lt;"): mangling those into "and lt;"
-  // is worse than leaving them.
-  t = t.replace(/\s*&(?!(?:#\d+|[a-zA-Z]+);)\s*/g, ' and ');
+  // Fork: °, %, $, mph, km/h and & become English words only for an English
+  // (or unset) speech language; any other keeps the symbol for its engine to
+  // read in its own language — the Russian F5 service agrees "5 процентов" and
+  // "5 долларов" itself, and its pronunciation dictionary keys names on "&".
+  if (english) {
+    t = t.replace(/(\d)\s*°\s*F\b/g, '$1 degrees Fahrenheit');
+    t = t.replace(/(\d)\s*°\s*C\b/g, '$1 degrees Celsius');
+    // Bare degree after a number ("45° today") — after the F/C passes so only
+    // unitless degrees remain; a ° glued to any other letter is left alone.
+    t = t.replace(/(\d)\s*°(?![A-Za-z])/g, '$1 degrees');
+    t = t.replace(/(\d)\s*%/g, '$1 percent');
+    // $ only when it PRECEDES a number — "Ke$ha" has no digit after the $ and
+    // survives. Four passes, most specific first:
+    // 1. The model already wrote the spoken form ("$5 million dollars", "$5
+    //    dollars") — drop the symbol instead of speaking "dollars" twice.
+    t = t.replace(
+      new RegExp(`\\$(${DOLLAR_AMOUNT}${DOLLAR_MAGNITUDE})(?=\\s+dollars?\\b)`, 'gi'),
+      '$1',
+    );
+    // 2./3. Compact magnitude suffixes ("$100k", "$5M", "$2bn") — expanded here
+    //    so the letter can't glue onto "dollars" ("100 dollarsk"). Anchored on
+    //    the $ AND the suffix, so a bare "5k run" is untouched.
+    t = t.replace(new RegExp(`\\$(${DOLLAR_AMOUNT})k\\b`, 'gi'), '$1 thousand dollars');
+    t = t.replace(new RegExp(`\\$(${DOLLAR_AMOUNT})m\\b`, 'gi'), '$1 million dollars');
+    t = t.replace(new RegExp(`\\$(${DOLLAR_AMOUNT})(?:bn|b)\\b`, 'gi'), '$1 billion dollars');
+    // 4. The plain form. The trailing (?!\w) leaves any OTHER glued suffix
+    //    ("$100x") alone entirely — unspoken beats mangled.
+    t = t.replace(
+      new RegExp(`\\$(${DOLLAR_AMOUNT}${DOLLAR_MAGNITUDE})(?!\\w)`, 'gi'),
+      '$1 dollars',
+    );
+    t = t.replace(/(\d)\s*mph\b/gi, '$1 miles per hour');
+    t = t.replace(/(\d)\s*km\/h\b/gi, '$1 kilometers per hour');
+    // "&" reads as "and" everywhere — that's the spoken form even inside names
+    // ("Florence & the Machine", "R&B") — EXCEPT when it opens an entity-shaped
+    // sequence we didn't decode above ("&lt;"): mangling those into "and lt;"
+    // is worse than leaving them.
+    t = t.replace(/\s*&(?!(?:#\d+|[a-zA-Z]+);)\s*/g, ' and ');
+  }
 
   // --- station branding: TTS engines read "SUB/WAVE" as "sub slash wave" ---
   t = t.replace(/\bSUB\s*(?:\/|slash)\s*WAVE\b/gi, 'Subwave');

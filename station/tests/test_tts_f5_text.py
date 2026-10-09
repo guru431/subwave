@@ -5,6 +5,8 @@
 отрезок длиннее предела дорезается по словам — штатная функция отдаёт его целиком,
 и F5 на таком куске комкает окончание.
 """
+import json
+import os
 import sys
 from pathlib import Path
 
@@ -134,14 +136,20 @@ def test_respell_touches_only_whole_words():
     assert T.respell(text) == text
 
 
+def write_dictionary(path, words, phrases=None):
+    path.write_text(json.dumps({"words": words, "phrases": phrases or {}}, ensure_ascii=False),
+                    encoding="utf-8")
+    return path
+
+
 @pytest.fixture
-def dictionary(monkeypatch):
+def dictionary(monkeypatch, tmp_path):
     """Малый словарь вместо собранного: проверяется подстановка, а не данные."""
     d = {"dire": "д+айр", "dire straits": "Д+айр Стр+ейтс", "straits": "стр+ейтс",
          "don't stop me now": "Д+онт Стоп Ми Н+ау", "ac/dc": "эй-си-ди-с+и",
          "live": "лайв", "sting": "Стинг"}
-    monkeypatch.setattr(T, "DICTIONARY", d)
-    monkeypatch.setattr(T, "_DICTIONARY", T._dictionary_pattern(d))
+    path = write_dictionary(tmp_path / "pronunciation.json", d)
+    monkeypatch.setattr(T, "DICTIONARY", T.Dictionary(path, fallback=path))
     return d
 
 
@@ -169,11 +177,120 @@ def test_text_without_latin_is_untouched(dictionary):
     assert T.cyrillize("Кино, «Звезда по имени Солнце»") == "Кино, «Звезда по имени Солнце»"
 
 
-def test_empty_dictionary_changes_nothing(monkeypatch):
+def test_ampersand_names_reach_the_shipped_dictionary(monkeypatch):
+    """Контроллер переписывал «&» в « and » при любом языке, и 76 ключей словаря с «&»
+    («al bano & romina power») не срабатывали никогда. С языком персоны «&» доходит."""
+    shipped = T.Dictionary(T.DICTIONARY_FILE, fallback=T.DICTIONARY_FILE)
+    monkeypatch.setattr(T, "DICTIONARY", shipped)
+    words, _ = shipped.current()
+    assert T.cyrillize("Это Al Bano & Romina Power.") == \
+        f"Это {words['al bano & romina power']}."
+    assert "&" not in words["al bano & romina power"]
+
+
+def test_empty_dictionary_changes_nothing(monkeypatch, tmp_path):
     # пустая альтернатива в regex совпала бы с каждой позицией строки
-    monkeypatch.setattr(T, "DICTIONARY", {})
-    monkeypatch.setattr(T, "_DICTIONARY", T._dictionary_pattern({}))
+    path = write_dictionary(tmp_path / "empty.json", {})
+    monkeypatch.setattr(T, "DICTIONARY", T.Dictionary(path, fallback=path))
     assert T.cyrillize("Dire Straits") == "Dire Straits"
+
+
+# ── словарь на томе ──────────────────────────────────────────────────────────
+#
+# Новый латинский исполнитель звучал по русским правилам, пока владелец не
+# пересоберёт образ F5: словарь лежал только в нём. Теперь рабочий словарь — на томе
+# (F5_PRONUNCIATION) и перечитывается по mtime, копия в образе — запасная.
+
+
+class Clock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+def bump(path, words):
+    """Переписать файл и сдвинуть mtime: на быстрой ФС две записи подряд дают один mtime."""
+    write_dictionary(path, words)
+    st = path.stat()
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10 ** 9))
+
+
+@pytest.fixture
+def two_copies(tmp_path):
+    volume = write_dictionary(tmp_path / "volume.json", {"sting": "Ст+инг-том"})
+    image = write_dictionary(tmp_path / "image.json", {"sting": "Стинг"})
+    return volume, image
+
+
+def test_volume_dictionary_wins_over_the_image_copy(two_copies):
+    volume, image = two_copies
+    words, _ = T.Dictionary(volume, fallback=image).current()
+    assert words["sting"] == "Ст+инг-том"
+
+
+def test_without_the_volume_file_the_image_copy_is_read(two_copies, tmp_path):
+    _, image = two_copies
+    words, _ = T.Dictionary(tmp_path / "нет.json", fallback=image).current()
+    assert words["sting"] == "Стинг"
+
+
+def test_broken_volume_file_at_start_falls_back_to_the_image_copy(two_copies):
+    volume, image = two_copies
+    volume.write_text('{"words": {"sting"', encoding="utf-8")
+    logs = []
+    words, _ = T.Dictionary(volume, fallback=image, log=logs.append).current()
+    assert words["sting"] == "Стинг" and logs
+
+
+def test_changed_file_is_reread_but_stat_waits_for_the_interval(two_copies):
+    volume, image = two_copies
+    clock = Clock()
+    d = T.Dictionary(volume, fallback=image, check_every=30.0, clock=clock, log=lambda *_: None)
+    bump(volume, {"sting": "Стинг-новый"})
+    clock.now += 29
+    assert d.current()[0]["sting"] == "Ст+инг-том"      # не чаще раза в 30 с
+    clock.now += 1
+    assert d.current()[0]["sting"] == "Стинг-новый"
+
+
+def test_half_written_file_keeps_the_previous_dictionary(two_copies):
+    # файл на томе переписывают на месте: недописанный JSON — повод подождать
+    volume, image = two_copies
+    clock = Clock()
+    logs = []
+    d = T.Dictionary(volume, fallback=image, check_every=30.0, clock=clock, log=logs.append)
+    volume.write_text('{"words": {"sting"', encoding="utf-8")
+    os.utime(volume, ns=(volume.stat().st_atime_ns, volume.stat().st_mtime_ns + 10 ** 9))
+    clock.now += 30
+    assert d.current()[0]["sting"] == "Ст+инг-том" and logs
+    bump(volume, {"sting": "Стинг-дописан"})
+    clock.now += 30
+    assert d.current()[0]["sting"] == "Стинг-дописан"
+
+
+def test_removed_volume_file_falls_back_to_the_image_copy(two_copies):
+    volume, image = two_copies
+    clock = Clock()
+    d = T.Dictionary(volume, fallback=image, check_every=30.0, clock=clock, log=lambda *_: None)
+    volume.unlink()
+    clock.now += 30
+    assert d.current()[0]["sting"] == "Стинг"
+
+
+def test_dictionary_path_comes_from_the_environment(tmp_path):
+    volume = tmp_path / "pronunciation.json"
+    assert T.dictionary_from_env({T.DICTIONARY_ENV: str(volume)}).path == volume
+    assert T.dictionary_from_env({}).path == T.DICTIONARY_FILE
+
+
+def test_leftovers_are_latin_and_digits_after_the_dictionary():
+    """Остаток после словаря и чисел — то, что F5 прочтёт по русским правилам:
+    кандидаты в pronunciation-extra.json (tools/stress_audit.py)."""
+    assert T.leftovers("Д+айр Стр+ейтс и Sting, AC/DC, 1979 и 15:30, «Don't».") == [
+        "Sting", "AC", "DC", "1979", "15:30", "Don't"]
+    assert T.leftovers("Кино, восемьдесят девятый год.") == []
 
 
 def test_shipped_dictionary_covers_the_complaints_and_is_well_formed():

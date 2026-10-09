@@ -6,9 +6,10 @@
 import sys
 from pathlib import Path
 
-import numpy as np
 import pytest
 
+np = pytest.importorskip("numpy")      # без него пропускается этот файл, а не весь набор
+pytest.importorskip("num2words")       # f5_service → f5_numbers
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tts-f5"))
 import f5_audio as A  # noqa: E402
 import f5_service as S  # noqa: E402
@@ -207,6 +208,26 @@ def test_latin_is_respelled_before_synthesis(voices):
     assert eng.calls[0][3] == "Это эй ай радио."
 
 
+class SpyAccent(FakeAccent):
+    def __init__(self):
+        self.seen = []
+
+    def apply(self, text):
+        self.seen.append(text)
+        return super().apply(text)
+
+
+def test_numbers_are_spelled_before_the_accent(voices):
+    """Годы и проценты доходили до F5 цифрами: числительных в цепочке не было. Слова
+    нужны до RUAccent — иначе числительное осталось бы без ударений."""
+    accent, eng = SpyAccent(), FakeEngine()
+    S.Service(eng, voices, "ru-host", accent, W.Worker(), queue_wait=1.0,
+              log=lambda *_: None).speak("В 1969 году дождь шёл с вероятностью 80%.")
+    assert accent.seen == ["В тысяча девятьсот шестьдесят девятом году дождь шёл "
+                           "с вероятностью восемьдесят процентов."]
+    assert not any(ch.isdigit() for call in eng.calls for ch in call[3])
+
+
 class StrictAccent(FakeAccent):
     """Как настоящая: текст, где «+» уже стоят, не размечается вовсе."""
 
@@ -214,12 +235,15 @@ class StrictAccent(FakeAccent):
         return text if "+" in text else super().apply(text)
 
 
-def test_collection_dictionary_goes_after_the_accent(voices, monkeypatch):
+def test_collection_dictionary_goes_after_the_accent(voices, monkeypatch, tmp_path):
     # «+» словаря, попади он к RUAccent раньше, оставил бы без ударений всю реплику
+    import json
+
     import f5_text
-    d = {"dire straits": "Д+айр Стр+ейтс"}
-    monkeypatch.setattr(f5_text, "DICTIONARY", d)
-    monkeypatch.setattr(f5_text, "_DICTIONARY", f5_text._dictionary_pattern(d))
+    path = tmp_path / "pronunciation.json"
+    path.write_text(json.dumps({"words": {}, "phrases": {"dire straits": "Д+айр Стр+ейтс"}},
+                               ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(f5_text, "DICTIONARY", f5_text.Dictionary(path, fallback=path))
     eng = FakeEngine()
     S.Service(eng, voices, "ru-host", StrictAccent(), W.Worker(), queue_wait=1.0,
               log=lambda *_: None).speak("Старый замок и Dire Straits.")

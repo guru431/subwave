@@ -8,9 +8,9 @@ import sys
 import wave
 from pathlib import Path
 
-import numpy as np
 import pytest
 
+np = pytest.importorskip("numpy")      # без него пропускается этот файл, а не весь набор
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tts-f5"))
 import f5_audio as A  # noqa: E402
 

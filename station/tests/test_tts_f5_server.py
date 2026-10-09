@@ -11,8 +11,11 @@ import types
 from pathlib import Path
 
 import pytest
-from starlette.formparsers import MultiPartParser
 
+# без них пропускается этот файл, а не весь набор; numpy и num2words нужны f5_service
+pytest.importorskip("numpy")
+pytest.importorskip("num2words")
+MultiPartParser = pytest.importorskip("starlette.formparsers").MultiPartParser
 F5_DIR = Path(__file__).resolve().parent.parent / "tts-f5"
 sys.path.insert(0, str(F5_DIR))
 import f5_service as S  # noqa: E402

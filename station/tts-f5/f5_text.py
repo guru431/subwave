@@ -8,7 +8,10 @@
 окончание.
 """
 import json
+import os
 import re
+import threading
+import time
 from pathlib import Path
 
 VOWELS = "аеёиоуыэюяАЕЁИОУЫЭЮЯ"
@@ -33,7 +36,11 @@ _PRONUNCIATION = re.compile(r"\b(" + "|".join(map(re.escape, PRONUNCIATION)) + r
 # «Востинг Майхэд», «Dire Straits» — «Даррис Тредс» (эфир 23.09). Применяется ПОСЛЕ
 # RUAccent (cyrillize): «+» из словаря, попав к ней, выключил бы разметку всей
 # реплики (Accentizer.apply), а латиницу она оставляет как есть.
+# Рабочий словарь — на томе службы (F5_PRONUNCIATION): новый исполнитель не ждёт
+# пересборки образа. Копия в образе — запасная: без тома или с пропавшим файлом.
 DICTIONARY_FILE = Path(__file__).with_name("pronunciation.json")
+DICTIONARY_ENV = "F5_PRONUNCIATION"
+RELOAD_CHECK_S = 30.0
 
 
 def dictionary_key(s: str) -> str:
@@ -62,9 +69,62 @@ def load_dictionary(path: Path) -> dict[str, str]:
     return {**data["words"], **data["phrases"]}
 
 
-DICTIONARY = load_dictionary(DICTIONARY_FILE)
-_DICTIONARY = _dictionary_pattern(DICTIONARY)
+class Dictionary:
+    """Словарь коллекции, перечитываемый по mtime: том, а без него — копия в образе.
+
+    cyrillize зовётся на каждую реплику, поэтому stat — не чаще раза в check_every.
+    Недописанный файл (его переписывают на месте) оставляет прежний словарь до
+    следующей проверки; на старте — копию из образа."""
+
+    def __init__(self, path, fallback=DICTIONARY_FILE, check_every=RELOAD_CHECK_S,
+                 clock=time.monotonic, log=print):
+        self.path, self.fallback = Path(path), Path(fallback)
+        self.check_every, self.clock, self.log = check_every, clock, log
+        self._lock = threading.Lock()
+        self._state = ({}, None)        # слова и regex — одним кортежем: читатель без замка
+        self._stamp = None              # (файл, mtime, размер) загруженного словаря
+        self._refresh()
+
+    def current(self) -> tuple[dict[str, str], re.Pattern | None]:
+        # занят замок — перечитывает другой поток; этот берёт словарь, какой есть
+        if self.clock() - self._checked >= self.check_every and self._lock.acquire(blocking=False):
+            try:
+                self._refresh()
+            finally:
+                self._lock.release()
+        return self._state
+
+    def _refresh(self) -> None:
+        self._checked = self.clock()
+        for source in dict.fromkeys((self.path, self.fallback)):
+            try:
+                st = source.stat()
+            except OSError:
+                continue
+            stamp = (source, st.st_mtime_ns, st.st_size)
+            if stamp == self._stamp:
+                return
+            try:
+                words = load_dictionary(source)
+            except (OSError, ValueError, KeyError) as e:
+                self.log(f"pronunciation: {source} не прочитан ({type(e).__name__}: {e})")
+                if self._stamp is not None:
+                    return              # словарь есть — держим его до следующей проверки
+                continue
+            if self._stamp is not None:
+                self.log(f"pronunciation: перечитан {source}, записей {len(words)}")
+            self._state, self._stamp = (words, _dictionary_pattern(words)), stamp
+            return
+
+
+def dictionary_from_env(env=os.environ) -> Dictionary:
+    """Словарь с тома из F5_PRONUNCIATION; переменной нет — копия в образе."""
+    return Dictionary(env.get(DICTIONARY_ENV) or DICTIONARY_FILE)
+
+
+DICTIONARY = dictionary_from_env()
 _LATIN = re.compile(r"[A-Za-z]")
+_LEFTOVER = re.compile(r"[A-Za-z][A-Za-z'.]*|\d+(?:[.,:]\d+)*")
 
 
 # Паузы на стыках единиц синтеза, мс. Внутри одного куска F5 сам решает, где дышать, и
@@ -127,9 +187,16 @@ def respell(text: str) -> str:
 
 def cyrillize(text: str) -> str:
     """Латиница из словаря коллекции — русскими буквами с ударением, прочее как есть."""
-    if _DICTIONARY is None or not _LATIN.search(text):
+    words, pattern = DICTIONARY.current()
+    if pattern is None or not _LATIN.search(text):
         return text
-    return _DICTIONARY.sub(lambda m: DICTIONARY[dictionary_key(m.group(0))], text)
+    return pattern.sub(lambda m: words[dictionary_key(m.group(0))], text)
+
+
+def leftovers(text: str) -> list[str]:
+    """Латиница и цифры, оставшиеся в тексте для F5, — их он прочтёт по русским
+    правилам. После cyrillize это кандидаты в tools/pronunciation-extra.json."""
+    return _LEFTOVER.findall(text)
 
 
 def has_stress_marks(text: str) -> bool:

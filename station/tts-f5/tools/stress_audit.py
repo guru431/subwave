@@ -3,8 +3,10 @@ r"""Аудит ударений на настоящих репликах вед�
 Сначала эталон — реплики эфира, на которых ударения уже были неверны; любой
 промах — код выхода 1. Затем по каждому слову корпуса — откуда знак: словарь,
 нейросеть (слова нет в словаре) или модель омографов; слова из двух и больше
-гласных без знака; латиница, которую F5 прочтёт сам. Повторять после каждой правки
-ударений (f5_accent: поправки, омографы, фразы) — и до выкатки образа.
+гласных без знака; остаток — латиница и цифры, которые дошли бы до F5 и после
+словаря коллекции, и после чисел словами: их F5 прочтёт по русским правилам, это
+кандидаты в tools/pronunciation-extra.json. Повторять после каждой правки ударений
+(f5_accent: поправки, омографы, фразы) — и до выкатки образа.
 
     stress_audit.py <corpus.json> [workdir]
 
@@ -12,8 +14,10 @@ corpus.json — список строк, реплики ведущей: его �
 Debian, отдельную реплику берут из `docker logs sub-wave-controller`. workdir —
 модели RUAccent и dictionary\accents.sqlite, по умолчанию `ruaccent` в каталоге
 службы (рядом с `app`, где лежит этот `tools`).
-Запускать на хосте gpu-host в венве с ruaccent (D:\Temp\f5-probe\venv); f5_accent и
-f5_text берутся из каталога над tools — копию до выкатки можно проверить где угодно.
+Запускать на хосте gpu-host в венве с ruaccent и num2words (D:\Temp\f5-probe\venv);
+модули службы (f5_accent, f5_service, f5_text) берутся из каталога над tools — копию
+до выкатки можно проверить где угодно. Словарь коллекции — тот же, что у службы:
+F5_PRONUNCIATION, без неё — pronunciation.json рядом с f5_text.
 """
 import collections
 import json
@@ -25,6 +29,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import f5_text  # noqa: E402
 from f5_accent import Accentizer  # noqa: E402
+from f5_service import before_accent  # noqa: E402
 
 # Реплики эфира 23.09 и слова, которые в них звучали неверно, — в верном виде.
 GOLDEN = [
@@ -72,7 +77,7 @@ m = acc._model
 
 misses = 0
 for text, *expected in GOLDEN:
-    marked = acc.apply(f5_text.respell(text))
+    marked = acc.apply(before_accent(text))
     lost = [e for e in expected if not re.search(rf"(?<![\w+]){re.escape(e)}(?![\w+])", marked)]
     if lost:
         misses += 1
@@ -81,10 +86,10 @@ print(f"эталон: {len(GOLDEN) - misses} из {len(GOLDEN)}")
 
 with open(sys.argv[1], encoding="utf-8") as f:
     texts = json.load(f)
-missing, nn, omo, latin = collections.Counter(), {}, collections.Counter(), collections.Counter()
+missing, nn, omo, rest = collections.Counter(), {}, collections.Counter(), collections.Counter()
 total = 0
 for t in texts:
-    marked = acc.apply(f5_text.respell(t))
+    marked = acc.apply(before_accent(t))
     for w in re.findall(r"[А-Яа-яЁё+\-]+", marked):
         plain = w.replace("+", "").lower().strip("-")
         if not plain:
@@ -97,8 +102,9 @@ for t in texts:
             nn[plain] = w.lower()
         if plain in m.omographs:
             omo[f"{plain} → {w.lower()}"] += 1
-    for w in re.findall(r"[A-Za-z][A-Za-z'.]*", t):
-        latin[w] += 1
+    # до словаря коллекции латиницы много, а важно, что от неё осталось после
+    for w in f5_text.leftovers(f5_text.cyrillize(marked)):
+        rest[w] += 1
 
 print(f"\nреплик {len(texts)}, русских слов {total}")
 print(f"\nБЕЗ ЗНАКА (≥2 гласных, без ё): {sum(missing.values())}")
@@ -110,6 +116,6 @@ for w in sorted(nn):
 print(f"\nОМОГРАФЫ: {len(omo)}")
 for w, c in omo.most_common():
     print(f"  {w} ×{c}")
-print(f"\nЛАТИНИЦА: {len(latin)} разных")
-print("  " + ", ".join(f"{w}×{c}" if c > 1 else w for w, c in latin.most_common()))
+print(f"\nОСТАТОК после словаря и чисел (латиница и цифры, F5 прочтёт сам): {len(rest)} разных")
+print("  " + ", ".join(f"{w}×{c}" if c > 1 else w for w, c in rest.most_common()))
 sys.exit(1 if misses else 0)

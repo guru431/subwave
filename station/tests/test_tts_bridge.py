@@ -93,8 +93,8 @@ class _FakeHandler(bridge.Handler):
         self.path = "/speak"
         self.sent = []
 
-    def _send(self, code, body, ctype, close=False):
-        self.sent.append((code, body, close))
+    def _send(self, code, body, ctype, close=False, headers=None):
+        self.sent.append((code, body, close, headers or {}))
 
 
 def test_bad_request_answers_400_without_touching_gpu(monkeypatch):
@@ -161,10 +161,12 @@ def test_negative_content_length_is_refused(monkeypatch):
 # в ту же пачку и бесполезен (проверено на живом сервисе).
 
 
-def _upstream(monkeypatch, answers):
-    """Подменяет upstream списком исходов: HTTPError(код) либо байты аудио."""
+def _upstream(monkeypatch, answers, headers=None):
+    """Подменяет upstream списком исходов: HTTPError(код) либо байты аудио.
+    headers — заголовки удачного ответа сверх Content-Type."""
     import io
     seen = []
+    reply_headers = {"Content-Type": "audio/wav", **(headers or {})}
 
     def fake_urlopen(req, timeout=None):
         if "audio/speech" not in req.full_url:
@@ -177,7 +179,7 @@ def _upstream(monkeypatch, answers):
                 io.BytesIO(b'{"error":"TTS generation failed"}'))
 
         class _Resp:
-            headers = {"Content-Type": "audio/wav"}
+            headers = reply_headers
             def read(self): return outcome
             def __enter__(self): return self
             def __exit__(self, *a): return False
@@ -254,6 +256,34 @@ def test_retry_renews_the_gpu_lease(monkeypatch):
     assert len(leased) == 2
 
 
+FELL_BACK = {"X-TTS-Voice-Used": "ru-host", "X-TTS-Fell-Back": "1",
+             "X-TTS-Fell-Back-Reason": 'unknown voice "ru-rajt"'}
+
+
+def test_voice_substitution_headers_reach_the_station(monkeypatch):
+    # контроллер видит подмену голоса только по X-TTS-Fell-Back (#238, remoteTts.ts);
+    # мостик отдавал Content-Type и Content-Length, и предупреждение молчало всегда
+    _upstream(monkeypatch, [b"WAV"], {**FELL_BACK, "Server": "uvicorn", "Date": "x"})
+    handler = _FakeHandler('{"text":"а","voice":"ru-rajt"}'.encode())
+    handler.do_POST()
+    code, body, _, headers = handler.sent[0]
+    assert code == 200 and body == b"WAV"
+    assert headers == FELL_BACK            # только три заголовка голоса, не всё подряд
+
+
+def test_voice_headers_go_out_on_the_wire():
+    import io
+    handler = bridge.Handler.__new__(bridge.Handler)
+    handler.wfile = io.BytesIO()
+    handler.request_version, handler.requestline = "HTTP/1.1", "POST /speak HTTP/1.1"
+    handler.command, handler.close_connection = "POST", False
+    handler._send(200, b"WAV", "audio/wav", headers=FELL_BACK)
+    wire = handler.wfile.getvalue().decode("latin-1")
+    assert "\r\nX-TTS-Fell-Back: 1\r\n" in wire
+    assert '\r\nX-TTS-Fell-Back-Reason: unknown voice "ru-rajt"\r\n' in wire
+    assert wire.endswith("\r\n\r\nWAV")
+
+
 def test_retries_can_be_switched_off(monkeypatch):
     seen = _upstream(monkeypatch, [500])
     monkeypatch.setattr(bridge, "RETRIES", 0)
@@ -301,6 +331,99 @@ def test_queue_that_never_clears_answers_503(monkeypatch):
         assert handler.sent[0][0] == 503
     finally:
         bridge._synthesis.release()
+
+
+# ── аренда слота при неудачном /health ───────────────────────────────────────
+#
+# Гейт C05 (группа voice) не шлёт /speak, пока /health мостика — 503. А аренду слота
+# берёт только /speak: раньше выгнанный пультом слот tts будили именно ошибочные
+# /speak, теперь их нет. Поэтому неудачный /health сам просит слот — в фоне.
+
+
+def _health_upstream(monkeypatch, ok):
+    def fake_urlopen(url, timeout=None):
+        if not ok:
+            raise urllib.error.URLError("F5 выгнан пультом")
+
+        class _Resp:
+            status = 200
+            def read(self): return b'{"model_loaded": true}'
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        return _Resp()
+
+    monkeypatch.setattr(bridge.urllib.request, "urlopen", fake_urlopen)
+
+
+@pytest.fixture
+def health_leases(monkeypatch):
+    """Аренды, запущенные /health; пульт задан, окно и замок — свежие."""
+    leased = threading.Semaphore(0)
+    monkeypatch.setattr(bridge, "GPU_CTL_URL", "http://10.0.0.5:8119")
+    monkeypatch.setattr(bridge, "lease_slot", leased.release)
+    monkeypatch.setattr(bridge, "_health_lease_lock", threading.Lock())
+    monkeypatch.setattr(bridge, "_health_lease_at", None)
+    return leased
+
+
+def _get_health():
+    handler = _FakeHandler(b"")
+    handler.path = "/health"
+    handler.do_GET()
+    return handler.sent[0][0]
+
+
+def test_failed_health_leases_the_slot(monkeypatch, health_leases):
+    _health_upstream(monkeypatch, ok=False)
+    assert _get_health() == 503
+    assert health_leases.acquire(timeout=5)
+
+
+def test_failed_health_leases_once_per_window(monkeypatch, health_leases):
+    monkeypatch.setattr(bridge, "HEALTH_LEASE_EVERY", 60)
+    _health_upstream(monkeypatch, ok=False)
+    assert _get_health() == 503 and health_leases.acquire(timeout=5)
+    first = bridge._health_lease_at
+    assert _get_health() == 503
+    assert bridge._health_lease_at == first              # повтор внутри окна — без аренды
+
+
+def test_healthy_upstream_does_not_lease(monkeypatch, health_leases):
+    _health_upstream(monkeypatch, ok=True)
+    assert _get_health() == 200
+    assert bridge._health_lease_at is None
+
+
+def test_health_lease_needs_the_controller(monkeypatch, health_leases):
+    monkeypatch.setattr(bridge, "GPU_CTL_URL", "")
+    _health_upstream(monkeypatch, ok=False)
+    assert _get_health() == 503
+    assert bridge._health_lease_at is None
+
+
+def test_health_does_not_wait_for_the_lease_and_runs_one_at_a_time(monkeypatch, health_leases):
+    # аренда идёт до GPU_CTL_TIMEOUT (90 с): /health её не ждёт, а второй поток при
+    # окне 0 не стартует, пока первый не кончился
+    monkeypatch.setattr(bridge, "HEALTH_LEASE_EVERY", 0)
+    started, release, finished, calls = (threading.Event(), threading.Event(),
+                                         threading.Event(), [])
+
+    def slow_lease():
+        calls.append(1)
+        started.set()
+        release.wait(5)
+        finished.set()
+
+    monkeypatch.setattr(bridge, "lease_slot", slow_lease)
+    _health_upstream(monkeypatch, ok=False)
+    try:
+        assert _get_health() == 503
+        assert started.wait(5) and not finished.is_set()     # ответ ушёл, аренда висит
+        assert _get_health() == 503
+        assert calls == [1]                                  # второй поток не стартовал
+    finally:
+        release.set()
+        assert finished.wait(5)
 
 
 def test_prep_voice_takes_library_url_from_environment(monkeypatch):

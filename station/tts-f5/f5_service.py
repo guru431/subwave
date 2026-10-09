@@ -9,11 +9,18 @@ import time
 from dataclasses import dataclass, field
 
 import f5_audio
+import f5_numbers
 import f5_text
 from f5_voices import resolve, voice_from_audio
 from f5_worker import BROADCAST, CLONE, QueueTimeout
 
 MAX_TEXT_CHARS = 20000
+
+
+def before_accent(text: str) -> str:
+    """Текст до RUAccent: латиница из PRONUNCIATION и числа — словами (числительному
+    тоже нужны ударения). Тем же путём реплику размечает tools/stress_audit.py."""
+    return f5_numbers.normalize(f5_text.respell(text))
 
 
 class ServiceError(Exception):
@@ -91,7 +98,7 @@ class Service:
             raise ServiceError(400, "текст обязателен и должен быть непустой строкой")
         if len(text) > MAX_TEXT_CHARS:
             raise ServiceError(413, f"текст длиннее {MAX_TEXT_CHARS} символов")
-        marked = f5_text.cyrillize(self.accentizer.apply(f5_text.respell(text.strip())))
+        marked = f5_text.cyrillize(self.accentizer.apply(before_accent(text.strip())))
         if not marked.strip():
             # иначе нарезка не даёт ни куска, и ответ 200 несёт WAV без отсчётов
             raise ServiceError(400, "после разметки ударений от текста ничего не осталось")
