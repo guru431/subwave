@@ -16,11 +16,15 @@
     GET  /admin/dislikes              → {"artists": [...], "tracks": [...]}   (пароль владельца)
     POST /admin/dislikes/decide       → {"ok": true}   (тело — {kind, key, action})
 
-Личность слушателя приезжает заголовками `X-Listener-Id` и `X-Listener-Name`:
-ни паролей, ни базы пользователей — станция закрыта общим паролем, аудитория
-семейная, и подмена имени даёт ровно то, что и так доступно (написать под чужим
-именем). Имя едет percent-encoded: заголовки по RFC 7230 — latin-1, и кириллица
-в них иначе не проходит.
+Личность слушателя приезжает заголовками `X-Listener-Id` и `X-Listener-Name`,
+и это подпись, а не учётка: ни паролей, ни базы пользователей. Станция открыта
+всем, кто знает адрес (осознанное решение, station/docs/deploy.md), и `/room/*`
+вместе с ней — читать ленту и писать в неё может кто угодно. Чат публичен
+осознанно: в нём нет ничего, кроме того, что слушатели сами написали, а подмена
+имени даёт ровно это — написать под чужим именем. Держат комнату лимиты: личный
+и общий на запись, потолки сверок и подписок, лента — неделю и не больше
+LIMIT_MAX последних сообщений на запрос. Имя едет percent-encoded: заголовки по
+RFC 7230 — latin-1, и кириллица в них иначе не проходит.
 
 Запросы `/admin/…` — владельцу станции: вместо личности слушателя у них пароль
 админки в `Authorization`, и проверяет его контроллер (`admin.py`).
@@ -51,11 +55,14 @@ import notify
 import push
 import station
 import subsonic
-from store import Store
+from store import RETENTION_DAYS, Store
 
 FEED_LIMIT = 50          # сколько отдаём плееру по умолчанию
 UNREAD_LIMIT = 20        # сколько отдаём ведущему: он читает вслух, не листает
-LIMIT_MAX = 200
+# Больше не отдаём, сколько бы ни попросили: лента открыта наружу, а
+# `since` отдаёт самые свежие после курсора — листать назад нечем, и снаружи
+# видно не больше LIMIT_MAX последних сообщений. Плееру хватает FEED_LIMIT.
+LIMIT_MAX = FEED_LIMIT
 # Сколько байт отвергнутого тела согласны вычитать, чтобы ответ дошёл до
 # клиента. Больше — обрываем соединение: дочитывать мегабайты за тем, кто уже
 # нарушил лимит, значит выполнять его работу.
@@ -630,7 +637,7 @@ def push_subject(environ) -> str:
 def main() -> None:
     port = int(os.environ.get("PORT", "8080"))
     store = Store(os.environ.get("ROOM_DB", "/data/room.db"),
-                  retention_days=int(os.environ.get("RETENTION_DAYS", "14")))
+                  retention_days=int(os.environ.get("RETENTION_DAYS", RETENTION_DAYS)))
     config = Config(
         rate_seconds=int(os.environ.get("RATE_SECONDS", "60")),
         rate_max=int(os.environ.get("RATE_MAX", "10")),

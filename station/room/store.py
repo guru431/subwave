@@ -72,6 +72,10 @@ CREATE TABLE IF NOT EXISTS dislike_decisions (
 PUSH_FAILURES_MAX = 5
 PUSH_STALE_DAYS = 30
 PUSH_GONE = (404, 410)
+# Сколько дней хранится лента. Она открыта всем, кто знает адрес станции,
+# поэтому короткая память — часть защиты; неделя — то, что нужно от чата
+# ведущему и слушателям.
+RETENTION_DAYS = 7
 
 
 def _iso(moment: datetime) -> str:
@@ -86,7 +90,7 @@ def _iso_ms(moment: datetime) -> str:
 
 
 class Store:
-    def __init__(self, path: str, retention_days: int = 14,
+    def __init__(self, path: str, retention_days: int = RETENTION_DAYS,
                  now: datetime | None = None):
         # check_same_thread=False: сервер — ThreadingHTTPServer, соединение одно
         # на процесс. Блокировка — потому что рассылка push идёт фоновым

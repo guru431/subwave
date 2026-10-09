@@ -206,6 +206,18 @@ def test_window_counts_hits_in_a_sliding_window():
     assert window.take(now=121)
 
 
+def test_feed_limit_is_capped_whatever_the_client_asks(room):
+    # лента открыта наружу: сколько бы ни попросил клиент, отдаётся не больше
+    # 50 последних (столько и берёт плеер), листать назад нечем
+    base, store, _ = room
+    for i in range(60):
+        store.add(f"l{i}", "Аня", f"сообщение {i}")
+    for path in ("/messages?limit=1000", "/unread?limit=1000"):
+        code, body = call(base, path)
+        assert code == 200 and len(body["messages"]) == 50
+        assert body["messages"][-1]["text"] == "сообщение 59"
+
+
 def test_unread_returns_only_what_is_newer(room):
     base, _, _ = room
     call(base, "/messages", {"text": "раз"}, {"X-Listener-Id": "l1"})

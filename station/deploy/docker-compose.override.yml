@@ -70,7 +70,7 @@ services:
     restart: unless-stopped
     environment:
       ROOM_DB: /data/room.db
-      RETENTION_DAYS: "14"
+      RETENTION_DAYS: "7"
       RATE_SECONDS: "60"
       RATE_MAX: "10"
       NAVIDROME_URL: ${NAVIDROME_URL}

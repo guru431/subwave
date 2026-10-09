@@ -175,6 +175,15 @@ def test_prune_drops_old_and_keeps_fresh(store):
     assert [m["id"] for m in store.since(0, 10)] == [fresh["id"]]
 
 
+def test_feed_is_kept_for_a_week_by_default(store):
+    # лента открыта всем, кто знает адрес станции: короткая память — часть
+    # защиты, и неделя — то, что ведущему и слушателям нужно от чата
+    store.add("l1", "Аня", "восемь дней назад", now=T0 - timedelta(days=8))
+    kept = store.add("l1", "Аня", "шесть дней назад", now=T0 - timedelta(days=6))
+    assert store.prune(now=T0) == 1
+    assert [m["id"] for m in store.since(0, 10)] == [kept["id"]]
+
+
 def test_reopened_store_keeps_messages(tmp_path):
     path = str(tmp_path / "room.db")
     s = store_mod.Store(path)
