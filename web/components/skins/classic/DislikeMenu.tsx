@@ -27,7 +27,11 @@ export default function DislikeMenu({ songId, title, artist, size = 15, classNam
   const on = isMarked(mark);
   const label = { title, artist };
   return (
-    <DropdownMenu>
+    // Ключ — песня. Строки «Уже прозвучало» апстрим ключует по индексу, и на
+    // смене трека они сдвигаются: без ключа открытое меню оставалось открытым,
+    // а его пункты уже отмечали соседнюю песню. Другая песня — другое меню,
+    // смена его закрывает.
+    <DropdownMenu key={id}>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
