@@ -11,7 +11,7 @@ r"""Аудит ударений на настоящих репликах вед�
     stress_audit.py <corpus.json> [workdir]
 
 corpus.json — список строк, реплики ведущей: его собирает tools/stress_corpus.py на
-Debian, отдельную реплику берут из `docker logs sub-wave-controller`. workdir —
+хосте станции, отдельную реплику берут из `docker logs sub-wave-controller`. workdir —
 модели RUAccent и dictionary\accents.sqlite, по умолчанию `ruaccent` в каталоге
 службы (рядом с `app`, где лежит этот `tools`).
 Запускать на хосте gpu-host в венве с ruaccent и num2words (D:\Temp\f5-probe\venv);

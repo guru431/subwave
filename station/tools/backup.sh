@@ -6,7 +6,7 @@
 # апстрима пишет в тот же state/, не берёт blocklist.json и folder-genres.json, а
 # комната целиком лежит вне state/.
 #
-#   на хосте станции:   sudo BACKUP_STACK_DIR=<deploy-dir>/subwave \
+#   на хосте станции:   sudo BACKUP_STACK_DIR=<stack-dir> \
 #                         BACKUP_DEST_DIR=<share>/radio/backup bash backup.sh
 #   с рабочей машины:   bash station/tools/backup.sh --remote
 #     скрипт уезжает на хост станции по ssh (stdin → временный файл) и

@@ -1090,7 +1090,7 @@ bash station/tools/push-to-station.sh <ref>          # по умолчанию H
 cd ~/radio && bash station/tools/guarded.sh sudo docker build -f web/Dockerfile -t subwave-web:1.17.0-ru \
   --label org.opencontainers.image.revision=$(git rev-parse HEAD) \
   --build-arg SUBWAVE_BUILD_VERSION=1.17.0-ru+$(git rev-parse --short HEAD) .
-cd <deploy-dir>/subwave && sudo docker compose up -d web
+cd <stack-dir> && sudo docker compose up -d web
 ```
 
 **Доставка ревизии** — [push-to-station.sh](../tools/push-to-station.sh): `git bundle` всех

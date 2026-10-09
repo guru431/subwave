@@ -358,7 +358,7 @@ db.commit()
 
 ## База
 
-SQLite на томе хоста — `<deploy-dir>/subwave/room/room.db`. **Не на шаре**:
+SQLite на томе хоста станции — `<stack-dir>/room/room.db`. **Не на шаре**:
 SQLite на CIFS повреждается, это правило проекта. Вторая таблица —
 `push_subscriptions` (адрес, ключи, id и имя слушателя, счётчик отказов, время
 последнего успеха). Колонку `last_success_at` прежний `room.db` получает сам при
@@ -389,7 +389,7 @@ SQLite на CIFS повреждается, это правило проекта.
 ```bash
 # на хосте станции, в клоне ~/radio (его обновляет station/tools/push-to-station.sh)
 cd ~/radio && bash station/tools/guarded.sh sudo docker build -t subwave-room:2 station/room
-cd <deploy-dir>/subwave && sudo docker compose up -d room
+cd <stack-dir> && sudo docker compose up -d room
 ```
 
 Переменные (`NAVIDROME_URL`, `NAVIDROME_USER`, `NAVIDROME_PASS`, `PUSH_SUBJECT`)

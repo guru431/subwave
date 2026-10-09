@@ -1,6 +1,6 @@
 # subwave — эфир с ведущим
 
-Живёт на хосте станции в `<deploy-dir>/subwave`.
+Живёт на хосте станции в `<stack-dir>`.
 Единственная часть проекта в Docker — у subwave нет нативной установки: `controller`
 и `web` собираются в образы, `broadcast` — это `icecast2` + `liquidsoap` под supervisor
 в одном контейнере.
@@ -37,8 +37,8 @@ Apache. Официальная инструкция при этом требуе
 
 ## Установка и восстановление с нуля
 
-Хост станции с 2026-10 — srvllm (`/opt/ai/stacks/subwave`, контейнеры видны в Arcane), Apache и
-Navidrome — на debian. Собственные образы при переезде переносятся `docker save | docker load`;
+Хост станции с 2026-10 — srvllm (`<stack-dir>`, контейнеры видны в Arcane), Apache и
+Navidrome — на debian (`<debian-host>`). Собственные образы при переезде переносятся `docker save | docker load`;
 копия `state/` и `room/` — ежесуточно на сетевое хранилище (`srvllm-stacks-backup`).
 
 `<репозиторий>` ниже — клон форка на хосте станции, `~/radio`: его доставляет
@@ -63,8 +63,8 @@ Navidrome — на debian. Собственные образы при перее
 Piper не останется ни одного голоса. `room/` (база комнаты) и `state/` Docker заводит сам.
 
 ```bash
-mkdir -p <deploy-dir>/subwave/caddy <deploy-dir>/subwave/piper-voices
-cd <deploy-dir>/subwave
+mkdir -p <stack-dir>/caddy <stack-dir>/piper-voices
+cd <stack-dir>
 cp <репозиторий>/docker-compose.yml .                               # версия апстрима под форком
 cp <репозиторий>/station/deploy/docker-compose.override.yml .      # наши образы, голоса Piper, комната
 cp <репозиторий>/station/deploy/caddy/Caddyfile caddy/              # маршрут /room/*
@@ -184,7 +184,7 @@ python3 onboard.py --persona p_ru --from /tmp/freq.json
 
 | Поле | Значение | Почему так |
 |---|---|---|
-| Navidrome URL | `http://<station-host>:4533` | LAN-адрес хоста, **не** `127.0.0.1`: контроллер работает в контейнере, и петлевой адрес указывал бы внутрь него |
+| Navidrome URL | `http://<debian-host>:4533` | LAN-адрес хоста Navidrome (debian, не хост станции), **не** `127.0.0.1`: контроллер работает в контейнере, и петлевой адрес указывал бы внутрь него |
 | Navidrome user / pass | учётка Navidrome из менеджера секретов | та же учётка, что у Subsonic API. Заданные в `.env` стека `NAVIDROME_*` главнее мастера: контроллер читает их через `env_file`, и правка в мастере при них не действует — менять в `.env` (их же читает комната) |
 | LLM | провайдер `openai-compatible`, база `http://<station-host>:4000/v1`, модель — **имя роли** `chat`, ключ шлюза | шлюз LiteLLM; сверено с живой станцией 2026-09-21: `/api/doctor` отвечает `openai-compatible:chat · reachable`, `0/20 failed`, `1/3002 calls errored` |
 | TTS | см. ниже | |
@@ -206,10 +206,12 @@ POST /speak   →  {"text": "...", "voice": "..."}  →  тело ответа =
 
 Chatterbox отвечает по схеме OpenAI (`POST /v1/audio/speech`), поэтому между ними стоит
 мостик из этого репозитория — [`tts-bridge/bridge.py`](../tts-bridge/bridge.py) на
-стандартной библиотеке. Server URL в админке — адрес мостика на gpu-host.
+стандартной библиотеке. Server URL в админке — адрес мостика, `http://<station-host>:4124`
+(с 2026-10-09 мостик на хосте станции; до того — на gpu-host).
 
 Движки запасного TTS встроены в образ контроллера, ставить их не нужно. Сайдкар
-`tts-heavy` на Debian не ставим — 5–6 ГБ PyTorch при 20 ГБ свободных на `/`.
+`tts-heavy` не ставим — 5–6 ГБ PyTorch; на Debian, где стек жил до 2026-10-09, было
+20 ГБ свободных на `/`.
 
 **Русскую модель Piper пришлось доложить руками** (2026-08-23): в образе лежал один
 голос — `en_GB-alan-medium`, у Kokoro 54 голоса без русского, и при остановленном мостике
@@ -451,9 +453,9 @@ HTML network-first. Писать ничего этого не пришлось.
 
 Конфиг: [`apache-fm.conf.example`](../deploy/apache-fm.conf.example) +
 [`robots-fm.txt`](../deploy/robots-fm.txt); подключается одной строкой
-`IncludeOptional` в конфиг Apache хоста (бэкап файла — перед правкой, после —
+`IncludeOptional` в конфиг Apache на `<debian-host>` (бэкап файла — перед правкой, после —
 `apache2ctl configtest`, `graceful` и удаление бэкапа). Два виртуальных хоста: `*:80` редиректит на https,
-`*:<https-port>` терминирует TLS и проксирует всё на `127.0.0.1:7700`. Конкретика
+`*:<https-port>` терминирует TLS и проксирует всё на Caddy стека, `http://<station-host>:7700`. Конкретика
 установки (DNS, сертификат, NAT) ведётся вне репозитория.
 
 **`SITE_URL` в `.env` переведён на новый адрес.** Из него строятся абсолютные адреса,
@@ -475,8 +477,8 @@ OG-теги и sitemap; пока там стоял `http://<station-host>:7700`,
 шесть префиксов (`/api/settings`, `system`, `debug`, `doctor`, `backup`, `mcp`), а
 открытыми снаружи оставались 158 из 188 ручек под `requireAdmin`. Одна неудача там
 стоит дорого: `requireAdmin` засчитывает неудачей и анонимный запрос, после 10 неудач
-закрывает вход на 15 минут — по адресу клиента, а снаружи все приходят одним адресом
-docker-шлюза (ниже). Десять анонимных запросов из интернета к `/api/stations` или
+закрывает вход на 15 минут — по адресу клиента, а снаружи все приходят одним адресом,
+адресом Apache (ниже). Десять анонимных запросов из интернета к `/api/stations` или
 `/api/admin-auth` закрывали владельцу админку через домен; обход был только прямым
 входом по `:7700` из LAN. Перечень правящих путей к тому же отстаёт от апстрима сам
 собой, а белый список закрывает новую ручку сразу.
@@ -689,7 +691,7 @@ bash station/tools/backup.sh --remote
 не из шаблона.
 
 ```bash
-cd <deploy-dir>/subwave
+cd <stack-dir>
 A=<share>/radio/backup/station-backup-YYYYMMDD-HHMMSS.tar.gz
 tar -tzf "$A"                          # архив читается целиком
 sudo docker compose down               # базы не должны быть открыты

@@ -11,7 +11,7 @@
 
     python prep_voice.py "voices/<ролик диктора>.mp3" ru-host
 
-Адреса — из окружения: `TTS_BRIDGE_URL` (мостик, `http://<gpu-host>:4124`) и
+Адреса — из окружения: `TTS_BRIDGE_URL` (мостик, `http://<station-host>:4124`) и
 `CHATTERBOX_VOICES_URL` (библиотека голосов, `http://<gpu-host>:4123/voices`).
 """
 import json
@@ -46,7 +46,7 @@ def bridge_url() -> str:
     url = os.environ.get("TTS_BRIDGE_URL", "").strip().rstrip("/")
     if not url:
         raise SystemExit("TTS_BRIDGE_URL не задан: адрес мостика TTS, "
-                         "например http://<gpu-host>:4124")
+                         "например http://<station-host>:4124")
     return url
 
 MIN_CLIP = 5.0          # короче Chatterbox нечего клонировать

@@ -2,7 +2,7 @@
 
     python3 stress_corpus.py <logs-dir> > corpus.json
 
-logs-dir — state/logs стека станции, например <deploy-dir>/subwave/state/logs
+logs-dir — state/logs стека станции, например <stack-dir>/state/logs
 (журналы events-*.jsonl, с 2026-09-09). Многострочные ответы — рассуждение модели,
 утёкшее в ответ до правки контроллера, — и почти целиком латинские пропускаются.
 """

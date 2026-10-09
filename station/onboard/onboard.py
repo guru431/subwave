@@ -16,7 +16,7 @@ Python, а не shell: тело собирается `json.dumps`, а не `prin
 
     SUBWAVE_URL=http://<station-host>:7700 \\
     SUBWAVE_ADMIN_USER=admin SUBWAVE_ADMIN_PASS=... \\
-    NAVIDROME_URL=http://<station-host>:4533 \\
+    NAVIDROME_URL=http://<debian-host>:4533 \\
     NAVIDROME_USER=subwave NAVIDROME_PASS=... \\
     LLM_BASE_URL=http://<station-host>:4000/v1 LLM_MODEL=dj \\
     LLM_API_KEY=... ./onboard.py

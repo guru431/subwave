@@ -80,8 +80,9 @@
 **Комната, доступ, сеть**
 - `vapid.pem` на томе комнаты не пересоздавать: новый ключ обесценивает все подписки браузеров.
 - Пароль владельца проверяет контроллер; 401 — без `WWW-Authenticate` намеренно. Дизлайки — только сигнал.
-- `https://<station-domain>` → Apache на хосте станции → Caddy. Конфиг `station/deploy/apache-fm.conf.example`
-  подключён в **общий** `<apache-dir>/apache2.conf`: перед правкой бэкап, после —
+- `https://<station-domain>` → Apache на `<debian-host>` → Caddy стека на хосте станции
+  (`<station-host>:7700`). Конфиг `station/deploy/apache-fm.conf.example`
+  подключён в **общий** `<apache-dir>/apache2.conf` на `<debian-host>`: перед правкой бэкап, после —
   `apache2ctl configtest`, `graceful` и удаление бэкапа. Правило по пути — только `(?i)`; проверять сужением сетей в правиле
   и вариантами регистра.
 - Погода и MusicBrainz ходят через VPN (правило роутера по имени); «тормозит админка» —

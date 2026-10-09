@@ -1,7 +1,7 @@
 # TTS на GPU gpu-host
 
-Тяжёлый синтез вынесен на машину с картой: RTX 5060 Ti (16 ГБ), `<gpu-host>`.
-На Debian остаётся только лёгкое и постоянно работающее.
+До 2026-10-09 тяжёлый синтез был вынесен на машину с картой: RTX 5060 Ti (16 ГБ), `<gpu-host>`;
+на Debian, тогдашнем хосте станции, оставалось только лёгкое и постоянно работающее.
 
 **С 2026-10-09 мостик и F5 живут на srvllm** — разделы ниже описывают прежнюю площадку. Мостик —
 контейнер `tts-bridge` шага `interim` проекта llm_routers (`/opt/ai/interim/compose.yaml`, образ
@@ -260,7 +260,7 @@ python3 station/onboard/onboard.py --persona p_ru --from /tmp/voice.json
 
 ```bash
 B=https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU/irina/medium
-D=<deploy-dir>/subwave/piper-voices          # том, смонтированный в /opt/piper/voices
+D=<stack-dir>/piper-voices                    # том, смонтированный в /opt/piper/voices
 sudo curl -sL -o $D/ru_RU-irina-medium.onnx      $B/ru_RU-irina-medium.onnx
 sudo curl -sL -o $D/ru_RU-irina-medium.onnx.json $B/ru_RU-irina-medium.onnx.json
 # дальше — те же два шага, что выше, с --model .../ru_RU-irina-medium.onnx и voice_name=ru-irina
@@ -361,7 +361,7 @@ piper, и пока тот был мужским `dmitri` при женской �
 человека.
 
 ```bash
-cd <deploy-dir>/subwave
+cd <stack-dir>
 sudo cp -n .env .env.bak-$(date +%F)
 sudo sed -i 's|ru_RU-dmitri-medium|ru_RU-irina-medium|g' .env
 sudo docker compose up -d --force-recreate --no-deps controller   # сервис зовётся controller, не sub-wave-controller
@@ -440,7 +440,8 @@ Chatterbox отвечает `500` с ошибкой генерации на ча
 
 ## Подключение к subwave
 
-`Admin → Settings → Voices → Default engine → Remote`, Server URL — `http://<gpu-host>:4124`
-(мостик), не `:4123`. Контракт Remote — `GET /health` + `POST /speak`; Chatterbox говорит
+`Admin → Settings → Voices → Default engine → Remote`, Server URL — `http://<station-host>:4124`
+(мостик на хосте станции с 2026-10-09; до того — `http://<gpu-host>:4124`), не движок
+напрямую. Контракт Remote — `GET /health` + `POST /speak`; Chatterbox говорит
 по схеме OpenAI, мостик переводит одно в другое. Подробности — в
 [`docs/deploy.md`](../docs/deploy.md).
