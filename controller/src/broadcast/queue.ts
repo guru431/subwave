@@ -406,6 +406,7 @@ class Queue {
   senderBusy = false;          // drain-to-Liquidsoap mutex
   pendingForceDrain = false;   // a forced drain arrived while senderBusy — re-run on release
   pendingForceItem: QueueItem | null = null;   // Fork: the item that pending force must reach (clip-as-track)
+  _drainingItem: QueueItem | null = null;      // Fork: the item the drain has captured but not yet marked sent — see requestInsertIndex
   pickerBusy = false;          // prevent concurrent LLM picks
   autoPick = true;             // toggle: should we ask Ollama for next track when idle
   // How many picked-but-unplayed tracks may sit in Liquidsoap's dj_queue.
@@ -1034,13 +1035,20 @@ class Queue {
   // the queue) was stamped against. Splitting such a pair airs that track's
   // transition into the wrong song, so the request waits one slot more.
   // -1 = append.
+  //
+  // The item the drain is handing over counts as sent: it was captured before
+  // the drain's awaits (render, loudness, bed, writeHandoff) and goes to
+  // Liquidsoap whatever is inserted meanwhile. A request put in front of it
+  // would sit unsent AHEAD of a sent track — DRAIN_AHEAD never passes it, and
+  // onTrackStarted would have consumed it with the head.
   requestInsertIndex(): number {
-    const first = this.upcoming.findIndex(i => !i.sent && i.aiPicked);
+    const handedOver = (i: QueueItem) => i.sent || i === this._drainingItem;
+    const first = this.upcoming.findIndex(i => !handedOver(i) && i.aiPicked);
     if (first < 0) return -1;
-    const before = first > 0 ? this.upcoming[first - 1].sent : !!this.current;
+    const before = first > 0 ? handedOver(this.upcoming[first - 1]) : !!this.current;
     const paired = !!this.upcoming[first].stemSeam || (this.pairDrainActive() && before);
     if (!paired) return first;
-    return this.upcoming.findIndex((i, k) => k > first && !i.sent && i.aiPicked);
+    return this.upcoming.findIndex((i, k) => k > first && !handedOver(i) && i.aiPicked);
   }
 
   // A request the MIXER will silently eat (#1594). Log only — nothing is
@@ -1904,6 +1912,9 @@ class Queue {
               remainingSec: this.remainingUntilItemAirs(item),
             });
         if (action === 'hold') break;
+        // Fork: from here to `sent` the item is on its way to Liquidsoap — a
+        // request pushed during the awaits below must queue behind it.
+        this._drainingItem = item;
 
         // Render the track's intro/link WAV ahead of time but DON'T air it here
         // — airing now would play it over whatever's currently on-air, one (or
@@ -2131,6 +2142,7 @@ class Queue {
           }
         }
         item.sent = true;
+        this._drainingItem = null;
         this.persist();  // record the sent flag — these are now live in dj_queue
 
         // `sent` means "handed over", NOT "playable": Liquidsoap drops a
@@ -2145,6 +2157,7 @@ class Queue {
       }
     } finally {
       this.senderBusy = false;
+      this._drainingItem = null;
       if (this.pendingForceDrain) {
         this.pendingForceDrain = false;
         // Fork: a pending clip-as-track item still queued is the furthest
@@ -3278,12 +3291,20 @@ class Queue {
       // `idx > 0` means Liquidsoap already consumed those items — only possible
       // after a controller restart that missed their transitions. Splicing them
       // here keeps recovered zombies from lingering in "Up next" forever.
-      const consumed = this.upcoming.splice(0, idx + 1);
-      if (idx > 0) {
-        this.log('scheduler',
-          `Dropped ${idx} queue item(s) Liquidsoap played during the downtime`);
+      // Fork: only HANDED-OVER items ahead are consumed. An unsent one never
+      // reached Liquidsoap, so it cannot have played — dropping it would lose
+      // a request the listener has already been given a position for.
+      const item = this.upcoming[idx];
+      let played = 0;
+      for (let k = idx; k >= 0; k--) {
+        if (k < idx && !this.upcoming[k].sent) continue;
+        this.upcoming.splice(k, 1);
+        if (k < idx) played++;
       }
-      const item = consumed[consumed.length - 1];
+      if (played > 0) {
+        this.log('scheduler',
+          `Dropped ${played} queue item(s) Liquidsoap played during the downtime`);
+      }
       const source = item.aiPicked ? 'ai' : 'request';
       this.current = { ...item, startedAt: new Date().toISOString(), source };
       // A timed-out intro pre-render is keyed by the queued item. The current
