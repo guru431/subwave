@@ -53,7 +53,7 @@ import * as settings from '../settings.js';
 import { TRANSITION_EFFECTS } from '../settings/vocab.js';
 import { logEvent } from '../observability/events.js';
 import { djCallsAllowed, presentListeners } from './listeners.js';
-import { autoVoiceAllowed } from './voice-policy.js';
+import { autoVoiceAllowed, voiceEnabled } from './voice-policy.js';
 import { speakClockAllowed, stationIdDaypartDrifted, stationIdDaypartStamp } from './clock-policy.js';
 import {
   currentTalkAir,
@@ -2795,7 +2795,7 @@ class Queue {
     // synchronous, keeping the decision ahead of this function's first await.
     const incoming = this.upcoming[this.matchUpcomingIndex(np)] || null;
     if (boundaryCarriesTrackVoice(incoming, this.current?.track || null, {
-      voiceAllowed: autoVoiceAllowed(),
+      voiceAllowed: voiceEnabled(),   // Fork (C05): airIntro's own backstop, see there
       wavExists: path => existsSync(path),
       nowMs: Date.now(),
     })) {
@@ -2917,7 +2917,10 @@ class Queue {
     // skip writing intros, so this only catches an item queued BEFORE the
     // switch was flipped — it must not air its script now. Backstop, not the
     // policy: nothing here spends tokens, so a plain drop is the whole job.
-    if (!autoVoiceAllowed()) return;
+    // Fork (C05): the switch alone, not autoVoiceAllowed() — that also closes
+    // while the engine is known down, and a WAV rendered before it went down
+    // needs no engine to air.
+    if (!voiceEnabled()) return;
     if (!item || item.introAired) return;
     if (!item.introWav && !item.introScript) return;
     const liveSessionKey = session.getSession()?.key ?? null;
