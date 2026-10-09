@@ -9,13 +9,15 @@
 
 Сюда пишется замер `measure.py` по файлу целиком. Id трека станции — это id
 Navidrome, а замер знает путь; мост между ними — `media_file.path` в базе
-Navidrome (путь относительно корня коллекции, с прямыми слешами).
+Navidrome (путь относительно корня коллекции, с прямыми слешами). Navidrome
+может жить на другом хосте: тогда его соответствие id → путь приходит готовым
+JSON-файлом (`--navidrome-paths`, его снимает `run.py`), а не базой.
 
 Если анализатор станции когда-нибудь запустят, он перепишет колонку своим
 замером по началу трека. Следующий прогон этого скрипта вернёт замер по
 файлу целиком: значения расходятся, и строка обновится.
 
-Без внешних зависимостей: на Debian системный python3.
+Без внешних зависимостей: на хосте станции системный python3.
 """
 import argparse
 import json
@@ -71,9 +73,13 @@ def plan_updates(rows, id_to_path: dict[str, str],
     return updates, stats
 
 
-def run(cache: Path, navidrome_db: Path, library_db: Path, dry_run: bool = False) -> dict:
+def run(cache: Path, navidrome_db: Path, library_db: Path, dry_run: bool = False,
+        paths_file: Path | None = None) -> dict:
     measurements = load_measurements(cache)
-    id_to_path = navidrome_paths(navidrome_db)
+    if paths_file is not None:
+        id_to_path = json.loads(Path(paths_file).read_text(encoding="utf-8"))
+    else:
+        id_to_path = navidrome_paths(navidrome_db)
     # таймаут — ожидание блокировки: контроллер пишет в ту же базу сам
     conn = sqlite3.connect(library_db, timeout=15)
     try:
@@ -100,12 +106,16 @@ def run(cache: Path, navidrome_db: Path, library_db: Path, dry_run: bool = False
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="замеры громкости → library.db станции")
     ap.add_argument("--cache", required=True, help="кэш замеров с шары")
-    ap.add_argument("--navidrome-db", default=NAVIDROME_DB)
+    src = ap.add_mutually_exclusive_group()
+    src.add_argument("--navidrome-db", default=NAVIDROME_DB)
+    src.add_argument("--navidrome-paths",
+                     help="JSON {id: путь} — снимок базы Navidrome с другого хоста")
     ap.add_argument("--library-db", required=True, help="library.db станции")
     ap.add_argument("--dry-run", action="store_true", help="посчитать, но не писать")
     args = ap.parse_args(argv)
+    paths = Path(args.navidrome_paths) if args.navidrome_paths else None
     stats = run(Path(args.cache), Path(args.navidrome_db), Path(args.library_db),
-                args.dry_run)
+                args.dry_run, paths_file=paths)
     print(json.dumps(stats, ensure_ascii=False))
     return 0
 

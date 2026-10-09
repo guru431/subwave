@@ -261,6 +261,20 @@ def test_failed_measurement_does_not_overwrite(tmp_path):
     assert _loudness(lib)["id1"] == (-12.0, -1.0)
 
 
+def test_paths_snapshot_from_another_host_replaces_navidrome_db(tmp_path, capsys):
+    # Navidrome на другом хосте, чем library.db (с 2026-10-09): его id → путь
+    # приходит JSON-снимком, а база Navidrome на хосте станции не нужна вовсе
+    cache, _, lib = _station(tmp_path, {"Rock/Кино/01.mp3": _measured(-8.5, 0.2)},
+                             [], [("id1", "Группа крови", None, None)])
+    paths = tmp_path / "navidrome-paths.json"
+    paths.write_text(json.dumps({"id1": "Rock/Кино/01.mp3"}, ensure_ascii=False),
+                     encoding="utf-8")
+    assert apply.main(["--cache", str(cache), "--navidrome-paths", str(paths),
+                       "--library-db", str(lib)]) == 0
+    assert json.loads(capsys.readouterr().out)["updated"] == 1
+    assert _loudness(lib) == {"id1": (-8.5, 0.2)}
+
+
 def test_mismatched_paths_refuse_to_write(tmp_path):
     # так выглядит сменившаяся схема путей Navidrome или кэш другой коллекции:
     # «замера нет у всех» — это не пополнение, а сломанное сопоставление
@@ -276,25 +290,34 @@ def test_mismatched_paths_refuse_to_write(tmp_path):
 
 # --- оркестратор ------------------------------------------------------------
 
-CFG = {"GPU_SSH": "gpu@10.0.0.5", "STATION_SSH": "op@10.0.0.10", "SSH_PORT": "2222",
+CFG = {"GPU_SSH": "gpu@10.0.0.5", "STATION_SSH": "op@10.0.0.10",
+       "NAVIDROME_SSH": "nd@10.0.0.11", "SSH_PORT": "2222",
        "SSH_KEY": "~/.ssh/test_key",
        "LOUDNESS_MEASURE_REMOTE": r"D:\data\loudness\measure.py",
        "LOUDNESS_GPU_MUSIC_ROOT": r"D:\Music",
        "LOUDNESS_GPU_CACHE": r"D:\data\loudness\loudness.json",
+       "LOUDNESS_NAVIDROME_DB": "/var/lib/navidrome/navidrome.db",
        "LOUDNESS_APPLY_DIR": "/srv/radio/loudness",
-       "LOUDNESS_STATION_CACHE": "/mnt/data/loudness/loudness.json",
        "LOUDNESS_LIBRARY_DB": "/srv/radio/state/library.db"}
+
+# вывод `sqlite3 -json` на хосте Navidrome: строка на запись, кириллица как есть
+SQLITE_JSON = ('[{"id":"id1","path":"Rock/Кино/01.mp3"},\n'
+               '{"id":"id2","path":"Rock/b.mp3"}]\n')
 
 
 def test_orchestrator_measures_first_and_applies_second():
-    seen = []
+    seen, shipped = [], {}
 
     def runner(cmd, timeout=None, ok_codes=(0,)):
         seen.append(cmd)
         if "measure.py --root" in cmd[-1]:
             return 'ход замера\n{"files": 3, "measured": 1}\n'
+        if "sqlite3" in cmd[-1]:
+            return SQLITE_JSON
         if "apply.py" in cmd[-1] and Path(cmd[0]).stem.lower() == "ssh":
             return '{"tracks": 3, "updated": 1, "dry_run": true}\n'
+        if Path(cmd[-2]).name == "navidrome-paths.json":     # что уехало на станцию
+            shipped.update(json.loads(Path(cmd[-2]).read_text(encoding="utf-8")))
         return ""
     measured, applied = run_mod.run(CFG, dry_run=True, workers=4, runner=runner)
     assert measured == {"files": 3, "measured": 1}
@@ -304,11 +327,19 @@ def test_orchestrator_measures_first_and_applies_second():
     assert kinds[0] == ("scp", "gpu@10.0.0.5:D:/data/loudness/measure.py")
     assert kinds[1] == ("ssh", r"python D:\data\loudness\measure.py --root D:\Music "
                                r"--cache D:\data\loudness\loudness.json --workers 4")
-    assert kinds[2] == ("ssh", "sudo install -d -o op /srv/radio/loudness")
-    assert kinds[3] == ("scp", "op@10.0.0.10:/srv/radio/loudness/apply.py")
-    assert kinds[4] == ("ssh", "sudo python3 /srv/radio/loudness/apply.py "
-                               "--cache /mnt/data/loudness/loudness.json "
+    # кэш — с GPU-хоста к себе: у хоста станции шары нет
+    assert (kinds[2][0], seen[2][-2]) == ("scp", "gpu@10.0.0.5:D:/data/loudness/loudness.json")
+    assert Path(kinds[2][1]).name == "loudness.json"
+    assert seen[3][-2:] == ["nd@10.0.0.11", "sudo sqlite3 -readonly -json "
+                            "/var/lib/navidrome/navidrome.db 'SELECT id, path FROM media_file'"]
+    assert kinds[4] == ("ssh", "sudo install -d -o op /srv/radio/loudness")
+    assert kinds[5:8] == [("scp", f"op@10.0.0.10:/srv/radio/loudness/{name}")
+                          for name in ("apply.py", "loudness.json", "navidrome-paths.json")]
+    assert kinds[8] == ("ssh", "sudo python3 /srv/radio/loudness/apply.py "
+                               "--cache /srv/radio/loudness/loudness.json "
+                               "--navidrome-paths /srv/radio/loudness/navidrome-paths.json "
                                "--library-db /srv/radio/state/library.db --dry-run")
+    assert shipped == {"id1": "Rock/Кино/01.mp3", "id2": "Rock/b.mp3"}
     assert seen[1][1:3] == ["-p", "2222"]
 
 

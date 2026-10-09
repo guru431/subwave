@@ -3,12 +3,14 @@
 
     python station/loudness/run.py [--dry-run] [--workers N]
 
-Два хоста, два шага, оба скрипта — из этого каталога:
+Три хоста, два шага, оба скрипта — из этого каталога:
 
 1. `measure.py` на GPU-хосте: коллекция там на локальном диске, и ffmpeg в сети
    живёт только там. Меряет новые и изменившиеся файлы, кэш — на шаре.
-2. `apply.py` на хосте станции: читает кэш с шары, сопоставляет пути с id
-   станции через базу Navidrome и пишет замеры в `library.db`.
+2. `apply.py` на хосте станции: сопоставляет пути с id станции и пишет замеры в
+   `library.db`. Ни шары, ни базы Navidrome у хоста станции нет, поэтому оба
+   входа везёт этот скрипт: кэш — с GPU-хоста, соответствие id → путь — снимком
+   базы с хоста Navidrome (`sqlite3 -json`, только чтение).
 
 Скрипты копируются на хосты перед каждым запуском: разошедшейся копии,
 которую пришлось бы сверять с репозиторием, не бывает вовсе.
@@ -22,6 +24,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 # Полный путь — запасной: ночная задача (LogonType=Password) стартует в
@@ -40,13 +43,14 @@ MEASURE_PARTIAL_EXIT = 3
 KEYS = (
     "GPU_SSH",                  # user@host GPU-хоста: там коллекция и ffmpeg
     "STATION_SSH",              # user@host хоста станции
+    "NAVIDROME_SSH",            # user@host хоста Navidrome (бывает им же)
     "SSH_PORT",
     "SSH_KEY",
     "LOUDNESS_MEASURE_REMOTE",  # путь measure.py на GPU-хосте
     "LOUDNESS_GPU_MUSIC_ROOT",  # корень коллекции на GPU-хосте
     "LOUDNESS_GPU_CACHE",       # кэш замеров, как его видит GPU-хост
-    "LOUDNESS_APPLY_DIR",       # каталог apply.py на хосте станции
-    "LOUDNESS_STATION_CACHE",   # тот же кэш, как его видит хост станции
+    "LOUDNESS_NAVIDROME_DB",    # navidrome.db на хосте Navidrome
+    "LOUDNESS_APPLY_DIR",       # каталог apply.py и его входов на хосте станции
     "LOUDNESS_LIBRARY_DB",      # library.db станции
 )
 
@@ -79,9 +83,10 @@ def _ssh(cfg: dict, host: str, remote: str) -> list[str]:
             *SSH_OPTS, host, remote]
 
 
-def _scp(cfg: dict, local: Path, host: str, remote: str) -> list[str]:
+def _scp(cfg: dict, local: Path, host: str, remote: str, fetch: bool = False) -> list[str]:
+    ends = [str(local), f"{host}:{remote}"]
     return [SCP, "-P", cfg["SSH_PORT"], "-i", str(Path(cfg["SSH_KEY"]).expanduser()),
-            *SSH_OPTS, str(local), f"{host}:{remote}"]
+            *SSH_OPTS, *(ends[::-1] if fetch else ends)]
 
 
 def _run(cmd: list[str], timeout: int = STEP_TIMEOUT_SEC, ok_codes=(0,)) -> str:
@@ -115,13 +120,24 @@ def run(cfg: dict, dry_run: bool = False, workers: int = 8, runner=_run) -> tupl
                        f"--cache {cfg['LOUDNESS_GPU_CACHE']} --workers {workers}"),
         timeout=MEASURE_TIMEOUT_SEC, ok_codes=(0, MEASURE_PARTIAL_EXIT)))
     apply_dir = cfg["LOUDNESS_APPLY_DIR"]
-    # каталог на хосте станции принадлежит root: заводится через sudo, но на
-    # пользователя ssh — иначе scp следующей строкой не сможет в него писать
-    runner(_ssh(cfg, station, f"sudo install -d -o {station.split('@')[0]} {apply_dir}"))
-    runner(_scp(cfg, HERE / "apply.py", station, f"{apply_dir}/apply.py"))
+    with tempfile.TemporaryDirectory() as tmp:
+        cache, paths = Path(tmp) / "loudness.json", Path(tmp) / "navidrome-paths.json"
+        runner(_scp(cfg, cache, gpu, cfg["LOUDNESS_GPU_CACHE"].replace("\\", "/"), fetch=True))
+        # база принадлежит работающей службе и root: только чтение, через sudo
+        rows = runner(_ssh(cfg, cfg["NAVIDROME_SSH"],
+                           f"sudo sqlite3 -readonly -json {cfg['LOUDNESS_NAVIDROME_DB']} "
+                           "'SELECT id, path FROM media_file'"))
+        paths.write_text(json.dumps({r["id"]: r["path"] for r in json.loads(rows or "[]")},
+                                    ensure_ascii=False), encoding="utf-8")
+        # каталог на хосте станции принадлежит root: заводится через sudo, но на
+        # пользователя ssh — иначе scp следующей строкой не сможет в него писать
+        runner(_ssh(cfg, station, f"sudo install -d -o {station.split('@')[0]} {apply_dir}"))
+        for local in (HERE / "apply.py", cache, paths):
+            runner(_scp(cfg, local, station, f"{apply_dir}/{local.name}"))
     applied = _last_json(runner(_ssh(
         cfg, station,
-        f"sudo python3 {apply_dir}/apply.py --cache {cfg['LOUDNESS_STATION_CACHE']} "
+        f"sudo python3 {apply_dir}/apply.py --cache {apply_dir}/{cache.name} "
+        f"--navidrome-paths {apply_dir}/{paths.name} "
         f"--library-db {cfg['LOUDNESS_LIBRARY_DB']}" + (" --dry-run" if dry_run else ""))))
     return measured, applied
 
