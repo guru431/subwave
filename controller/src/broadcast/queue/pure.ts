@@ -277,6 +277,18 @@ export function pickOutlivedShow(
   return pickedForShow === liveShow && forecastShow !== pickedForShow;
 }
 
+// Fork (C03): whether this pick cycle may air a pending show handoff (the
+// mic-pass). Upstream reaches that branch from a cycle on an EMPTY queue, so
+// anything still queued — a request, a studio block — airs before the
+// handoff, and a mic-pass never lands between two tracks of one record. A
+// top-up runs on a NON-empty queue; it may release the handoff only when every
+// queued item is an auto-pick, i.e. what upstream would not have picked yet —
+// its empty queue. Anything else still to air (`requestedBy` — a listener or the
+// studio; the rule never reads `QueueItem.block`) holds it for a later cycle.
+export function handoffMayAirFromCycle(topUp: boolean, upcoming: readonly { aiPicked?: boolean }[]): boolean {
+  return !topUp || upcoming.every(i => !!i.aiPicked);
+}
+
 // Seconds from NOW until the pick being made will start airing — the lead the
 // show look-ahead adds to the wall clock (see runPickCycle).
 //

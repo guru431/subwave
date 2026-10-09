@@ -111,6 +111,7 @@ import {
   boundaryCarriesTrackVoice,
   exchangeSegment,
   formatAgo,
+  handoffMayAirFromCycle,
   knownDurationSec,
   linkClockDrifted,
   nextTransitionLabel,
@@ -3737,7 +3738,16 @@ class Queue {
           // live. It may prepare the handoff, but confirmed playback of that
           // recorded final track is what lets runArmedBoundaryHandoff speak.
           const pendingMicPass = !!session.pendingHandoff();
+          // Fork: a top-up runs with tracks still queued; a request or studio
+          // track among them airs before the handoff (queue/pure.ts
+          // handoffMayAirFromCycle). The next cycle with only auto-picks left
+          // — or the empty-queue one — releases it.
+          const heldByQueue = !handoffMayAirFromCycle(topUp, this.upcoming);
+          if (pendingMicPass && heldByQueue && !session.boundaryHandoffAwaitsTrack()) {
+            this.log('scheduler', 'Show handoff held — a request or studio track is still queued ahead; it airs once only auto-picks remain');
+          }
           if (pendingMicPass
+              && !heldByQueue
               && !session.boundaryHandoffAwaitsTrack()
               && !(finalTrackHandoff && pickAnchorItem)) {
             this.dropPendingVoice('the show handoff covers this boundary');
