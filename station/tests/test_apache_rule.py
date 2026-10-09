@@ -22,7 +22,12 @@ docker-шлюза (Caddy не верит X-Forwarded-For от Apache). `requireA
 - `<LocationMatch "re">` сравнивается с путём URL после декодирования и
   нормализации, без строки запроса; поиск по регэкспу не заякорен (якоря — в
   самом шаблоне). Регэксп — PCRE; использованные конструкции (`(?i)`, `^`, `$`,
-  `(?!…)`, `[^/]`, `\\.`, альтернативы) в `re` Python значат то же самое;
+  `(?!…)`, `[^/]`, `/+`, `\\.`, альтернативы) в `re` Python значат то же самое;
+- повторные слэши Apache склеивает только при `MergeSlashes On`. Модель их НЕ
+  склеивает — это худший случай, `Off`, — а Caddy склеивает всегда (в `path` и
+  в `handle_path`), поэтому `//api/settings` доходит до контроллера как
+  `/settings`. Так проверяются оба рубежа: регэкспы, терпящие повторы, и явный
+  `MergeSlashes On` в vhost (`test_merge_slashes_explicit`);
 - несколько `Require` в секции без контейнера — неявный `<RequireAny>`:
   хватает одного выполненного;
 - провайдеры — только `ip` (сети IPv4/IPv6) и `method` (GET и HEAD для него
@@ -96,6 +101,17 @@ CLOSED_OUTSIDE = [
     ("/api/personas/community/x1/install", "POST"),
     ("/api/", "GET"),
     ("/api/now-playing/", "GET"),        # белый список точный: неизвестное закрыто
+    # Повторные слэши (без склейки — худший случай MergeSlashes Off). Caddy
+    # склеивает их в сопоставлении и в handle_path: первые четыре доходят до
+    # контроллера и комнаты как /settings, /stations и /admin/dislikes;
+    # //admin Next.js уводит 308-м на /admin — закрыт всё равно.
+    ("//api/settings", "GET"),
+    ("/api//settings", "GET"),
+    ("///API/stations", "GET"),
+    ("//room/admin/dislikes", "GET"),
+    ("/room//admin/dislikes", "GET"),
+    ("//admin", "GET"),
+    ("//api/schedule", "PUT"),
 ]
 
 OPEN_OUTSIDE = [
@@ -120,6 +136,8 @@ OPEN_OUTSIDE = [
     ("/api/request", "POST"),
     ("/api/request/abc", "GET"),
     ("/api/cover/al-1", "GET"),
+    ("//api/now-playing", "GET"),        # Caddy склеит в /now-playing
+    ("//api/schedule", "GET"),
 ]
 
 
@@ -331,6 +349,19 @@ def test_model_covers_every_access_directive():
         assert construct not in code, f"{construct}: вне модели теста"
     rest = _DIRECTORY.sub("", _SECTION.sub("", code))
     assert "Require" not in rest, "Require вне <LocationMatch>/<Directory> — вне модели"
+
+
+def test_merge_slashes_explicit():
+    # Регэкспы терпят повторные слэши сами, но второй рубеж — склейка самим
+    # Apache — не должен зависеть от умолчания (On с 2.4.39): ставится явно в
+    # том vhost, где стоят правила
+    text = CONF.read_text(encoding="utf-8")
+    vhosts = re.findall(r"^<VirtualHost\b.*?^</VirtualHost>", text, re.M | re.S)
+    guarded = [v for v in vhosts if "<LocationMatch" in v]
+    assert guarded, "нет vhost с правилами доступа"
+    for v in guarded:
+        assert re.search(r"^[ \t]*MergeSlashes[ \t]+On[ \t]*$", v, re.M | re.I), \
+            "MergeSlashes On не задан явно"
 
 
 @pytest.mark.parametrize("path,method", CLOSED_OUTSIDE)
