@@ -8,11 +8,23 @@
 // (slower) cadence, null stops as usual. Needed only where the page still has a
 // job to do while nobody is looking at it — the station feed behind a phone's
 // lock screen is the one such caller (see useStationFeed).
+//
+// Fork (W07): the cleanup also carries `resync`, which consults
+// `hiddenIntervalMs` NOW. Its answer can change with no visibility flip —
+// tuning in from the lock screen, headphones or a media key while the page
+// stays hidden — and without a re-read the poll stayed stopped and the lock
+// screen froze. Still a plain callable, so every effect that returns it as its
+// cleanup is untouched.
+export interface Poll {
+  (): void;
+  resync: () => void;
+}
+
 export function pollWhileVisible(
   fn: () => void,
   intervalMs: number,
   hiddenIntervalMs?: () => number | null,
-): () => void {
+): Poll {
   let id: ReturnType<typeof setInterval> | null = null;
   // Which cadence is armed, so a re-sync at the same one leaves the timer (and
   // its phase) alone instead of restarting it.
@@ -30,7 +42,8 @@ export function pollWhileVisible(
     id = setInterval(fn, ms);
   };
   // Foreground always fires at once — arriving (or coming back) wants fresh
-  // data now; a background re-arm just waits for its first tick.
+  // data now; a background re-arm just waits for its first tick. Unless it
+  // re-arms a STOPPED poll (Fork, see resync): that data is as old as the stop.
   const sync = () => {
     if (!document.hidden) {
       arm(intervalMs, true);
@@ -38,12 +51,15 @@ export function pollWhileVisible(
     }
     const ms = hiddenIntervalMs?.() ?? null;
     if (ms == null) stop();
-    else arm(ms, false);
+    else arm(ms, id == null);
   };
+  let disposed = false;
   document.addEventListener('visibilitychange', sync);
   sync();
-  return () => {
+  const dispose = () => {
+    disposed = true;
     stop();
     document.removeEventListener('visibilitychange', sync);
   };
+  return Object.assign(dispose, { resync: () => { if (!disposed) sync(); } });
 }

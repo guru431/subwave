@@ -98,7 +98,6 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
   // станции, но она не выставлена наружу, а расширять контекст ради одного
   // потребителя — дороже, чем две строки здесь.
   const tunedInRef = useRef(false);
-  useEffect(() => { tunedInRef.current = tunedIn; }, [tunedIn]);
 
   const [chatEvents, setChatEvents] = useState<FeedItem[]>([]);
   const openChat = useCallback(() => setDrawer('chat'), []);
@@ -138,6 +137,14 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
   }, [chatOpen, openChat]);
 
   const room = useRoomFeed({ open: chatOpen, keepAliveWhenHidden: tunedInRef, onArrive });
+  // Fork (W07): after useRoomFeed so its poll exists. Tuning in from the lock
+  // screen flips the ref with the page still hidden; resync makes the room
+  // poll act on it now, the same as PlayerCore does for the station feed.
+  const { resyncPoll: resyncRoomPoll } = room;
+  useEffect(() => {
+    tunedInRef.current = tunedIn;
+    resyncRoomPoll();
+  }, [tunedIn, resyncRoomPoll]);
 
   // Лента студии уже отфильтрована по слышимости (useStationFeed →
   // splitAudibleTurns), поэтому реплика попадает в чат ровно тогда, когда
