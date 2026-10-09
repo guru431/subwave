@@ -125,7 +125,8 @@ _DATE = re.compile(rf"(?<![\w.,])(3[01]|[12]?\d)(\s+(?:{'|'.join(_MONTHS)}))(?!\
 _BARE_YEAR = re.compile(r"(?<![\w.,])(1[89]\d\d|20\d\d)(?:\s*[–—-]\s*(1[89]\d\d|20\d\d))?"
                         r"(?![.,]?\d)(?!\w)")
 _CLOCK = re.compile(r"(?<![\w.,:])([01]?\d|2[0-3]):([0-5]\d)(?![\w:])")
-_COUNT = re.compile(rf"(?:(?<![^\s(«„\"])([+−]))?(?<![\w.,])({_NUM})(?![\w])")
+# знак — как у _MEASURE: «до -10» — «до минус десяти», а «2-3» знака не несёт
+_COUNT = re.compile(rf"{_SIGNED}(?<![\w.,])({_NUM})(?![\w])")
 
 _LATIN_BEFORE = re.compile(r"[A-Za-z][\w'’&]*[ \-/]*$")
 _LATIN_AFTER = re.compile(r"^[ \-/]*[A-Za-z]")

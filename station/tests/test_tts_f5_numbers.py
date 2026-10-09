@@ -156,6 +156,17 @@ def test_dot_is_never_a_decimal_point(text, expected):
     assert N.normalize(text) == expected
 
 
+@pytest.mark.parametrize("text,expected", [
+    ("Ночью до -10 градусов, а днём -3.", "Ночью до минус десяти градусов, а днём минус три."),
+    ("-5 за окном, «-7» в песне.", "минус пять за окном, «минус семь» в песне."),
+    ("Ещё 2-3 песни и 10 - 15 минут.", "Ещё два-три песни и десять - пятнадцать минут."),
+], ids=["minus", "line-start-and-quote", "ranges-keep-dash"])
+def test_minus_before_a_number_is_said(text, expected):
+    """«до -10 градусов» читалось «до -десять градусов»: знак терялся, падеж — тоже.
+    Дефис между числами («2-3») — не минус."""
+    assert N.normalize(text) == expected
+
+
 @pytest.mark.parametrize("text", [
     "Maroon 5 и «2 Minutes to Midnight».",
     "Blink-182, U2 и Sum 41 подряд.",
