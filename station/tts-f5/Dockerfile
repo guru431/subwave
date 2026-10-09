@@ -25,7 +25,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       echo "pip attempt $i failed, retrying"; sleep 15; \
     done; test "$ok" = 1
 RUN pip install --retries 10 --no-deps f5-tts==1.1.22 \
- && python3 -c "import f5_tts.infer.utils_infer, f5_tts.model, ruaccent, soundfile, pydub, multipart, yaml; print('imports ok')"
+ && python3 -c "import f5_tts.infer.utils_infer, f5_tts.model, ruaccent, soundfile, pydub, multipart, yaml, num2words; print('imports ok')"
 
 # koziev (POS-теггер и лемматизатор RuleEngine) в колесо ruaccent не входит, а
 # RUAccent.load ищет его в каталоге пакета, не в workdir (ruaccent.py:82-87), и без
@@ -42,7 +42,7 @@ RUN --mount=type=bind,source=ruaccent-koziev,target=/tmp/koziev \
 
 # pronunciation.json — словарь латиницы коллекции для f5_text; без него служба
 # стартует, но читает английские имена по-русски
-COPY f5_audio.py f5_text.py f5_worker.py f5_accent.py f5_voices.py f5_engine.py f5_service.py server.py pronunciation.json /app/
+COPY f5_audio.py f5_text.py f5_numbers.py f5_worker.py f5_accent.py f5_voices.py f5_engine.py f5_service.py server.py pronunciation.json /app/
 ENV PYTHONUNBUFFERED=1 \
     HF_HUB_OFFLINE=1 \
     PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True

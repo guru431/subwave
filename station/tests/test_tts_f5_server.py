@@ -12,8 +12,9 @@ from pathlib import Path
 
 import pytest
 
-# без них пропускается этот файл, а не весь набор; numpy нужен f5_service (f5_audio)
+# без них пропускается этот файл, а не весь набор; numpy и num2words нужны f5_service
 pytest.importorskip("numpy")
+pytest.importorskip("num2words")
 MultiPartParser = pytest.importorskip("starlette.formparsers").MultiPartParser
 F5_DIR = Path(__file__).resolve().parent.parent / "tts-f5"
 sys.path.insert(0, str(F5_DIR))

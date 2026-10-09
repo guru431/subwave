@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass, field
 
 import f5_audio
+import f5_numbers
 import f5_text
 from f5_voices import resolve, voice_from_audio
 from f5_worker import BROADCAST, CLONE, QueueTimeout
@@ -91,7 +92,9 @@ class Service:
             raise ServiceError(400, "текст обязателен и должен быть непустой строкой")
         if len(text) > MAX_TEXT_CHARS:
             raise ServiceError(413, f"текст длиннее {MAX_TEXT_CHARS} символов")
-        marked = f5_text.cyrillize(self.accentizer.apply(f5_text.respell(text.strip())))
+        # числа — словами до RUAccent: числительному тоже нужны ударения
+        spoken = f5_numbers.normalize(f5_text.respell(text.strip()))
+        marked = f5_text.cyrillize(self.accentizer.apply(spoken))
         if not marked.strip():
             # иначе нарезка не даёт ни куска, и ответ 200 несёт WAV без отсчётов
             raise ServiceError(400, "после разметки ударений от текста ничего не осталось")
