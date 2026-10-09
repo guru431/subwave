@@ -3,6 +3,15 @@
 Тяжёлый синтез вынесен на машину с картой: RTX 5060 Ti (16 ГБ), `<gpu-host>`.
 На Debian остаётся только лёгкое и постоянно работающее.
 
+**С 2026-10-09 мостик и F5 живут на srvllm** — разделы ниже описывают прежнюю площадку. Мостик —
+контейнер `tts-bridge` шага `interim` проекта llm_routers (`/opt/ai/interim/compose.yaml`, образ
+vLLM ради Python): код — побайтовая копия `bridge.py` в `/opt/ai/interim/tts-bridge/`,
+`UPSTREAM=http://f5-tts:4126`, `GPU_CTL_URL` не задан — аренды слота нет, её код молчит.
+Выкатка — копия файла (`install` с прежними владельцем и правами) и `docker restart tts-bridge`,
+перерыв — пара секунд. Проверка — `/health` и `POST /speak` с несуществующим голосом: в ответе
+`X-TTS-Voice-Used` и `X-TTS-Fell-Back*`. Сборка и смена образа F5 —
+[tts-f5/README.md](../tts-f5/README.md), «На srvllm».
+
 ## Что развёрнуто
 
 | Что | Где | Порт |

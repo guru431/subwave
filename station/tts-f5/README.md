@@ -126,6 +126,37 @@ session 0) — сборка идёт временной задачей план�
     # ждать строки "exit …" в <gpu-ssd>\LLM\docker\f5-tts\build.log, затем:
     Unregister-ScheduledTask -TaskName 'TmpF5Build' -Confirm:$false
 
+### На srvllm (с 2026-10-09)
+
+Служба переехала на srvllm: контейнер `f5-tts` из compose шага `interim` проекта llm_routers
+(`/opt/ai/interim/compose.yaml`, данные — `/opt/ai/interim/f5-tts/{models,ruaccent,voices}`), им
+ведёт юнит `srvllm-tts.service` контроллера карты `srvllm-slots`. Сборка — обычный `docker
+build` по SSH, Docker Desktop с его кредхелпером тут нет. Порядок выкатки 2026-10-09:
+
+1. Ревизия на хост — `station/tools/push-to-station.sh` (клон `~/radio`).
+2. Контекст — копия `~/radio/station/tts-f5` плюс `ruaccent-koziev`. Венва SuperTonic на
+   srvllm нет, поэтому koziev берётся из живого образа:
+   `docker cp <контейнер из f5-tts:local>:<каталог пакета ruaccent>/koziev ruaccent-koziev`.
+3. `guarded.sh sudo docker build -t f5-tts:new --label org.opencontainers.image.revision=<sha>`
+   — не поверх `:local`, живой образ остаётся нетронутым до проверки.
+4. Аудит ударений — в самом новом образе, на процессоре: `docker run --rm --memory 3g
+   --entrypoint python3 -v …/ruaccent:/ruaccent:ro -v <контекст>/tools:/app/tools:ro -v
+   corpus.json:/corpus.json:ro f5-tts:new /app/tools/stress_audit.py /corpus.json /ruaccent`.
+   Корпус — `stress_corpus.py` по `state/logs` стека станции.
+5. Без карты — `F5_ENGINE=dry` в разовом контейнере на `127.0.0.1:14126` и `tools/smoke.py`.
+6. Смена: `f5-tts:local` → тег отката `f5-tts:pre-<дата>`, `f5-tts:new` → `f5-tts:local`, затем
+   `sudo systemctl restart srvllm-tts.service`: `compose up` юнита пересоздаёт контейнер на новом
+   образе. Ручка контроллера `/release` только снимает аренду и резидента не гасит, а
+   перезапуск того же юнита занимает ту же память карты — контроллер видит обычный прогрев.
+   Модель грузится ~16 с.
+7. Приёмка — фразы через мостик `:4124`, распознавание — служба `asr` того же хоста
+   (`:8000/v1/audio/transcriptions`, large-v3) вместо whisper-small, сравнение со старым образом
+   на тех же фразах, прослушивание владельцем; откат — обратная перестановка тегов и тот же
+   рестарт юнита.
+
+**Тома словаря латиницы в compose `interim` нет** (`F5_PRONUNCIATION` не задана): служба читает
+копию из образа, и новый `pronunciation.json` доезжает только пересборкой.
+
 ## Голоса
 
 `tools/make_voice.py <запись.wav> <имя> <каталог>` режет эталон ≤12 с по последней
