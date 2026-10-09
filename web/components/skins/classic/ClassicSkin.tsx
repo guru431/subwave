@@ -235,8 +235,10 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
   // Fork (W14): the stage draws what was last seen while the page is hidden,
   // so its keyed exits can't pile up where no frame ever finishes them (see
   // useHeldWhileHidden). The lock screen reads the live feed in PlayerCore.
+  // The booth drawer's rows exit the same popLayout way, one per new turn.
   const stageNowPlaying = useHeldWhileHidden(nowPlaying);
   const stageTrackStartedAt = useHeldWhileHidden(trackStartedAt);
+  const stageBoothFeed = useHeldWhileHidden(boothFeed);
   const [tickerOn, setTickerOn] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -373,7 +375,7 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
         {drawer === 'timeline' && (
           <TimelineDrawer upcoming={state.upcoming} history={state.history} />
         )}
-        {drawer === 'booth'   && <BoothDrawer items={boothFeed} timezone={timezone} locale={locale} />}
+        {drawer === 'booth'   && <BoothDrawer items={stageBoothFeed} timezone={timezone} locale={locale} />}
         {drawer === 'request' && (
           <RequestDrawer
             requestText={requestText} setRequestText={setRequestText}

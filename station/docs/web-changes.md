@@ -989,7 +989,9 @@ Block и Keep.
 `visibilitychange` к видимой — актуальные. Ключ `AnimatePresence` в скрытой вкладке не
 меняется, копий нет; на возврате сцена делает один переход сразу к текущему треку.
 Хук — новый файл форка, а не правка `CenterStage`: конфликтов при обновлении апстрима
-меньше.
+меньше. Тем же хуком идёт лента ящика студии (`BoothDrawer`, апстрим): его строки
+тоже уходят через `AnimatePresence mode="popLayout"`, по одной на каждую новую реплику,
+и ящик, оставленный открытым в скрытой вкладке, копил бы их так же.
 
 **W07 это не задевает:** экран блокировки получает метаданные из `PlayerCore`
 (`useMediaSession({ nowPlaying: feed.nowPlaying, trackStartedAt: feed.trackStartedAt })`)
@@ -1155,7 +1157,7 @@ TanStack Query; раздел фичи после этого описывает �
 | W07 | `setPositionState` у апстрима; третий параметр `pollWhileVisible` и `resync` у его возврата; новые вызывающие `pollWhileVisible` |
 | W08 | условие отказа от Web Audio в `useAnalyser` |
 | W12, W13 | переписанные апстримом `BlockRulesCard`, `BlockedTabContainer`, `queries.ts` |
-| W14 | `useTrackLike` и `LikeHeart` под `AnimatePresence`; пропсы `CenterStage` в `ClassicSkin` идут через `useHeldWhileHidden` |
+| W14 | `useTrackLike` и `LikeHeart` под `AnimatePresence`; пропсы `CenterStage` и лента `BoothDrawer` в `ClassicSkin` идут через `useHeldWhileHidden` |
 
 **Новые английские строки апстрима в классическом скине переводятся** в том же
 переносе, как «More/Less» → «Ещё/Свернуть» на v1.17 (вердикт W01). Искать по диффу
