@@ -35,6 +35,11 @@ CHECKPOINT_EVERY = 200        # первый прогон идёт ~15 мину�
                               # стоить всей сделанной работы
 # фоновый приоритет: на gpu-host рядом живут сервисы с GPU и эфирный TTS
 BELOW_NORMAL = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
+# Обход неполный, но замер честный: что видно — измерено и записано, чистка кэша
+# пропущена, итог с `walk_errors` — в JSON. Отдельный код, а не 1: на 1 (упавший
+# замер) run.py итогу не верит, а этот итог годен для записи в базу станции.
+# Копия числа — в run.py (MEASURE_PARTIAL_EXIT); не 2 — его занимает argparse.
+PARTIAL_EXIT = 3
 
 _I_RE = re.compile(r"^\s*I:\s+(-?\d+(?:\.\d+)?)\s+LUFS", re.M)
 _PEAK_RE = re.compile(r"^\s*Peak:\s+(-?(?:\d+(?:\.\d+)?|inf))\s+dBFS", re.M)
@@ -214,7 +219,7 @@ def main(argv=None) -> int:
     stats = run(Path(args.root), Path(args.cache), args.workers, args.limit,
                 args.retry_errors)
     print(json.dumps(stats, ensure_ascii=False))
-    return 1 if stats["walk_errors"] else 0
+    return PARTIAL_EXIT if stats["walk_errors"] else 0
 
 
 if __name__ == "__main__":
