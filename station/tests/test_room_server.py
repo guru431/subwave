@@ -229,6 +229,16 @@ def test_unread_never_serves_what_is_past_retention(room):
     assert [m["text"] for m in body["messages"]] == ["свежее"]
 
 
+def test_feed_never_serves_what_is_past_retention(room):
+    # чистка на чтении стояла только у /unread: плеер в тихом чате получал
+    # из /messages сообщения старше срока хранения
+    base, store, _ = room
+    store.add("l1", "Аня", "давнее", now=datetime(2020, 1, 1, tzinfo=timezone.utc))
+    store.add("l1", "Аня", "свежее")
+    _, body = call(base, "/messages")
+    assert [m["text"] for m in body["messages"]] == ["свежее"]
+
+
 def test_unread_returns_only_what_is_newer(room):
     base, _, _ = room
     call(base, "/messages", {"text": "раз"}, {"X-Listener-Id": "l1"})

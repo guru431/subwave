@@ -165,16 +165,22 @@ class Store:
             self.db.commit()
         return {"id": cur.lastrowid, "at": moment, "name": name, "text": text}
 
-    def since(self, after_id: int, limit: int) -> list[dict]:
+    def since(self, after_id: int, limit: int,
+              now: datetime | None = None) -> list[dict]:
         """Сообщения после `after_id`, не больше `limit` — самые свежие.
 
         Лимит режет хвост, а не голову: если за время отсутствия написали
         сотню сообщений, читать надо последние, а не первые.
+
+        `now` — отсечь сообщения старше срока хранения на этот момент. Сервер
+        передаёт его всегда: чистка на чтении идёт раз в PRUNE_READ_EVERY, а
+        отдавать устаревшее нельзя ни минуты. Без него — лента как в базе.
         """
+        edge = "" if now is None else _iso(now - timedelta(days=self.retention_days))
         with self.lock:
             rows = self.db.execute(
-                "SELECT id, at, name, text FROM messages WHERE id > ? "
-                "ORDER BY id DESC LIMIT ?", (after_id, limit)).fetchall()
+                "SELECT id, at, name, text FROM messages WHERE id > ? AND at > ? "
+                "ORDER BY id DESC LIMIT ?", (after_id, edge, limit)).fetchall()
         return [dict(r) for r in reversed(rows)]
 
     def prune(self, now: datetime | None = None) -> int:

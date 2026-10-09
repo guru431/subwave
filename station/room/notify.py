@@ -129,15 +129,29 @@ class Notifier:
         with self.lock:
             batch, self.pending = list(self.pending.values()), {}
         for sub, payload in batch:
+            # В журнал — только хост: путь адреса и есть токен подписки
+            host = urllib.parse.urlsplit(sub["endpoint"]).hostname
             try:
                 status = self.sender(sub, payload, self.vapid, self.subject)
             except Exception as e:                      # noqa: BLE001
-                # чужой сломанный ключ не должен ронять рассылку остальным. В
-                # журнал — только хост: путь адреса и есть токен подписки
-                host = urllib.parse.urlsplit(sub["endpoint"]).hostname
-                print(f"room: push на {host}: {type(e).__name__}", file=sys.stderr, flush=True)
-                status = 0
-            self.store.push_result(sub["endpoint"], status)
+                # чужой сломанный ключ не должен ронять рассылку остальным.
+                # Битый ключ — постоянная беда самой подписки (заведённой до
+                # проверки в check_subscription), и она забывается: код 0 значит
+                # «сбой комнаты, не считать», и такая подписка жила бы вечно
+                broken = push.key_problem(sub["p256dh"], sub["auth"])
+                print(f"room: push на {host}: {type(e).__name__}"
+                      + (f" — {broken}, подписка забыта" if broken else ""),
+                      file=sys.stderr, flush=True)
+                status = None if broken else 0
+            try:
+                if status is None:
+                    self.store.unsubscribe(sub["endpoint"])
+                else:
+                    self.store.push_result(sub["endpoint"], status)
+            except Exception as e:                      # noqa: BLE001
+                # учёт ответа одного адресата не должен обрывать рассылку
+                # остальным в этой пачке
+                print(f"room: учёт push на {host}: {e!r}", file=sys.stderr, flush=True)
         return len(batch)
 
 
