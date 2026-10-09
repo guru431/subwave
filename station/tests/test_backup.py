@@ -137,6 +137,40 @@ def test_backup_archives_the_station_and_rotates_only_its_own(stack, tmp_path):
     assert not [n for n in left if n.endswith(".tmp") and n != FRESH_PART]
 
 
+@pytest.mark.integration
+def test_temporary_copies_stay_off_tmp(stack, tmp_path):
+    # /tmp на хосте станции — tmpfs: снимки баз там едят ОЗУ. Временный каталог
+    # — в каталоге стека (тот же диск, что базы), и после прогона его нет
+    root, dest = stack
+    stale = root / ".station-backup-work.Old123"         # убитый прогон
+    stale.mkdir()
+    (stale / "library.db").write_bytes(b"x")
+    two_hours_ago = time.time() - 7200
+    os.utime(stale, (two_hours_ago, two_hours_ago))
+    fresh = root / ".station-backup-work.New456"         # соседний прогон
+    fresh.mkdir()
+    foreign = root / ".station-backup-work-keep"
+    foreign.mkdir()
+    os.utime(foreign, (two_hours_ago, two_hours_ago))
+    r = _run([str(SCRIPT)], _env(root, dest, TMPDIR=str(tmp_path / "no-such-tmp")))
+    assert r.returncode == 0, r.stdout + r.stderr
+    left = {p.name for p in root.iterdir() if p.name.startswith(".station-backup")}
+    assert left == {fresh.name, foreign.name}
+
+
+@pytest.mark.integration
+def test_failure_after_the_archive_says_the_archive_exists(stack):
+    # сбой ротации после mv: архив уже лежит — «архив не сделан» было бы ложью
+    root, dest = stack
+    blocker = dest / "station-backup-19990101-000000.tar.gz"   # свой по имени,
+    blocker.mkdir()                                            # но каталог: rm -f падает
+    (blocker / "x").write_bytes(b"x")
+    r = _run([str(SCRIPT)], _env(root, dest, BACKUP_KEEP="1"))
+    assert r.returncode == 2, r.stdout + r.stderr
+    assert "архив сделан" in r.stderr and "не сделан" not in r.stderr
+    assert len(_new_archives(dest)) == 1
+
+
 def test_missing_data_fails_without_touching_old_archives(stack):
     root, dest = stack
     (root / "room" / "vapid.pem").unlink()

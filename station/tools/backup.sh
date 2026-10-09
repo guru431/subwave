@@ -22,7 +22,8 @@
 #   BACKUP_PYTHON     python3 по умолчанию — снимок SQLite и проверка целостности
 #
 # Архив — station-backup-YYYYMMDD-HHMMSS.tar.gz, пути внутри — от каталога стека
-# (./.env, ./state/…, ./room/…). Код ≠ 0 — нового архива нет, прежние не тронуты.
+# (./.env, ./state/…, ./room/…). Код выхода: 0 — готово; 1 — нового архива нет,
+# прежние не тронуты; 2 — архив сделан, но ротация или уборка после него сорвались.
 set -eu
 
 if [ "${1:-}" = "--remote" ]; then
@@ -66,6 +67,9 @@ REQUIRED=(./.env ./state/library.db ./room/room.db ./room/vapid.pem)
 for m in "${REQUIRED[@]}"; do
   [ -f "$STACK/${m#./}" ] || die "нет $STACK/${m#./} — не тот каталог стека?"
 done
+# абсолютный путь без обратных слешей: GNU tar раскрывает «\1» в -C как
+# восьмеричный код, а путь C:\… в Git Bash (тесты на Windows) ими полон
+STACK=$(cd "$STACK" && pwd)
 [ -d "$DEST" ] || die "нет каталога $DEST — шара не смонтирована? (создаётся один раз руками)"
 
 # Снимок SQLite через backup API, а не копия файла: база живая, в WAL-режиме, и
@@ -101,14 +105,35 @@ sys.exit(1 if bad else 0)
 STAMP=$(date '+%Y%m%d-%H%M%S')
 NAME="station-backup-$STAMP.tar.gz"
 PART="$DEST/.$NAME.$$.tmp"
-WORK=$(mktemp -d)
+WORK=""
+DONE=""
 cleanup() {
   rc=$?
-  rm -rf "$WORK"
+  if [ -n "$WORK" ]; then rm -rf "$WORK"; fi
   rm -f "$PART"
-  [ "$rc" -eq 0 ] || log "архив не сделан (код $rc), прежние архивы не тронуты" >&2
+  [ "$rc" -ne 0 ] || return 0
+  if [ -n "$DONE" ]; then
+    # архив уже лежит — сбой случился в ротации или уборке после него
+    log "архив сделан ($DONE), но после него сбой (код $rc) — ротация или уборка не закончены" >&2
+    exit 2
+  fi
+  log "архив не сделан (код $rc), прежние архивы не тронуты" >&2
+  exit 1
 }
 trap cleanup EXIT
+
+# Временное — в каталоге стека, а не в /tmp: на хосте станции /tmp — tmpfs, и
+# снимки баз ели бы ОЗУ; на шаре же SQLite писать нельзя (CIFS и блокировки).
+# Каталоги убитых прогонов (trap не успел) убираются по якорному имени, свежий
+# может принадлежать соседнему прогону.
+for d in "$STACK"/.station-backup-work.*; do
+  [[ "${d##*/}" =~ ^\.station-backup-work\.[A-Za-z0-9]{6}$ ]] || continue
+  [ -d "$d" ] || continue
+  [ -n "$(find "$d" -maxdepth 0 -mmin +60)" ] || continue
+  rm -rf -- "$d"
+  log "удалён временный каталог убитого прогона: ${d##*/}"
+done
+WORK=$(mktemp -d "$STACK/.station-backup-work.XXXXXX")
 
 SNAP="$WORK/snap"
 mkdir -p "$SNAP/state" "$SNAP/room"
@@ -157,6 +182,7 @@ tar --force-local -xzf "$PART" -C "$WORK/check" ./state/library.db ./room/room.d
 # доступ к архиву тогда держит приватность самой шары
 chmod 600 "$PART" 2>/dev/null || log "chmod 600 не применился — доступ к архиву определяют права шары"
 mv -f "$PART" "$DEST/$NAME"
+DONE="$DEST/$NAME"
 log "архив: $DEST/$NAME ($(wc -c < "$DEST/$NAME") байт; state: $n файлов + library.db)"
 
 # Ротация — только своих архивов, по якорному имени: в каталоге могут лежать

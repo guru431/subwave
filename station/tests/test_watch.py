@@ -5,6 +5,7 @@
 недоставленное сообщение не теряется.
 """
 import importlib.util
+import io
 import json
 import sys
 import threading
@@ -21,7 +22,7 @@ _spec.loader.exec_module(watch)
 
 T0 = 1_791_000_000.0
 MIN = 60
-OK = {"bridge": None, "air": None, "room": None, "api": None}
+OK = {"bridge": None, "air": None, "stream": None, "room": None, "api": None}
 
 
 def run(results: dict, state: dict, now: float):
@@ -108,10 +109,21 @@ class _Station(BaseHTTPRequestHandler):
         pass
 
 
+def _now_playing(started: float, duration=None, online=True) -> dict:
+    """Форма GET /api/now-playing: timestamp пишет radio.liq (unix-секунды
+    начала трека), duration добавляет контроллер, если знает длину."""
+    track = {"title": "Группа крови", "artist": "Кино", "timestamp": int(started)}
+    if duration is not None:
+        track["duration"] = duration
+    return {"nowPlaying": track, "streamOnline": online, "listeners": {"current": 1}}
+
+
 @pytest.fixture
 def station():
     routes = {"/b/health": (200, {"ok": True}),
               "/api/state": (200, {"musicStarved": False, "musicStarvedSince": None}),
+              # без длины: порог 20 минут, запуски тестов main укладываются
+              "/api/now-playing": (200, _now_playing(T0 - MIN)),
               "/room/health": (200, {"ok": True}),
               "/api/health": (200, {"status": "on-air"})}
     handler = type("Station", (_Station,), {"routes": routes})
@@ -129,11 +141,11 @@ def station():
 
 def test_checks_read_the_real_fields(station):
     cfg, routes = station
-    assert watch.check(cfg) == OK
+    assert watch.check(cfg, T0) == OK
     routes["/b/health"] = (503, {"ok": False})
     routes["/api/state"] = (200, {"musicStarved": True, "musicStarvedSince": None})
     routes["/room/health"] = (502, {})
-    got = watch.check(cfg)
+    got = watch.check(cfg, T0)
     assert got["bridge"].startswith("HTTP 503")
     assert got["air"] == "музыка на аварийной петле"
     assert got["room"].startswith("HTTP 502") and got["api"] is None
@@ -144,7 +156,56 @@ def test_bridge_answering_200_without_ok_is_not_healthy(station):
     # грузит веса, и адрес мимо мостика иначе выглядел бы здоровым
     cfg, routes = station
     routes["/b/health"] = (200, {"ok": False})
-    assert watch.check(cfg)["bridge"] is not None
+    assert watch.check(cfg, T0)["bridge"] is not None
+
+
+# ── мёртвый микшер: всё остальное зелёное при полной тишине ──────────────────
+#
+# Упал broadcast — music-starved.json перестаёт обновляться, и через 60 с
+# контроллер отвечает «не голодает» (music-starve-pure.ts); /api/health —
+# константа on-air; комната жива. Тишину видно только по самому эфиру.
+
+def test_stream_without_source_is_a_failure(station):
+    cfg, routes = station
+    routes["/api/now-playing"] = (200, _now_playing(T0 - MIN, online=False))
+    assert "Icecast" in watch.check(cfg, T0)["stream"]
+
+
+def test_track_far_past_its_end_means_the_mixer_stopped(station):
+    cfg, routes = station
+    routes["/api/now-playing"] = (200, _now_playing(T0 - 4 * MIN, duration=240))
+    assert watch.check(cfg, T0)["stream"] is None
+    # длина + 5 минут запаса (стык, джингл, пауза ведущей)
+    assert watch.check(cfg, T0 + 4 * MIN + 1)["stream"] is None
+    got = watch.check(cfg, T0 + 6 * MIN)["stream"]
+    assert got and "Кино — Группа крови" in got
+
+
+def test_track_without_duration_gets_20_minutes(station):
+    cfg, routes = station
+    routes["/api/now-playing"] = (200, _now_playing(T0))
+    assert watch.check(cfg, T0 + 19 * MIN)["stream"] is None
+    assert watch.check(cfg, T0 + 21 * MIN)["stream"] is not None
+
+
+def test_nothing_playing_is_a_failure(station):
+    # stream_down в radio.liq удаляет now-playing.json — nowPlaying: null
+    cfg, routes = station
+    routes["/api/now-playing"] = (200, {"nowPlaying": None, "streamOnline": True})
+    assert watch.check(cfg, T0)["stream"] is not None
+
+
+def test_stalled_stream_alerts_on_the_second_run_and_once():
+    # перезапуск контроллера даёт до 15 с streamOnline=false — один запуск не повод
+    bad = {**OK, "stream": "Icecast без источника — микшер не вещает"}
+    state, text = run(bad, {}, T0)
+    assert text == ""
+    state, text = run(bad, state, T0 + 5 * MIN)
+    assert "СБОЙ поток" in text
+    state, text = run(bad, state, T0 + 10 * MIN)
+    assert text == ""
+    state, text = run(OK, state, T0 + 15 * MIN)
+    assert "В ПОРЯДКЕ поток" in text
 
 
 def test_unreachable_station_is_a_failure(monkeypatch):
@@ -154,7 +215,7 @@ def test_unreachable_station_is_a_failure(monkeypatch):
         raise watch.urllib.error.URLError(ConnectionRefusedError(10061, "refused"))
     monkeypatch.setattr(watch.urllib.request, "urlopen", refused)
     base = "http://station:7700"
-    got = watch.check({"TTS_BRIDGE_URL": base, "WATCH_STATION_URL": base})
+    got = watch.check({"TTS_BRIDGE_URL": base, "WATCH_STATION_URL": base}, T0)
     assert got["air"].startswith("/api/state не отвечает (URLError")
     assert all(got[n].startswith("нет ответа (URLError") for n in ("bridge", "room", "api"))
 
@@ -203,6 +264,50 @@ def test_failed_notify_is_an_error_and_is_retried(station, tmp_path):
     assert watch.main([], now=lambda: T0, environ=env, env_file=absent) == 1
     state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
     assert state["room"]["alerted"] is False
+
+
+# ── сторож не падает сам ─────────────────────────────────────────────────────
+#
+# Упавший сторож молчит так же, как молчит эфир, — и в задаче планировщика это
+# лишь ненулевой код. Чтение тела ответа 5xx и состояние чужой формы роняли его.
+
+def test_unreadable_error_body_is_a_failure_not_a_crash(monkeypatch):
+    class Reset(io.BytesIO):
+        def read(self, *a):
+            raise ConnectionResetError(10054, "reset by peer")
+
+    def bad_gateway(url, timeout=None):
+        raise watch.urllib.error.HTTPError(url, 502, "Bad Gateway", {}, Reset())
+    monkeypatch.setattr(watch.urllib.request, "urlopen", bad_gateway)
+    assert watch.fetch("http://station:7700/api/health")[0] == 502
+    got = watch.check({"TTS_BRIDGE_URL": "http://b", "WATCH_STATION_URL": "http://s"}, T0)
+    assert got["api"].startswith("HTTP 502") and got["room"].startswith("HTTP 502")
+
+
+def test_absurd_starve_time_does_not_crash(station):
+    cfg, routes = station
+    routes["/api/state"] = (200, {"musicStarved": True, "musicStarvedSince": 1e30})
+    assert watch.check(cfg, T0)["air"] == "музыка на аварийной петле"
+
+
+@pytest.mark.parametrize("content", [
+    '{"room": {"alerted": true}}',              # нет since
+    '{"room": "сбой"}',                         # запись не объект
+    '{"room": {"since": "вчера", "alerted": true}}',
+    '[1, 2]',
+    'не JSON',
+])
+def test_state_of_another_shape_starts_clean(station, tmp_path, capsys, content):
+    cfg, routes = station
+    routes["/room/health"] = (502, {})
+    (tmp_path / "state.json").write_text(content, encoding="utf-8")
+    env = _env(cfg, tmp_path)
+    assert watch.main([], now=lambda: T0, environ=env,
+                      env_file=tmp_path / "absent.env") == 1
+    captured = capsys.readouterr()
+    assert "СБОЙ комната" in captured.out          # начал с чистого и сообщил
+    state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert state["room"]["since"] == T0
 
 
 # ── настройки ────────────────────────────────────────────────────────────────
