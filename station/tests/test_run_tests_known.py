@@ -90,3 +90,44 @@ def test_every_entry_names_an_existing_test():
         assert source.is_file(), entry
         if name and name != "*":
             assert name in source.read_text(encoding="utf-8"), entry
+
+
+def _summary(tmp_path, log: str) -> subprocess.CompletedProcess:
+    """Разбор итога из самого скрипта — от проверки TESTS_ENV до конца — над
+    подставным выводом прогона (SRC=-, ssh не нужен)."""
+    text = SCRIPT.read_text(encoding="utf-8")
+    tail = text[re.search(r"^grep -qE '\^TESTS_", text, re.M).start():]
+    script = tmp_path / "summary.sh"
+    script.write_bytes(("set -u\nSRC=-\nout=$1\nrc=$2\n" + _known_block() + tail).encode("utf-8"))
+    out = tmp_path / "out.log"
+    out.write_bytes(log.encode("utf-8"))
+    return subprocess.run([_bash(), script.as_posix(), out.as_posix(), "1"],
+                          capture_output=True, encoding="utf-8", timeout=20)
+
+
+MIRROR = "the mirror carries the skill schema to the browser"
+
+
+def _log(fail: int, *entries: str) -> str:
+    failing = "".join(f"test at /app/scripts/skill-schema.test.ts:1:1\n✖ {e} (0.5ms)\n  Error: x\n\n"
+                      for e in entries)
+    return (f"ℹ tests 30\nℹ pass {30 - fail}\nℹ fail {fail}\nℹ skipped 0\nℹ todo 0\n\n"
+            f"✖ failing tests:\n\n{failing}")
+
+
+def test_summary_with_only_known_failures_passes(tmp_path):
+    r = _summary(tmp_path, _log(1, MIRROR))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "TESTS_RESULT pass=29 fail=0 skip=1" in r.stdout
+
+
+def test_a_failure_the_parser_missed_is_a_new_failure(tmp_path):
+    # ℹ fail 2, а в списке одна строка: второе падение разбор не узнал.
+    r = _summary(tmp_path, _log(2, MIRROR))
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "ℹ fail 2" in r.stdout and "TESTS_RESULT pass=28 fail=1" in r.stdout
+
+
+def test_two_failures_with_one_name_are_not_a_parser_miss(tmp_path):
+    r = _summary(tmp_path, _log(2, MIRROR, MIRROR))
+    assert r.returncode == 0, r.stdout + r.stderr
