@@ -6,16 +6,11 @@
 # в Kokoro русского нет вовсе. При недоступности Chatterbox на gpu-host (а он
 # недоступен by design до логона на машине) ведущий читал русский текст
 # английским голосом. Каталог с голосами вынесен на хост, в него доложен
-# `ru_RU-dmitri-medium` с HuggingFace (rhasspy/piper-voices).
+# `ru_RU-irina-medium` с HuggingFace (rhasspy/piper-voices); выбор — PIPER_VOICE
+# в .env. Каталог собирается один раз — рецепт в station/docs/deploy.md,
+# «Установка и восстановление с нуля».
 #
-# Каталог собирается один раз:
-#   mkdir -p <deploy-dir>/subwave/piper-voices
-#   docker cp sub-wave-controller:/opt/piper/voices/en_GB-alan-medium.onnx      <тот каталог>/
-#   docker cp sub-wave-controller:/opt/piper/voices/en_GB-alan-medium.onnx.json <тот каталог>/
-#   B=https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU/dmitri/medium
-#   curl -fsSL -O "$B/ru_RU-dmitri-medium.onnx" -O "$B/ru_RU-dmitri-medium.onnx.json"
-#
-# Английский голос копируется обязательно: монтирование подменяет весь каталог
+# Английский голос копируется туда обязательно: монтирование подменяет весь каталог
 # `/opt/piper/voices`, и без копии персона с англоязычным голосом потеряет файл.
 
 # Второе: интерфейс плеера по-русски. У subwave нет i18n вовсе — ни каталога
@@ -26,9 +21,8 @@
 # station/docs/web-changes.md.
 #
 # Образ собирается на хосте станции из клона ~/radio и живёт только локально
-# (в реестр не публикуется):
-#   docker build -f web/Dockerfile -t subwave-web:1.17.0-ru \
-#     --build-arg SUBWAVE_BUILD_VERSION=1.17.0-ru .
+# (в реестр не публикуется); команда сборки, с меткой ревизии, — в
+# station/docs/web-changes.md, «Сборка».
 # Тег обязан совпадать с версией апстрима, из которой собран: иначе после
 # `compose pull` окажется, что контроллер уехал вперёд, а интерфейс остался
 # старым, и понять это будет не по чему.
@@ -36,9 +30,8 @@
 # Третье: свой образ контроллера. Заказ слушателя у апстрима уходит в хвост
 # очереди и ждёт всю пачку авто-пиков; заказчику нужно, чтобы он играл сразу
 # после текущего трека. Снаружи это не настраивается — очередь ведёт сам
-# контроллер. Что изменено и порядок обновления — station/docs/controller-changes.md.
-#
-#   docker build -f docker/Dockerfile.controller -t subwave-controller:1.17.0-ru .
+# контроллер. Что изменено, порядок обновления и команда сборки (под сторожем
+# памяти, с меткой ревизии) — station/docs/controller-changes.md, «Сборка».
 #
 # Тег точно так же обязан совпадать с версией апстрима.
 

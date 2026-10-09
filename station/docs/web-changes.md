@@ -1049,7 +1049,7 @@ cd <deploy-dir>/subwave && sudo docker compose up -d web
 ```
 
 **Доставка ревизии** — [push-to-station.sh](../tools/push-to-station.sh): `git bundle` всех
-веток и тегов → `scp` → `git fetch` в `~/radio` → `checkout -f --detach <sha>` и
+веток, тегов и самой ревизии → `scp` → `git fetch` в `~/radio` → `checkout -f --detach <sha>` и
 `git clean -fd`. Хосту не нужен доступ к приватному origin, а дерево приходит с LF (архив
 с Windows принёс бы CRLF). Хост и SSH — из `station/.env`. Клон на хосте **руками не
 правится**: следующий вызов затрёт правки. Клон временный: после сборки и выкатки —
