@@ -57,6 +57,7 @@
 ```bash
 pip install --group station/pyproject.toml:test   # зависимости набора, pip ≥ 25.1
 cd station && python -m pytest          # быстрый набор станции
+npx tsx --test web/lib/*.test.ts        # тесты наших фич веба, на рабочей машине
 bash station/run-tests.sh --patch       # тесты наших фич контроллера в образе
 bash station/run-tests.sh               # весь набор контроллера
 ```
