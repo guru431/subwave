@@ -3,6 +3,7 @@
 Сервер поднимается на 127.0.0.1 и живёт доли секунды — это быстрый тест, а не
 `integration`: наружу он не ходит, Navidrome подменён.
 """
+import contextlib
 import importlib.util
 import json
 import socket
@@ -141,6 +142,68 @@ def test_rate_limit_is_per_listener(room):
     for _ in range(3):
         call(base, "/messages", {"text": "раз"}, {"X-Listener-Id": "l1"})
     assert call(base, "/messages", {"text": "раз"}, {"X-Listener-Id": "l2"})[0] == 201
+
+
+@contextlib.contextmanager
+def serve(store, config):
+    """Сервер со своим Config — для потолков, которые фикстура не задаёт."""
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), server_mod.build_handler(store, config))
+    thread = threading.Thread(target=lambda: srv.serve_forever(poll_interval=0.02),
+                              daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{srv.server_address[1]}"
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_new_listener_id_does_not_lift_the_room_cap(tmp_path):
+    # X-Listener-Id выбирает сам клиент: прежде новый id на каждое сообщение
+    # снимал лимит целиком, и анонимный путь из интернета не знал потолка
+    store = store_mod.Store(str(tmp_path / "room.db"))
+    try:
+        with serve(store, server_mod.Config(rate_max=3, rate_global=4)) as base:
+            for i in range(4):
+                assert call(base, "/messages", {"text": "раз"},
+                            {"X-Listener-Id": f"spam{i}"})[0] == 201
+            code, body = call(base, "/messages", {"text": "ещё"},
+                              {"X-Listener-Id": "spam-new"})
+            assert code == 429 and "error" in body
+            assert len(store.since(0, 50)) == 4
+    finally:
+        store.close()
+
+
+def test_resolve_has_a_room_wide_limit(tmp_path, monkeypatch):
+    # у сверки нет личности (плеер шлёт её без заголовков), а каждая — до шести
+    # походов в Navidrome: без потолка /resolve был открытым усилителем нагрузки
+    calls = []
+    monkeypatch.setattr(server_mod.subsonic, "resolve",
+                        lambda q, *a, **kw: calls.append(q) or
+                        {"exact": None, "alternatives": []})
+    store = store_mod.Store(str(tmp_path / "room.db"))
+    try:
+        with serve(store, server_mod.Config(navidrome=("http://navidrome", "u", "p"),
+                                            resolve_max=2)) as base:
+            assert call(base, "/resolve?q=raz")[0] == 200
+            assert call(base, "/resolve?q=dva")[0] == 200
+            code, body = call(base, "/resolve?q=tri")
+            assert code == 429 and "error" in body
+            # пустой запрос отвергается раньше и потолок не тратит
+            assert call(base, "/resolve")[0] == 400
+            assert calls == ["raz", "dva"]
+    finally:
+        store.close()
+
+
+def test_window_counts_hits_in_a_sliding_window():
+    window = server_mod.Window(seconds=60, cap=2)
+    assert window.take(now=0) and window.take(now=1)
+    assert not window.take(now=30)               # отказ попытку не засчитывает
+    assert window.take(now=60.5)                 # первый удар вышел из окна
+    assert not window.take(now=60.9)             # второй (в 1) — ещё нет
+    assert window.take(now=121)
 
 
 def test_unread_returns_only_what_is_newer(room):

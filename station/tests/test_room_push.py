@@ -192,7 +192,7 @@ def _subscribe(store, listener, name, endpoint=None):
 
 
 class Inline:
-    """spawn без потока: тест проверяет, что уехало, а не планировщик."""
+    """wake без потока: тест проверяет, что уехало, а не планировщик."""
     def __call__(self, fn, *args):
         fn(*args)
 
@@ -204,7 +204,7 @@ def test_every_message_wakes_everyone_but_its_author(store):
     _subscribe(store, "anya-phone", "аня")        # тот же человек, другое устройство
     _subscribe(store, "petya", "Петя")
     sent = []
-    n = notify.Notifier(store, vapid=None, subject="s", spawn=Inline(),
+    n = notify.Notifier(store, vapid=None, subject="s", wake=Inline(),
                         sender=lambda sub, payload, *_: sent.append((sub["listener_id"], payload)) or 201)
     assert n.on_message("petya", "Петя", "Всем привет!") == 2
     assert sorted(who for who, _ in sent) == ["anya", "anya-phone"]
@@ -213,6 +213,53 @@ def test_every_message_wakes_everyone_but_its_author(store):
     # своё не звенит — ни на этом устройстве, ни на другом
     assert n.on_message("anya", "Аня", "это я") == 1
     assert [who for who, _ in sent] == ["petya"]
+
+
+def test_messages_waiting_for_delivery_collapse_into_the_latest(store):
+    # в шторке у чата одна карточка (тег и Topic `subwave-chat`), поэтому
+    # неотправленное заменяется новым: очередь не длиннее числа подписок,
+    # сколько бы сообщений ни пришло, пока рассылка занята
+    _subscribe(store, "anya", "Аня")
+    _subscribe(store, "petya", "Петя")
+    sent = []
+    n = notify.Notifier(store, vapid=None, subject="s", wake=lambda drain: None,
+                        sender=lambda sub, payload, *_: sent.append(
+                            (sub["listener_id"], payload["body"])) or 201)
+    for i in range(50):
+        n.on_message(f"spam{i}", f"Спамер {i}", f"сообщение {i}")
+    assert len(n.pending) == 2
+    assert n.drain() == 2
+    assert sorted(sent) == [("anya", "сообщение 49"), ("petya", "сообщение 49")]
+    assert n.drain() == 0
+
+
+def test_delivery_runs_on_one_thread_however_many_messages(store):
+    # прежде каждое сообщение запускало свой поток, и сотня сообщений с разных
+    # id — сотня параллельных обходов до 500 подписок по 10 с на каждую
+    _subscribe(store, "anya", "Аня")
+    entered, release = threading.Event(), threading.Event()
+    sent = []
+
+    def sender(sub, payload, *_):
+        entered.set()
+        release.wait(timeout=5)
+        sent.append(payload["body"])
+        return 201
+
+    before = set(threading.enumerate())
+    n = notify.Notifier(store, vapid=None, subject="s", sender=sender)
+    n.on_message("petya", "Петя", "первое")
+    assert entered.wait(timeout=5)                  # рассылка занята первым
+    for i in range(2, 6):
+        n.on_message("petya", "Петя", f"сообщение {i}")
+    assert len(set(threading.enumerate()) - before) == 1
+    release.set()
+    for _ in range(250):
+        if len(sent) == 2:
+            break
+        threading.Event().wait(0.02)
+    # пока шла первая рассылка, четыре сообщения схлопнулись в последнее
+    assert sent == ["первое", "сообщение 5"]
 
 
 def test_gone_subscription_is_forgotten_and_flaky_one_after_five_failures(store):
@@ -240,7 +287,7 @@ def test_dj_reply_rings_once_and_history_never(store):
     window = [_turn("старый ответ", "2026-09-23T10:00:00Z"),
               _turn("это была подводка", "2026-09-23T10:01:00Z", kind="link")]
     replies = []
-    n = notify.Notifier(store, vapid=None, subject="s", spawn=Inline(),
+    n = notify.Notifier(store, vapid=None, subject="s", wake=Inline(),
                         sender=lambda sub, payload, *_: replies.append(payload["body"]) or 201)
     watch = notify.DjWatch(lambda: list(window), n, store)
     assert watch.tick() == 0                           # засев: история — не новость
@@ -266,7 +313,7 @@ def room(tmp_path):
     delivered = []
     notifier = notify.Notifier(
         store, push.Vapid(ec.generate_private_key(ec.SECP256R1())), "https://fm.example.org",
-        spawn=Inline(),
+        wake=Inline(),
         sender=lambda sub, payload, *_: delivered.append((sub["listener_id"], payload)) or 201)
     config = server_mod.Config(rate_seconds=60, rate_max=10, max_body=8192,
                                notifier=notifier)
@@ -356,7 +403,7 @@ def test_subscription_over_the_cap_is_refused_but_renewal_is_not(tmp_path):
     store = store_mod.Store(str(tmp_path / "room.db"))
     notifier = notify.Notifier(
         store, push.Vapid(ec.generate_private_key(ec.SECP256R1())), "https://fm.example.org",
-        spawn=Inline())
+        wake=Inline())
     srv = ThreadingHTTPServer(("127.0.0.1", 0), server_mod.build_handler(
         store, server_mod.Config(notifier=notifier, push_max=1)))
     thread = threading.Thread(target=lambda: srv.serve_forever(poll_interval=0.02),
@@ -370,6 +417,29 @@ def test_subscription_over_the_cap_is_refused_but_renewal_is_not(tmp_path):
                     listener="petya", name="Петя")[0] == 429
         assert call(base, "/push/subscribe", {"subscription": first})[0] == 201
         assert len(store.subscriptions()) == 1
+    finally:
+        srv.shutdown()
+        srv.server_close()
+        store.close()
+
+
+def test_one_listener_cannot_hold_more_than_its_share_of_subscriptions(tmp_path):
+    store = store_mod.Store(str(tmp_path / "room.db"))
+    notifier = notify.Notifier(
+        store, push.Vapid(ec.generate_private_key(ec.SECP256R1())), "https://fm.example.org",
+        wake=Inline())
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), server_mod.build_handler(
+        store, server_mod.Config(notifier=notifier, push_per_listener=2)))
+    thread = threading.Thread(target=lambda: srv.serve_forever(poll_interval=0.02),
+                              daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
+        for i in range(5):
+            assert call(base, "/push/subscribe",
+                        {"subscription": _subscription(f"{FCM}{i}")})[0] == 201
+        assert [s["endpoint"] for s in store.subscriptions()
+                if s["listener_id"] == "anya"] == [f"{FCM}3", f"{FCM}4"]
     finally:
         srv.shutdown()
         srv.server_close()

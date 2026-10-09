@@ -56,38 +56,79 @@ def _clip(text: str) -> str:
 
 
 class Notifier:
-    """Рассылка важного подписчикам. Отправка — фоновым потоком: слушатель,
-    написавший в чат, не должен ждать, пока комната обойдёт push-сервисы."""
+    """Рассылка важного подписчикам — одним фоновым потоком на всю комнату.
+
+    Слушатель, написавший в чат, не ждёт, пока комната обойдёт push-сервисы:
+    сообщение только встаёт в очередь. Очередь — по адресу подписки, и новое
+    сообщение заменяет неотправленное тому же адресату: в шторке у чата всё
+    равно одна карточка (тег `subwave-chat`, `Topic` у push-сервиса). Поэтому
+    очередь не длиннее числа подписок, сколько бы сообщений ни пришло, пока
+    рассылка занята. Прежде каждое сообщение запускало свой поток, и сотня
+    сообщений с разных id — сотня параллельных обходов до 500 подписок.
+    """
 
     def __init__(self, store, vapid: "push.Vapid", subject: str, sender=push.send,
-                 spawn=None):
+                 wake=None):
         self.store = store
         self.vapid = vapid
         self.subject = subject
         self.sender = sender
-        self.spawn = spawn or (lambda fn, *a: threading.Thread(
-            target=fn, args=a, daemon=True).start())
+        self.pending: dict[str, tuple[dict, dict]] = {}
+        self.lock = threading.Lock()
+        self.ready = threading.Event()
+        self.worker: threading.Thread | None = None
+        # wake(drain) — как запустить доставку. По умолчанию будится один
+        # фоновый поток; тест передаёт свой вызов, чтобы проверять, что
+        # уехало, а не планировщик
+        self.wake = wake or self._wake_worker
 
     def on_message(self, author_id: str, author: str, text: str) -> int:
         targets = [s for s in self.store.subscriptions()
                    if not is_author(s, author_id, author)]
         if targets:
-            self.spawn(self.deliver, targets,
-                       {"title": f"{author} — в чате", "body": _clip(text)})
+            self._enqueue(targets, {"title": f"{author} — в чате", "body": _clip(text)})
         return len(targets)
 
     def on_dj_reply(self, text: str) -> int:
         targets = self.store.subscriptions()
         if targets:
-            self.spawn(self.deliver, targets,
-                       {"title": "Ведущий ответил", "body": _clip(text)})
+            self._enqueue(targets, {"title": "Ведущий ответил", "body": _clip(text)})
         return len(targets)
 
-    def deliver(self, targets: list[dict], payload: dict) -> None:
+    def _enqueue(self, targets: list[dict], payload: dict) -> None:
         # тег один на весь чат — тот же, что у уведомления страницы: живая
         # вкладка и push-сервис не выстроят в шторке двух карточек об одном
         payload = {**payload, "tag": "subwave-chat", "url": "/?chat=1"}
-        for sub in targets:
+        with self.lock:
+            for sub in targets:
+                self.pending[sub["endpoint"]] = (sub, payload)
+        self.wake(self.drain)
+
+    def _wake_worker(self, _drain) -> None:
+        with self.lock:
+            if self.worker is None:
+                self.worker = threading.Thread(target=self._run, name="room-push",
+                                               daemon=True)
+                self.worker.start()
+        self.ready.set()
+
+    def _run(self) -> None:
+        while True:
+            self.ready.wait()
+            # сбросить ДО того, как забрать очередь: пришедшее после — в
+            # следующий круг, пришедшее раньше — уже в этой пачке
+            self.ready.clear()
+            try:
+                self.drain()
+            except Exception as e:                      # noqa: BLE001
+                # поток рассылки один на комнату — умереть ему нельзя
+                print(f"room: рассылка push: {e!r}", file=sys.stderr, flush=True)
+
+    def drain(self) -> int:
+        """Отправить всё, что ждёт в очереди. Возвращает число отправок."""
+        with self.lock:
+            batch, self.pending = list(self.pending.values()), {}
+        for sub, payload in batch:
             try:
                 status = self.sender(sub, payload, self.vapid, self.subject)
             except Exception as e:                      # noqa: BLE001
@@ -97,6 +138,7 @@ class Notifier:
                 print(f"room: push на {host}: {type(e).__name__}", file=sys.stderr, flush=True)
                 status = 0
             self.store.push_result(sub["endpoint"], status)
+        return len(batch)
 
 
 def fetch_session(base: str, timeout: float = WATCH_TIMEOUT_SEC) -> list[dict]:

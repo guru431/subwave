@@ -98,9 +98,15 @@ class Store:
 
     def add(self, listener_id: str, name: str, text: str,
             now: datetime | None = None,
-            rate: tuple[int, int] | None = None) -> dict | None:
+            rate: tuple[int, int] | None = None,
+            room_rate: tuple[int, int] | None = None) -> dict | str:
         """Добавить сообщение. `rate` — (секунд, сообщений): лимит слушателя;
-        исчерпан — None, и ничего не добавлено.
+        `room_rate` — такой же, но на всю комнату. Исчерпан — строка-причина
+        (`"listener"` или `"room"`), и ничего не добавлено.
+
+        Общий потолок нужен потому, что `listener_id` выбирает сам клиент: новый
+        id на каждое сообщение снимал бы личный лимит целиком. Личный
+        проверяется первым — исчерпавшему свой честнее сказать про него.
 
         Подсчёт и вставка — под одной блокировкой, как у set_dislike: иначе два
         запроса разом прошли бы проверку оба.
@@ -114,7 +120,14 @@ class Store:
                     "SELECT COUNT(*) FROM messages WHERE listener_id = ? AND at > ?",
                     (listener_id, _iso(now - timedelta(seconds=seconds)))).fetchone()
                 if count >= cap:
-                    return None
+                    return "listener"
+            if room_rate is not None:
+                seconds, cap = room_rate
+                (count,) = self.db.execute(
+                    "SELECT COUNT(*) FROM messages WHERE at > ?",
+                    (_iso(now - timedelta(seconds=seconds)),)).fetchone()
+                if count >= cap:
+                    return "room"
             cur = self.db.execute(
                 "INSERT INTO messages (at, listener_id, name, text) VALUES (?, ?, ?, ?)",
                 (moment, listener_id, name, text))
@@ -148,28 +161,44 @@ class Store:
         return cur.rowcount
 
     def subscribe(self, sub: dict, listener_id: str, name: str,
-                  now: datetime | None = None, cap: int | None = None) -> bool:
+                  now: datetime | None = None, cap: int | None = None,
+                  per_listener: int | None = None) -> bool:
         """Завести или обновить подписку. Повторная подписка того же браузера —
         обычное дело (плеер переподписывается при каждом открытии, чтобы имя
         для упоминаний не отставало), поэтому это upsert, а не отказ.
 
+        Счётчик отказов upsert не трогает: переподписаться может кто угодно
+        снаружи, и обнуление держало бы мёртвый адрес в рассылке вечно.
+
         `cap` — потолок подписок: новую сверх него не заводим (False), прежнюю
-        обновляем всегда. Проверка и вставка — под одной блокировкой.
+        обновляем всегда. `per_listener` — потолок на один `listener_id`: новая
+        подписка сверх него вытесняет самую старую того же слушателя. Один id —
+        один браузер, и лишние адреса у него — брошенные прежние подписки;
+        отказ оставил бы настоящего слушателя без уведомлений из-за них.
+        Проверка и вставка — под одной блокировкой.
         """
         with self.lock:
-            if cap is not None and not self.db.execute(
-                    "SELECT 1 FROM push_subscriptions WHERE endpoint = ?",
-                    (sub["endpoint"],)).fetchone():
+            known = self.db.execute(
+                "SELECT 1 FROM push_subscriptions WHERE endpoint = ?",
+                (sub["endpoint"],)).fetchone()
+            if not known and per_listener is not None:
+                self.db.execute(
+                    "DELETE FROM push_subscriptions WHERE endpoint IN ("
+                    " SELECT endpoint FROM push_subscriptions WHERE listener_id = ?"
+                    " ORDER BY created_at DESC, rowid DESC LIMIT -1 OFFSET ?)",
+                    (listener_id, max(per_listener - 1, 0)))
+            if cap is not None and not known:
                 (count,) = self.db.execute(
                     "SELECT COUNT(*) FROM push_subscriptions").fetchone()
                 if count >= cap:
+                    self.db.rollback()
                     return False
             self.db.execute(
                 "INSERT INTO push_subscriptions "
                 "(endpoint, p256dh, auth, listener_id, name, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(endpoint) DO UPDATE SET "
                 "p256dh = excluded.p256dh, auth = excluded.auth, "
-                "listener_id = excluded.listener_id, name = excluded.name, failures = 0",
+                "listener_id = excluded.listener_id, name = excluded.name",
                 (sub["endpoint"], sub["p256dh"], sub["auth"], listener_id, name,
                  _iso(now or datetime.now(timezone.utc))))
             self.db.commit()

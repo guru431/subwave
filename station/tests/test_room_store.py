@@ -56,13 +56,34 @@ def test_order_is_chronological(store):
 def test_rate_counts_only_this_listener(store):
     store.add("l1", "Аня", "раз", now=T0)
     store.add("l2", "Боря", "два", now=T0)
-    assert store.add("l1", "Аня", "ещё", now=T0, rate=(60, 2)) is not None
-    assert store.add("l1", "Аня", "лишнее", now=T0, rate=(60, 2)) is None
+    assert isinstance(store.add("l1", "Аня", "ещё", now=T0, rate=(60, 2)), dict)
+    assert store.add("l1", "Аня", "лишнее", now=T0, rate=(60, 2)) == "listener"
+
+
+def test_room_rate_counts_every_listener(store):
+    # id слушателя выбирает сам клиент: новый id на каждое сообщение снимал
+    # личный лимит, и общего потолка на комнату не было вовсе
+    for i in range(3):
+        assert isinstance(store.add(f"l{i}", "Аня", "раз", now=T0,
+                                    rate=(60, 10), room_rate=(60, 3)), dict)
+    assert store.add("l9", "Боря", "четвёртое", now=T0,
+                     rate=(60, 10), room_rate=(60, 3)) == "room"
+    assert len(store.since(0, 10)) == 3
+    # окно общее, но скользящее: через минуту комната снова принимает
+    assert isinstance(store.add("l9", "Боря", "позже", now=T0 + timedelta(seconds=61),
+                                rate=(60, 10), room_rate=(60, 3)), dict)
+
+
+def test_listener_limit_is_named_before_the_room_one(store):
+    # исчерпавшему СВОЙ лимит честнее сказать про него, а не про переполненный чат
+    store.add("l1", "Аня", "раз", now=T0)
+    assert store.add("l1", "Аня", "два", now=T0,
+                     rate=(60, 1), room_rate=(60, 1)) == "listener"
 
 
 def test_rate_ignores_older_than_window(store):
     store.add("l1", "Аня", "давно", now=T0 - timedelta(seconds=120))
-    assert store.add("l1", "Аня", "сейчас", now=T0, rate=(60, 1)) is not None
+    assert isinstance(store.add("l1", "Аня", "сейчас", now=T0, rate=(60, 1)), dict)
 
 
 def test_rate_holds_against_simultaneous_posts(store):
@@ -80,7 +101,25 @@ def test_rate_holds_against_simultaneous_posts(store):
         t.start()
     for t in threads:
         t.join()
-    assert sum(r is not None for r in added) == 3
+    assert sum(isinstance(r, dict) for r in added) == 3
+
+
+def test_room_rate_holds_against_simultaneous_posts(store):
+    # тот же гонщик, но с разных id: общий потолок считается под той же блокировкой
+    import threading
+    start = threading.Barrier(8)
+    added = []
+
+    def post(i):
+        start.wait()
+        added.append(store.add(f"l{i}", "Аня", "раз", rate=(60, 10), room_rate=(60, 3)))
+
+    threads = [threading.Thread(target=post, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sum(isinstance(r, dict) for r in added) == 3
 
 
 def test_subscription_cap_lets_a_known_browser_renew(store):
@@ -89,6 +128,43 @@ def test_subscription_cap_lets_a_known_browser_renew(store):
     assert store.subscribe(sub, "l1", "Аня", cap=1)
     assert not store.subscribe(other, "l2", "Боря", cap=1)
     assert store.subscribe(sub, "l1", "Аня Н.", cap=1)        # переподписка — не новая
+    assert [s["name"] for s in store.subscriptions()] == ["Аня Н."]
+
+
+def _sub(tail):
+    return {"endpoint": f"https://fcm.googleapis.com/{tail}", "p256dh": "k", "auth": "a"}
+
+
+def test_new_subscription_over_the_listener_cap_replaces_its_own_oldest(store):
+    # один id — один браузер; лишние адреса у него — брошенные прежние
+    # подписки, а новые id ничего не стоят: потолок не даёт одному id занять
+    # всю таблицу, а вытеснение — застрять настоящему слушателю
+    store.subscribe(_sub("a1"), "l1", "Аня", now=T0, per_listener=2)
+    store.subscribe(_sub("b1"), "l2", "Боря", now=T0, per_listener=2)
+    store.subscribe(_sub("a2"), "l1", "Аня", now=T0 + timedelta(seconds=1), per_listener=2)
+    assert store.subscribe(_sub("a3"), "l1", "Аня", now=T0 + timedelta(seconds=2),
+                           per_listener=2)
+    assert sorted(s["endpoint"].rsplit("/", 1)[1] for s in store.subscriptions()) == \
+        ["a2", "a3", "b1"]
+    # переподписка известного адреса никого не вытесняет
+    store.subscribe(_sub("a2"), "l1", "Аня", now=T0 + timedelta(seconds=3), per_listener=2)
+    assert len(store.subscriptions()) == 3
+
+
+def _failures(store, tail):
+    (n,) = store.db.execute("SELECT failures FROM push_subscriptions WHERE endpoint = ?",
+                            (_sub(tail)["endpoint"],)).fetchone()
+    return n
+
+
+def test_resubscription_keeps_the_failure_count(store):
+    # переподписка обнуляла счётчик отказов: мёртвый адрес, переподписанный
+    # снаружи, не забывался никогда
+    store.subscribe(_sub("a1"), "l1", "Аня", now=T0)
+    store.push_result(_sub("a1")["endpoint"], 503)
+    store.push_result(_sub("a1")["endpoint"], 503)
+    store.subscribe(_sub("a1"), "l1", "Аня Н.", now=T0)
+    assert _failures(store, "a1") == 2
     assert [s["name"] for s in store.subscriptions()] == ["Аня Н."]
 
 
