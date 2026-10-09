@@ -291,6 +291,12 @@ export function untaggedPathTracks(): Array<db.MoodPoolRecord & { path: string }
   return blocklist.rejectBlocked(db.untaggedPathRows());
 }
 
+// Fork: library-db's write token (any connection's commit, a handle swap), so a
+// caller can cache a read across picks — music/folder-genre-show.ts.
+export function changeToken(): string {
+  return loaded ? db.changeToken() : 'unloaded';
+}
+
 // Mean of the pace curve (0..1), null when un-analysed. Shared by slimTrack
 // and get() so both pick paths see the same scalar.
 export function paceMeanOf(pace: Array<{ value: number }> | null | undefined): number | null {

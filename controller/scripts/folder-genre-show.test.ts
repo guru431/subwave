@@ -29,10 +29,14 @@ const ok = (body: object) => new Response(JSON.stringify({
   'subsonic-response': { status: 'ok', version: '1.16.1', ...body },
 }), { status: 200, headers: { 'content-type': 'application/json' } });
 
+// Navidrome answering 503 to everything — getGenres included.
+let navidromeDown = false;
+
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
   if (url.startsWith('http://127.0.0.1:9/rest/')) {
+    if (navidromeDown) return new Response('fixture: down', { status: 503 });
     const endpoint = new URL(url).pathname.replace('/rest/', '');
     if (endpoint === 'getGenres') return ok({ genres: { genre: TAGS } });
     return ok({});                // genre fetches, random, albums: nothing
@@ -84,6 +88,22 @@ track('rock-1', '/m/Rock/1.mp3', ['Рок']);
 track('loose-1', '/m/Other/1.mp3', null);           // no folder genre
 track('chanson-1', '/m/Unsorted/Шансон/1.mp3', null);
 const KID_IDS = ['kid-1', 'kid-2', 'kid-3'];
+
+// First, while getGenres has never answered: a success is cached for 5 min.
+test('with Navidrome down a folder genre still resolves; a tag genre fails as upstream', async () => {
+  const { resolveShowGenreName } = await showGenre();
+  navidromeDown = true;
+  try {
+    // The folder genre needs nothing from Navidrome.
+    assert.equal(await resolveShowGenreName('Детские'), 'Детские');
+    // A tag genre throws exactly as resolveGenreName does; every caller drops a
+    // genre that throws, so its lock behaves as it always has.
+    await assert.rejects(subsonic.resolveGenreName('Рок'), /getGenres failed: 503/);
+    await assert.rejects(resolveShowGenreName('Рок'), /getGenres failed: 503/);
+  } finally {
+    navidromeDown = false;
+  }
+});
 
 test('a show genre resolves to a genre only a folder carries', async () => {
   const { resolveShowGenreName } = await showGenre();
@@ -153,4 +173,45 @@ test('the auto.m3u coast and the pool picker take the folder source in step', ()
   }
   has('../src/broadcast/dj-agent.ts', 'resolveShowGenreName(');
   has('../src/music/show-candidates.ts', 'resolveShowGenreName(');
+});
+
+// Last: it adds a track to the folder.
+test('the folder-genre source is cached until the library, the folder table or the blocklist moves', async () => {
+  const { folderGenreTracks } = await showGenre();
+  const blocklist = await import('../src/music/blocklist.js');
+  const ids = () => folderGenreTracks('Детские').map((t: any) => t.id).sort();
+  assert.deepEqual(ids(), KID_IDS);
+
+  // Served from the cache: the table is only ever REPLACED, never edited in
+  // place, so an in-place edit moves nothing the cache keys on. Without the
+  // cache this call would read the edit and find nothing.
+  const live = folderGenres.assigned() as Map<string, string[]>;
+  live.set(KIDS, ['Другое']);
+  try {
+    assert.deepEqual(ids(), KID_IDS, 'a second call within the same versions is not recomputed');
+  } finally {
+    live.set(KIDS, ['Детские']);
+  }
+
+  const copy = folderGenreTracks('Детские')[0] as any;
+  copy.gainDb = -3;
+  assert.equal((folderGenreTracks('Детские')[0] as any).gainDb, undefined, 'callers get copies to stamp');
+
+  // The blocklist is absolute: a block takes the track out at once, an unblock
+  // brings it back.
+  await blocklist.add({ type: 'track', id: 'kid-2', name: 'Song kid-2' });
+  assert.deepEqual(ids(), ['kid-1', 'kid-3'], 'a block invalidates');
+  await blocklist.remove('track', 'kid-2');
+  assert.deepEqual(ids(), KID_IDS, 'an unblock invalidates');
+
+  // A replaced folder table.
+  const table = folderGenres.assigned();
+  folderGenres.setAll(new Map([[KIDS, ['Сказки']]]));
+  assert.deepEqual(ids(), [], 'a new folder table invalidates');
+  folderGenres.setAll(table);
+  assert.deepEqual(ids(), KID_IDS);
+
+  // A library write.
+  track('kid-4', `${KIDS}/5.mp3`, null);
+  assert.deepEqual(ids(), [...KID_IDS, 'kid-4'], 'a library write invalidates');
 });
