@@ -835,7 +835,9 @@ runner на `node:24-bookworm-slim`). Node, npm и зависимости жив
 bash station/tools/push-to-station.sh <ref>          # по умолчанию HEAD
 
 # на хосте станции — сборка под сторожем памяти, затем подъём
-cd ~/radio && bash station/tools/guarded.sh sudo docker build -f web/Dockerfile -t subwave-web:1.17.0-ru --build-arg SUBWAVE_BUILD_VERSION=1.17.0-ru .
+cd ~/radio && bash station/tools/guarded.sh sudo docker build -f web/Dockerfile -t subwave-web:1.17.0-ru \
+  --label org.opencontainers.image.revision=$(git rev-parse HEAD) \
+  --build-arg SUBWAVE_BUILD_VERSION=1.17.0-ru+$(git rev-parse --short HEAD) .
 cd <deploy-dir>/subwave && sudo docker compose up -d web
 ```
 
@@ -857,7 +859,9 @@ cd <deploy-dir>/subwave && sudo docker compose up -d web
 сборки при обычном завершении сторож возвращает как есть.
 
 `SUBWAVE_BUILD_VERSION` — версия в подвале админки, вшивается в клиентский бандл при
-сборке; без неё берётся версия из `web/package.json` апстрима.
+сборке; без неё берётся версия из `web/package.json` апстрима. `+<sha>` в ней и метка
+`org.opencontainers.image.revision` называют ревизию форка: тег один на все сборки, а
+метку живого контейнера сверяет [«Перед выкаткой»](controller-changes.md#перед-выкаткой--сверка-живого-образа-с-клоном).
 
 **Образ берётся только свой.** Он живёт локально на хосте и в реестр не публикуется;
 [docker-compose.override.yml](../deploy/docker-compose.override.yml) задаёт
@@ -970,7 +974,8 @@ diff -q "$L/web/lib/schemas.generated.ts" web/lib/schemas.generated.ts && echo S
 `RULE_PATH_MAX`), — их правки зеркала совпали с уже сгенерированным, а не конфликтовали.
 
 **Дальше** — линтер, typecheck и тесты (раздел выше, 0 ошибок); сборка образа с новым
-тегом `subwave-web:X.Y.Z-ru` и `SUBWAVE_BUILD_VERSION=X.Y.Z-ru`; новый тег — в
+тегом `subwave-web:X.Y.Z-ru` и `SUBWAVE_BUILD_VERSION=X.Y.Z-ru+<sha>` (команда — раздел
+«Сборка»); новый тег — в
 [docker-compose.override.yml](../deploy/docker-compose.override.yml), вместе с образом
 контроллера (порядок контроллера и эталон его тестов — [controller-changes.md](controller-changes.md));
 `docker-compose.yml` и Caddyfile апстрима — по [deploy.md](deploy.md). В `main` ветка

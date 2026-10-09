@@ -737,8 +737,17 @@ Windows с CRLF, роняет shell-тесты апстрима (`aio-log-link`,
 
 ```bash
 cd ~/radio && bash station/tools/guarded.sh sudo docker build \
-  -f docker/Dockerfile.controller -t subwave-controller:1.17.0-ru .
+  -f docker/Dockerfile.controller -t subwave-controller:1.17.0-ru \
+  --label org.opencontainers.image.revision=$(git rev-parse HEAD) \
+  --build-arg SUBWAVE_BUILD_VERSION=1.17.0-ru+$(git rev-parse --short HEAD) .
 ```
+
+Метка `org.opencontainers.image.revision` — ревизия форка, из которой собран образ:
+тег `<версия>-ru` один на все сборки, а метку читает [сверка перед
+выкаткой](#перед-выкаткой--сверка-живого-образа-с-клоном). `SUBWAVE_BUILD_VERSION`
+`Dockerfile.controller` кладёт в окружение, контроллер пишет её в манифест резервной
+копии и бандла персон (без неё — версия из `package.json`); `+<sha>` делает видимой и
+ревизию.
 
 Хост станции делит ОЗУ с чужими службами, и память кончается у него раньше, чем у
 cgroup контейнера: `tsc` однажды пять раз подряд уронил хост в глобальный OOM, и тот
@@ -786,8 +795,24 @@ pgrep -af 'sleep 30'          # пусто
 Тег один на всех, а собрать его можно из любой ревизии. Сборка из ревизии без чужой
 свежей правки занимает тот же тег и молча откатывает её: 22.09 (ещё на патчах v1.8)
 так на три часа пропал из эфира `requestPath` — образ собрали из другой рабочей
-копии. Проверка — дифф исходников живого контейнера с клоном; в нём должны остаться
-только собственные новые правки:
+копии.
+
+Первая проверка — метка ревизии у живых контейнеров: выкатываемая ревизия (`HEAD`
+клона) должна быть её потомком, иначе в новом образе нет чего-то, что уже в эфире:
+
+```bash
+for c in sub-wave-controller sub-wave-web; do
+  rev=$(sudo docker inspect -f '{{with index .Config.Labels "org.opencontainers.image.revision"}}{{.}}{{end}}' "$c")
+  if [ -z "$rev" ]; then echo "$c: метки нет — собран до неё, смотреть дифф ниже"
+  elif git -C ~/radio merge-base --is-ancestor "$rev" HEAD; then echo "$c: $rev — предок, ок"
+  else echo "$c: $rev — НЕ предок HEAD (или неизвестен клону) = стоп"; fi
+done
+```
+
+Метка — только у образов, собранных командами из этого документа и
+[web-changes.md](web-changes.md); у собранных раньше её нет. Вторая проверка, и
+единственная для образа без метки, — дифф исходников живого контейнера с клоном; в нём
+должны остаться только собственные новые правки:
 
 ```bash
 cid=$(sudo docker create "$(sudo docker inspect -f '{{.Image}}' sub-wave-controller)")
