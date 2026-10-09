@@ -46,7 +46,8 @@ export function useTuneInGate(): TuneInGate {
   useEffect(() => {
     if (!idleStopped) return;
     setShowTuneIn(true);
-    toast('Tuned out while you were away — tap to keep listening.');
+    // Fork (W01): Russian, like the player page.
+    toast('Эфир выключен — вас долго не было. Нажмите, чтобы слушать дальше.');
   }, [idleStopped]);
 
   // Drop the gate whenever playback is running; covers resume paths that

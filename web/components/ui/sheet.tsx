@@ -132,9 +132,11 @@ export function Sheet({ open, onOpenChange, title, children, container }: SheetP
                   <Dialog.Title className="v3-eyebrow m-0 text-sm tracking-[0.4em]">
                     {title}
                   </Dialog.Title>
+                  {/* Fork (W01): Russian — the classic player's drawers are this
+                      component's only user. */}
                   <Dialog.Close
                     className="v3-focus cursor-pointer text-xl leading-none"
-                    aria-label="Close"
+                    aria-label="Закрыть"
                   >
                     ×
                   </Dialog.Close>

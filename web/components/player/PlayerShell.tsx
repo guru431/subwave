@@ -15,6 +15,7 @@ import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { cn } from '@/lib/cn';
 import {
   cacheStationSkin,
+  canonicalSkinId,
   loadCachedStationSkin,
   loadSkinOverride,
   saveSkinOverride,
@@ -53,6 +54,14 @@ function targetInsideDialog(e?: KeyboardEvent): boolean {
   return e?.target instanceof HTMLElement && e.target.closest('[role="dialog"]') != null;
 }
 
+// Fork (W01): only the classic face is translated (and carries the fork's chat,
+// 👎, download and volume slider), so the full-page player offers no other. The
+// palette's picker and the `s` shortcut both work off this list, and a pick of
+// another skin saved before the change is dropped. The operator's station-wide
+// `ui.skin` still applies; showcases (`contained`) keep the whole registry.
+const PAGE_SKINS = SKINS.filter(s => s.id === DEFAULT_SKIN_ID);
+const isPageSkin = (id: string | null) => PAGE_SKINS.some(s => s.id === canonicalSkinId(id));
+
 function ShellChrome({ skin, contained }: { skin?: SkinComponent; contained: boolean }) {
   const { attachAudio } = usePlayerAudio();
   const { state } = usePlayerFeed();
@@ -68,7 +77,11 @@ function ShellChrome({ skin, contained }: { skin?: SkinComponent; contained: boo
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
     if (contained) return; // showcases follow the remote station strictly
-    setOverrideId(loadSkinOverride());
+    // Fork (W01): a saved pick outside PAGE_SKINS is cleared, not just ignored,
+    // so the pre-paint script stops blanking the shell for it on every load.
+    const saved = loadSkinOverride();
+    if (saved && !isPageSkin(saved)) saveSkinOverride(null);
+    setOverrideId(saved && isPageSkin(saved) ? saved : null);
     setCachedStation(loadCachedStationSkin());
     setHydrated(true);
   }, [contained]);
@@ -93,13 +106,14 @@ function ShellChrome({ skin, contained }: { skin?: SkinComponent; contained: boo
 
   const selection = useMemo<SkinSelection>(
     () => ({
-      skins: SKINS,
+      // Fork (W01): one skin on the page, so ThemeSwitcher hides its picker.
+      skins: contained ? SKINS : PAGE_SKINS,
       stationSkinId: resolveSkinId(stationSkinId, null),
       overrideId,
       effectiveId,
       setOverride,
     }),
-    [stationSkinId, overrideId, effectiveId, setOverride],
+    [contained, stationSkinId, overrideId, effectiveId, setOverride],
   );
 
   // Shell-level cycling shortcuts, live in every skin: `s` cycles the skin
@@ -109,13 +123,15 @@ function ShellChrome({ skin, contained }: { skin?: SkinComponent; contained: boo
   // shortcut maps still work inside drawers, hence the check lives here and
   // not in useKeyboardShortcuts.
   const themeCtx = useThemeSwitcher();
+  // Fork (W01): cycles PAGE_SKINS (the shortcut is dead while contained), so
+  // with the one skin there is nowhere to go; toasts are Russian, like the page.
   const cycleSkin = useCallback((e?: KeyboardEvent) => {
-    if (contained || targetInsideDialog(e)) return;
-    const i = SKINS.findIndex(s => s.id === effectiveId);
-    const next = SKINS[(i + 1) % SKINS.length];
+    if (contained || targetInsideDialog(e) || PAGE_SKINS.length < 2) return;
+    const i = PAGE_SKINS.findIndex(s => s.id === effectiveId);
+    const next = PAGE_SKINS[(i + 1) % PAGE_SKINS.length];
     if (!next) return;
     setOverride(next.id);
-    toast(`Skin: ${next.name}`);
+    toast(`Вид плеера: ${next.name}`);
   }, [contained, effectiveId, setOverride]);
   const cycleTheme = useCallback((e?: KeyboardEvent) => {
     if (contained || targetInsideDialog(e) || !themeCtx || themeCtx.themes.length === 0) return;
@@ -124,7 +140,7 @@ function ShellChrome({ skin, contained }: { skin?: SkinComponent; contained: boo
     const next = themes[(i + 1) % themes.length];
     if (!next) return;
     setThemeOverride(next.id);
-    toast(`Theme: ${next.name}`);
+    toast(`Тема: ${next.name}`);
   }, [contained, themeCtx]);
   useKeyboardShortcuts({ s: cycleSkin, t: cycleTheme }, { disabled: contained });
 

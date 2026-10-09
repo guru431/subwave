@@ -43,6 +43,43 @@ export interface ThemeSwitcherProps {
   variant?: 'player' | 'admin';
 }
 
+// Fork (W01): the player page is Russian and the admin console is not
+// (station/docs/deploy.md), and this one dialog serves both — so its copy
+// follows `variant`. Theme and skin names are station/registry data and stay
+// as they come.
+const COPY = {
+  player: {
+    trigger: 'Оформление',
+    title: 'Оформление',
+    close: 'Закрыть',
+    theme: 'Тема',
+    dark: 'Тёмная палитра',
+    light: 'Светлая палитра',
+    stationTheme: '↺ Как у станции',
+    skin: 'Вид плеера',
+    stationSkin: '↺ Как у станции',
+    lite: 'Облегчённый режим',
+    liteHint: 'Быстрее на слабых экранах',
+    on: 'Вкл',
+    off: 'Выкл',
+  },
+  admin: {
+    trigger: 'Appearance — theme and skin',
+    title: 'Appearance',
+    close: 'Close',
+    theme: 'Theme',
+    dark: 'Dark palette',
+    light: 'Light palette',
+    stationTheme: '↺ Use station default',
+    skin: 'Player skin',
+    stationSkin: '↺ Use station skin',
+    lite: 'Lite mode',
+    liteHint: 'Improves performance on low-power screens',
+    on: 'On',
+    off: 'Off',
+  },
+} as const;
+
 // Per-listener theme + skin switcher; picks persist in localStorage and beat the
 // station-wide defaults until reset. Modal rather than a dropdown so it reads the
 // same on every skin — an anchored popover collided with each skin's own chrome.
@@ -55,6 +92,7 @@ export default function ThemeSwitcher({ variant = 'player' }: ThemeSwitcherProps
   const showSkins = skinCtx != null && skinCtx.skins.length > 1;
   const [open, setOpen] = useState(false);
   const { lite, setLite } = useLiteMode();
+  const copy = COPY[variant];
 
   const onPickTheme = useCallback(
     (id: string | null) => {
@@ -73,8 +111,8 @@ export default function ThemeSwitcher({ variant = 'player' }: ThemeSwitcherProps
       <Dialog.Trigger asChild>
         <button
           type="button"
-          aria-label="Appearance — theme and skin"
-          title="Appearance"
+          aria-label={copy.trigger}
+          title={copy.title}
           className={cn(
             'v3-focus inline-flex shrink-0 cursor-pointer items-center justify-center border-0 bg-transparent p-0 leading-none',
             // The admin header packs this next to other icon-only controls, so it
@@ -102,18 +140,18 @@ export default function ThemeSwitcher({ variant = 'player' }: ThemeSwitcherProps
         >
           <div className="flex items-baseline justify-between gap-3 border-b border-ink px-5 py-3.5">
             <Dialog.Title className="v3-eyebrow m-0 text-[12px] tracking-[0.3em]">
-              Appearance
+              {copy.title}
             </Dialog.Title>
             <Dialog.Close
               className="v3-focus cursor-pointer border-0 bg-transparent text-xl leading-none text-muted hover:text-ink"
-              aria-label="Close"
+              aria-label={copy.close}
             >
               ×
             </Dialog.Close>
           </div>
 
           <div className="v3-scroll grid flex-1 grid-cols-1 gap-1 overflow-auto px-3 py-3 sm:grid-cols-2">
-            <SectionLabel>Theme</SectionLabel>
+            <SectionLabel>{copy.theme}</SectionLabel>
             {themes.map(t => {
               const isActive = t.id === effectiveId;
               return (
@@ -139,7 +177,7 @@ export default function ThemeSwitcher({ variant = 'player' }: ThemeSwitcherProps
                       {t.name}
                     </span>
                     <span className="truncate text-[10px] leading-[1.3] text-muted">
-                      {t.description || (t.mode === 'dark' ? 'Dark palette' : 'Light palette')}
+                      {t.description || (t.mode === 'dark' ? copy.dark : copy.light)}
                     </span>
                   </span>
                 </button>
@@ -155,7 +193,7 @@ export default function ThemeSwitcher({ variant = 'player' }: ThemeSwitcherProps
                 overrideId ? 'v3-focus cursor-pointer hover:text-ink' : 'cursor-default opacity-60',
               )}
             >
-              ↺ Use station default
+              {copy.stationTheme}
               {stationActiveId && (
                 <span className="ml-1 normal-case opacity-70">
                   ({themes.find(t => t.id === stationActiveId)?.name ?? stationActiveId})
@@ -165,7 +203,7 @@ export default function ThemeSwitcher({ variant = 'player' }: ThemeSwitcherProps
 
             {showSkins && skinCtx && (
               <>
-                <SectionLabel className="mt-2">Player skin</SectionLabel>
+                <SectionLabel className="mt-2">{copy.skin}</SectionLabel>
                 {skinCtx.skins.map(s => {
                   const isActive = s.id === skinCtx.effectiveId;
                   return (
@@ -208,7 +246,7 @@ export default function ThemeSwitcher({ variant = 'player' }: ThemeSwitcherProps
                     skinCtx.overrideId ? 'v3-focus cursor-pointer hover:text-ink' : 'cursor-default opacity-60',
                   )}
                 >
-                  ↺ Use station skin
+                  {copy.stationSkin}
                   <span className="ml-1 normal-case opacity-70">
                     ({skinCtx.skins.find(s => s.id === skinCtx.stationSkinId)?.name ?? skinCtx.stationSkinId})
                   </span>
@@ -233,10 +271,10 @@ export default function ThemeSwitcher({ variant = 'player' }: ThemeSwitcherProps
               <Zap className="h-4 w-4 shrink-0" aria-hidden="true" />
               <span className="grid min-w-0 flex-1 gap-0.5">
                 <span className="truncate text-[11px] font-bold tracking-[0.12em] uppercase">
-                  Lite mode
+                  {copy.lite}
                 </span>
                 <span className="truncate text-[10px] leading-[1.3] text-muted">
-                  Improves performance on low-power screens
+                  {copy.liteHint}
                 </span>
               </span>
               <span
@@ -246,7 +284,7 @@ export default function ThemeSwitcher({ variant = 'player' }: ThemeSwitcherProps
                 )}
                 aria-hidden="true"
               >
-                {lite ? 'On' : 'Off'}
+                {lite ? copy.on : copy.off}
               </span>
             </button>
           </div>
