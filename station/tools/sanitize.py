@@ -9,7 +9,8 @@
 кончающийся цифрой, не ловится внутри другого числа (`10.0.0.1` ≠ `10.0.0.10`).
 Остаток — ключ карты или строка `.sanitize-patterns` (ERE, без учёта регистра),
 найденные после замены. Их правят руками: склонения фамилий, значения в коде,
-которым нужна переменная окружения, а не плейсхолдер.
+которым нужна переменная окружения, а не плейсхолдер. Файл не в UTF-8 (двоичный,
+cp1251) не проверяется и потому тоже остаток; NUL в UTF-8-тексте — не помеха.
 Код выхода: 0 — остатков нет, 1 — есть, 2 — нет карты.
 """
 import argparse
@@ -60,10 +61,14 @@ def residuals(text: str, rules, patterns) -> list[tuple[int, str]]:
 
 def process(path: Path, rules, patterns, check: bool) -> list[str]:
     raw = path.read_bytes()
-    if b"\0" in raw:
-        return []          # двоичный файл: такие в git не идут вовсе (.github-push-deny)
     bom = raw.startswith(BOM)
-    text = raw[len(BOM):].decode("utf-8") if bom else raw.decode("utf-8")
+    try:
+        # NUL — тоже UTF-8: show-filter.ts апстрима несёт его в строке и лежит
+        # в git, так что проверяется, как любой текст.
+        text = raw[len(BOM):].decode("utf-8") if bom else raw.decode("utf-8")
+    except UnicodeDecodeError:
+        # Двоичный или не UTF-8: ни заменить, ни проверить — остаток.
+        return [f"{path}: не UTF-8 — не проверен, смотреть руками"]
     new = text if check else sanitize_text(text, rules)
     if new != text:
         path.write_bytes((BOM if bom else b"") + new.encode("utf-8"))

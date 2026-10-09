@@ -52,6 +52,23 @@ def test_check_mode_reports_and_does_not_write(tmp_path):
     assert f.read_text(encoding="utf-8") == "ssh nas01\n"
 
 
+def test_text_with_nul_is_checked_and_sanitized(tmp_path):
+    # Как show-filter.ts апстрима: NUL в строке, файл лежит в git.
+    f = tmp_path / "show-filter.ts"
+    f.write_bytes(b"const key = `${a}\0${b}`; // nas01\n")
+    assert S.process(f, rules(), [], check=True) == [f"{f}:1: nas01"]
+    assert S.process(f, rules(), [], check=False) == []
+    assert f.read_bytes() == b"const key = `${a}\0${b}`; // gpu-host\n"
+
+
+def test_non_utf8_file_is_a_residual_not_a_silent_pass(tmp_path):
+    f = tmp_path / "a.png"
+    f.write_bytes(b"\x89PNG\r\n\x1a\n\0\0\xff nas01")
+    hits = S.process(f, rules(), [], check=True)
+    assert len(hits) == 1 and hits[0].startswith(f"{f}: ")
+    assert f.read_bytes() == b"\x89PNG\r\n\x1a\n\0\0\xff nas01"
+
+
 def test_main_exit_codes(tmp_path):
     m = tmp_path / "map.json"
     m.write_text(json.dumps(MAP), encoding="utf-8")
