@@ -19,7 +19,8 @@
 
 ## Ветки и апстрим
 - `main` — апстрим + `station/` + наши фичи коммитами `feat|fix(controller|web): …`,
-  у каждой — раздел в `station/docs/controller-changes.md` / `web-changes.md`.
+  у каждой — раздел в `station/docs/controller-changes.md` / `web-changes.md`. Фикс
+  фичи правит её раздел там же, а не только `port-X.Y.md`.
 - `ru-1.8.0` — эталон нарезки, не меняется.
 - Новая версия апстрима — `git merge vX.Y.Z` в `main` (не rebase: ветка опубликована),
   вердикты по фичам — `station/docs/port-X.Y.md`, эталон `KNOWN` в
