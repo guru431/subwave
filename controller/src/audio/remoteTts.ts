@@ -104,6 +104,9 @@ export async function speak(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text: text.trim(), voice: voice ?? '' }),
     timeoutMs: REQUEST_TIMEOUT_MS,
+    // Fork: the audio is read from the body below, so the deadline has to cover
+    // it — a body that stalls after the headers otherwise waits on undici's ~300s.
+    bodyDeadline: true,
   });
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');

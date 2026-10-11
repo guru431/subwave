@@ -9,11 +9,12 @@
 // never-persisted salt only to dedupe sessions within a day; only the resulting
 // count reaches disk.
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { config } from '../config.js';
+import { writeFileAtomic } from '../util/atomic-file.js';
 
 const STORE_FILE = join(config.stateDir, 'audience.json');
 const RETAIN_DAYS = 60;          // how many day-buckets we keep on disk
@@ -195,7 +196,9 @@ async function flush(): Promise<void> {
     paths: capMap(b.paths),
   }));
   try {
-    await writeFile(STORE_FILE, JSON.stringify({ days }, null, 2));
+    // Atomic: a write cut short (shutdown, full disk) must not truncate the
+    // file load() then discards as corrupt, taking every retained day with it.
+    await writeFileAtomic(STORE_FILE, JSON.stringify({ days }, null, 2));
   } catch {
     dirty = true; // retry on the next tick
   }

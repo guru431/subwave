@@ -780,11 +780,12 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
   if (!text) {
     // Distinguish "typed nothing" from "it was all staging directions", which an
     // ordinary listener can hit via a false positive. Never echo the text back.
-    return res.status(400).json({
-      error: stripped.injection
-        ? 'Не получилось разобрать заказ — напишите просто исполнителя, название или настроение.'
-        : 'Пустой заказ',
-    });
+    const message = stripped.injection
+      ? 'Не получилось разобрать заказ — напишите просто исполнителя, название или настроение.'
+      : 'Пустой заказ';
+    // Fork: the player renders `message` (as validatePublicBody's 400 carries it);
+    // with `error` alone the listener saw the generic "nothing found" line.
+    return res.status(400).json({ success: false, error: message, message });
   }
   const s = settings.get() as any;
   const reservedNames = [

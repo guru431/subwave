@@ -149,7 +149,7 @@ async function main() {
             reporter.add(base);
             continue;
           }
-          const callsBefore = recentCalls.length;
+          const headBefore = recentCalls[0];
           const t0 = Date.now();
           try {
             const out = await scenario.run();
@@ -169,7 +169,10 @@ async function main() {
             }
           }
           // recentCalls is the live ring buffer (newest first, unshift on record).
-          const newCalls = recentCalls.length - callsBefore;
+          // Counted by where the previous head now sits, not by length: the ring
+          // is capped, so a length delta reads 0 on every cell once it is full.
+          const headAt = headBefore === undefined ? -1 : recentCalls.indexOf(headBefore);
+          const newCalls = headAt < 0 ? recentCalls.length : headAt;
           if (newCalls > 0) {
             base.tokens = (recentCalls[0] as any)?.usage?.total ?? null;
             // Reasoning-state forensics, single-call cells only (an agent run

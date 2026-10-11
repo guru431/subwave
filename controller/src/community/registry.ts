@@ -160,6 +160,7 @@ function optStr(v: unknown, max: number): string | undefined {
   return s ? s.slice(0, max) : undefined;
 }
 function dial(v: unknown): number | undefined {
+  if (v == null) return undefined; // Number(null) is 0 — the far end of the dial, not "unset"
   const n = Number(v);
   return Number.isInteger(n) && n >= 0 && n <= 10 ? n : undefined;
 }
@@ -241,8 +242,10 @@ function normalizeShow(raw: any): CommunityShow | null {
   if (!SLUG_RE.test(slug)) return null;
   const name = (str(raw?.name) || str(raw?.displayName)).slice(0, SHOW_NAME_MAX);
   if (!name) return null;
-  const seconds = Number(raw?.maxTrackSeconds);
-  const floorSeconds = Number(raw?.minTrackLengthSeconds);
+  // The catalog spells "no cap of its own" as an explicit null, and Number(null)
+  // is 0 — an explicit "unlimited" that overrides the station instead of inheriting.
+  const seconds = raw?.maxTrackSeconds == null ? NaN : Number(raw.maxTrackSeconds);
+  const floorSeconds = raw?.minTrackLengthSeconds == null ? NaN : Number(raw.minTrackLengthSeconds);
   return {
     slug,
     name,

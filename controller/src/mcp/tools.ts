@@ -66,6 +66,11 @@ const REQUEST_OUTPUT = {
 
 function summarizeRequest(requestId: string, status: RequestStatus): string {
   if (status.status === "resolved") {
+    // A chat answer or a declined pick (cooldown, already queued) also lands
+    // here, with no track and/or no queue position: nothing was queued.
+    if (!status.track || status.queuePosition == null) {
+      return `Nothing was queued. DJ says: ${status.ack ?? "(no ack)"}`;
+    }
     return (
       `Queued "${status.track?.title}" by ${status.track?.artist} at position ` +
       `${status.queuePosition}. DJ says: ${status.ack ?? "(no ack)"}`

@@ -18,9 +18,9 @@
 // we put under the DJ's nose this minute?" — never "must we be silent?".
 
 import { existsSync, readFileSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
 import { config } from '../config.js';
 import { zonedParts, zonedISODate } from '../time.js';
+import { writeFileAtomic } from '../util/atomic-file.js';
 
 const ON_THIS_DAY_TTL_MS = 12 * 60 * 60 * 1000; // 12h — events for a date are stable
 
@@ -181,7 +181,9 @@ function schedulePersist() {
   persistTimer = setTimeout(async () => {
     persistTimer = null;
     try {
-      await writeFile(config.curiosity.seenFile, JSON.stringify(ledger, null, 2));
+      // Atomic: a process killed mid-write would leave a torn file, and the
+      // next boot starts an empty ledger on one — on the very restart it is for.
+      await writeFileAtomic(config.curiosity.seenFile, JSON.stringify(ledger, null, 2));
     } catch (err: any) {
       console.error('[curiosity] ledger persist failed:', err.message);
     }
