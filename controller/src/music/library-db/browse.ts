@@ -45,8 +45,10 @@ export function filter(opts: FilterOpts = {}): { total: number; rows: TrackRecor
   if (yearFrom != null) { where.push(`${ERA_YEAR_SQL} >= ?`); params.push(yearFrom); }
   if (yearTo != null) { where.push(`${ERA_YEAR_SQL} <= ?`); params.push(yearTo); }
   if (q) {
+    // Fork: ulower (lifecycle.ts), not LOWER — `q` is folded by JS above, and
+    // LOWER() leaves every non-ASCII letter as stored.
     where.push(
-      `(LOWER(COALESCE(title,'')) LIKE ? OR LOWER(COALESCE(artist,'')) LIKE ? OR LOWER(COALESCE(album,'')) LIKE ?)`,
+      `(ulower(COALESCE(title,'')) LIKE ? OR ulower(COALESCE(artist,'')) LIKE ? OR ulower(COALESCE(album,'')) LIKE ?)`,
     );
     const pat = `%${q}%`;
     params.push(pat, pat, pat);

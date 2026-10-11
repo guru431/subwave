@@ -40,6 +40,11 @@ export async function open(opts: {
   // bulk write pass and every later query walks it (#786).
   db.pragma('journal_size_limit = 67108864'); // 64 MiB
   sqliteVec.load(db);
+  // Fork: SQLite's LOWER() and LIKE fold ASCII only (no ICU), so the free-text
+  // filter never matched "кино" against a stored "Кино". JS folding, for browse.ts.
+  db.function('ulower', { deterministic: true }, (s: unknown) =>
+    typeof s === 'string' ? s.toLowerCase() : s,
+  );
 
   // migrate() may adopt the stored dim; trust its return as the live schema dim.
   setHandle({
