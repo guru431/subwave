@@ -137,7 +137,7 @@ GPU-платформы): среда `/opt/ai/venv/f5` (Python 3.12, пакеты
 нет: контейнеры шага `interim` удалены 2026-10-10, `f5-tts:local` остаётся лишь откатом до
 подпроекта 7 llm_routers.
 
-1. Выкатка ревизии — с work-ai: `bash llm_routers/srvllm/deploy/push-radio.sh [ревизия]` (уезжает
+1. Выкатка ревизии — с <workstation>: `bash llm_routers/srvllm/deploy/push-radio.sh [ревизия]` (уезжает
    только закоммиченное, `git archive`), затем `sudo systemctl restart srvllm-tts.service`
    (вместе с мостиком — и `srvllm-tts-bridge`). Перезапуск того же юнита занимает ту же память
    карты — контроллер видит обычный прогрев; модель грузится ~15 с. Новые зависимости — правка

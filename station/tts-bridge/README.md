@@ -10,7 +10,7 @@
 `tts` у контроллера карты `srvllm-slots` (`GPU_CTL_URL=http://localhost:8119`,
 `GPU_CTL_SLOT=tts`, клиентский токен — `/etc/srvllm/services/tts-bridge.env`): пока станция
 говорит, запрос к gemma4 получает `503 excluded_slot_busy` и ждёт, а не гасит F5 посреди эфира.
-Выкатка — с work-ai `bash llm_routers/srvllm/deploy/push-radio.sh [ревизия]` и `sudo systemctl
+Выкатка — с <workstation> `bash llm_routers/srvllm/deploy/push-radio.sh [ревизия]` и `sudo systemctl
 restart srvllm-tts-bridge`, перерыв — пара секунд. Проверка — `/health` и `POST /speak` с
 несуществующим голосом: в ответе `X-TTS-Voice-Used` и `X-TTS-Fell-Back*`. F5 —
 [tts-f5/README.md](../tts-f5/README.md), «На srvllm».
