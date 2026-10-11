@@ -99,8 +99,12 @@ export function useAdminAuth(): AdminAuth {
   // Verify against the controller BEFORE caching: cached-but-wrong creds look
   // like a successful login and then 401 every later call.
   const signIn = useCallback(async (user: string, pass: string): Promise<SignInResult> => {
+    // UTF-8 bytes, which is how the controller decodes the header. A bare
+    // btoa() throws on anything outside Latin-1, leaving the form stuck busy.
     const encode = (s: string) =>
-      typeof window !== 'undefined' ? window.btoa(s) : Buffer.from(s).toString('base64');
+      typeof window !== 'undefined'
+        ? window.btoa(String.fromCharCode(...new TextEncoder().encode(s)))
+        : Buffer.from(s).toString('base64');
     const token = encode(`${user}:${pass}`);
     let r: Response;
     try {

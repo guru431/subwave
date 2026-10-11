@@ -1308,7 +1308,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
             guard on both the agent and candidate-pool pickers, on top of the time-based
             window. Auto-scales down on a small library so it never blocks everything;
             on a big library, raise it — it is the station&apos;s long memory.
-            {' '}<strong>0 = off</strong>. Listener requests stay exempt. 0&ndash;1000.
+            {' '}<strong>0 = off</strong>. Listener requests stay exempt. 0&ndash;2000.
           </div>
         </div>
 

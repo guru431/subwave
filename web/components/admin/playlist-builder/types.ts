@@ -92,8 +92,10 @@ export function fmtDur(sec: number): string {
   return `${m}:${String(ss).padStart(2, '0')}`;
 }
 export function fmtRun(total: number): string {
-  const h = Math.floor(total / 3600);
-  const m = Math.round((total % 3600) / 60);
+  // Round the whole run, not the remainder: 7170s would otherwise read "1h 60m".
+  const mins = Math.round(total / 60);
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 export function relTime(iso: string): string {

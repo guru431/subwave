@@ -385,8 +385,11 @@ export default function PlaylistBuilderPanel() {
       const j = await runGenerationJob(adminFetch, buildBody(exclude));
       const got: DraftTrack[] = j.tracks || [];
       if (!got.length) {
-        setView(mode === 'more' && tracks.length ? 'result' : 'nomatch');
-        if (mode === 'more' && tracks.length) flash('nothing new matched — loosen the filters');
+        // Regenerate excludes the current tracks too, so an empty answer means
+        // "nothing else", not "nothing": keep the set on screen, as More does.
+        const keepSet = mode !== 'fresh' && tracks.length > 0;
+        setView(keepSet ? 'result' : 'nomatch');
+        if (keepSet) flash('nothing new matched — loosen the filters');
         return;
       }
       setReasons(j.reasons || []);
@@ -408,8 +411,10 @@ export default function PlaylistBuilderPanel() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'generation failed';
       setErrorMsg(msg);
-      setView(mode === 'more' && tracks.length ? 'result' : 'error');
-      if (mode === 'more' && tracks.length) flash(msg);
+      // As with an empty answer above: a failed Regenerate keeps the set it had.
+      const keepSet = mode !== 'fresh' && tracks.length > 0;
+      setView(keepSet ? 'result' : 'error');
+      if (keepSet) flash(msg);
     } finally {
       generatingRef.current = false;
     }
@@ -1364,7 +1369,8 @@ export default function PlaylistBuilderPanel() {
       </div>
 
       {toast && (
-        <div className="fixed top-[70px] right-4 left-4 z-[60] flex items-center gap-3 bg-ink px-3.5 py-3 text-bg shadow-drawer sm:right-6 sm:left-auto sm:max-w-[340px]">
+        // Above the z-[80] modals: a failed save or delete flashes while one is open.
+        <div className="fixed top-[70px] right-4 left-4 z-[90] flex items-center gap-3 bg-ink px-3.5 py-3 text-bg shadow-drawer sm:right-6 sm:left-auto sm:max-w-[340px]">
           <span className="text-[13px] leading-[1.4]">{toast}</span>
           <button type="button" onClick={() => setToast('')} className="flex-none text-bg/70 hover:text-bg" title="dismiss">
             <X className="size-3.5" />

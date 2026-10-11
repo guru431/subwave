@@ -134,11 +134,11 @@ const tokensCache = new Map<string, TokenizedCode>();
 
 const subscribers = new Map<string, Set<(result: TokenizedCode) => void>>();
 
-const getTokensCacheKey = (code: string, language: BundledLanguage) => {
-  const start = code.slice(0, 100);
-  const end = code.length > 100 ? code.slice(-100) : "";
-  return `${language}:${code.length}:${start}:${end}`;
-};
+// Keyed on the whole code: a sampled prefix/suffix gave two same-length blocks
+// that differ only in the middle one cache entry, so the second rendered the
+// first's text.
+const getTokensCacheKey = (code: string, language: BundledLanguage) =>
+  `${language}:${code}`;
 
 const getHighlighter = (
   language: BundledLanguage
