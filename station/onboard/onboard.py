@@ -125,6 +125,14 @@ def _drop_empty_secrets(value, keys: tuple = ()):
             out[k], sub = _drop_empty_secrets(v, keys + (k,))
             dropped += sub
         return out, dropped
+    if isinstance(value, list):
+        # как _snapshot_secrets: метка пустого секрета ложится и в элемент списка
+        out = []
+        for i, v in enumerate(value):
+            v, sub = _drop_empty_secrets(v, keys + (i,))
+            out.append(v)
+            dropped += sub
+        return out, dropped
     return value, dropped
 
 

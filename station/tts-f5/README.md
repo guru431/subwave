@@ -206,7 +206,9 @@ ESpeech — русская модель и латиницу читает рус�
     volumes:
       - <gpu-ssd>\LLM\docker\f5-tts\pronunciation:/pronunciation:ro
 
-Новые исполнители в коллекции — повторить `export` и `build` и положить
+Новые исполнители в коллекции — повторить `export` (в каталог без `in-`/`out-`файлов
+прошлой выгрузки: номера фраз в них другие, и `export` в такой каталог откажется
+писать) и `build` и положить
 `pronunciation.json` на том службы — на srvllm `/opt/ai/data/tts/pronunciation/`
 (раздел «На srvllm»), на gpu-host был `<gpu-ssd>\LLM\docker\f5-tts\pronunciation\` (в журнале
 службы — `pronunciation: перечитан …`). Что F5 всё ещё читает сам — раздел «ОСТАТОК» у

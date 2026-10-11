@@ -77,6 +77,20 @@ def test_build_drops_what_fails_the_check(tmp_path):
         and any("нет ответа" in r for r in report)
 
 
+def test_malformed_answer_is_reported_not_a_traceback(tmp_path):
+    # ответы пишет LLM: запись без id или ru — «нет ответа» в отчёте, а не KeyError
+    (tmp_path / "in-1.json").write_text(json.dumps([
+        {"id": 0, "src": "Dire Straits"}, {"id": 1, "src": "Queen"}]), encoding="utf-8")
+    (tmp_path / "out-1.json").write_text(json.dumps([
+        {"id": 0}, "мусор", {"ru": "Квин"}, {"id": 1, "ru": 5}], ensure_ascii=False),
+        encoding="utf-8")
+    extra = tmp_path / "extra.json"
+    extra.write_text("{}", encoding="utf-8")
+    data, report = P.build(tmp_path, extra)
+    assert data["phrases"] == {}
+    assert len(report) == 2 and all("нет ответа" in r for r in report)
+
+
 def test_hand_entry_wins_over_the_llm(tmp_path):
     (tmp_path / "in-1.json").write_text(json.dumps([{"id": 0, "src": "Dire Straits"}]),
                                         encoding="utf-8")

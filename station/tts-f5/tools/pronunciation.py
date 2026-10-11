@@ -11,6 +11,7 @@ DIR/out-K.json вида [{"id", "ru"}], русскими буквами с «+»
 pronunciation.json; запись, не прошедшая проверку, в словарь не попадает.
 
 Новые исполнители в коллекции — повторить оба шага: словарь пересобирается целиком.
+DIR для export — без in-/out-файлов прошлой выгрузки: id в них другие.
 """
 import argparse
 import json
@@ -32,6 +33,7 @@ EDGE = "()[]{}«»\"'’.,!?:;"
 def export(db: Path, out: Path, parts: int) -> int:
     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     rows = conn.execute("select artist, title from tracks order by artist, title").fetchall()
+    conn.close()
     items, seen = [], set()
     for artist, _ in rows:
         if artist and LATIN.search(artist) and dictionary_key(artist) not in seen:
@@ -44,6 +46,12 @@ def export(db: Path, out: Path, parts: int) -> int:
     for i, item in enumerate(items):
         item["id"] = i
     out.mkdir(parents=True, exist_ok=True)
+    # id — порядковые номера этой выгрузки: файлы прошлой (другой --parts, новые
+    # исполнители — номера сдвинулись) build молча свёл бы с чужими фразами
+    stale = sorted(p.name for pat in ("in-*.json", "out-*.json") for p in out.glob(pat))
+    if stale:
+        raise SystemExit(f"{out}: файлы прошлой выгрузки ({', '.join(stale)}) — "
+                         "нужен каталог без них")
     size = -(-len(items) // parts)
     for k in range(parts):
         (out / f"in-{k + 1}.json").write_text(
@@ -117,7 +125,10 @@ def build(src_dir: Path, extra: Path = EXTRA) -> tuple[dict, list[str]]:
     answers = {}
     for f in sorted(src_dir.glob("out-*.json")):
         for a in json.loads(f.read_text(encoding="utf-8")):
-            answers[a["id"]] = a["ru"]
+            # ответы пишет LLM: запись без id или ru — не ответ, фраза уйдёт в отчёт
+            if (isinstance(a, dict) and isinstance(a.get("id"), (int, float))
+                    and isinstance(a.get("ru"), str)):
+                answers[a["id"]] = a["ru"]
     report, pairs = [], []
     for i, item in items.items():
         ru = answers.get(i)

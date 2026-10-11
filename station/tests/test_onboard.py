@@ -320,6 +320,15 @@ def test_patch_with_empty_marker_does_not_send_it(api, tmp_path):
     assert calls[0]["payload"] == {"llm": {"reasoning": True}}
 
 
+def test_empty_marker_inside_a_list_is_dropped_too():
+    # _snapshot_secrets метит пустой секрет и в элементе списка — снимать его там же,
+    # иначе на станцию уехала бы сама метка
+    value, dropped = onboard._drop_empty_secrets(
+        {"webhooks": [{"url": "u", "token": onboard.EMPTY_SECRET}], "moods": ["calm"]})
+    assert value == {"webhooks": [{"url": "u"}], "moods": ["calm"]}
+    assert dropped == ["webhooks.0.token"]
+
+
 def test_patch_keys_absent_from_get_are_named(api, tmp_path, capsys):
     # skills, djSpeakClock, webhooks… GET /settings в values не отдаёт: в снимок
     # они не попадают, и молчать об этом — значит потерять их при переносе
