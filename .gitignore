@@ -67,6 +67,7 @@ __pycache__/
 /.sanitize-map.json
 /.github-push-deny
 /.claude/claude-switch.ps1
+/.claude/settings.local.json
 /station/.env
 /station/tts-f5/voices/
 /station/tts-bridge/refs/
