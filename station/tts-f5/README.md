@@ -147,7 +147,9 @@ GPU-платформы): среда `/opt/ai/venv/f5` (Python 3.12, пакеты
    затем `sudo -u aiservice /opt/ai/venv/f5/bin/python /opt/srvllm-services/radio/tts-f5/tools/stress_audit.py /tmp/corpus.json /opt/ai/data/tts/ruaccent`.
 3. `tools/smoke.py --url http://localhost:4126 --voices /opt/ai/data/tts/voices`.
 4. Приёмка — фразы через мостик `:4124`, распознавание — служба `asr` того же хоста
-   (`:8000/v1/audio/transcriptions`, large-v3, `language=ru`) вместо whisper-small, порог
+   (`:8000/v1/audio/transcriptions`, large-v3, `language=ru`) вместо whisper-small. С 2026-10-13
+   `asr` — слот по требованию: до распознавания поднять его у контроллера
+   (`POST :8119/ensure-up?slot=asr`, клиентский токен; на время работы он снимает gemma4). Порог —
    `check_speech.py` (40 % слов); прослушивание владельцем. Откат — `push-radio.sh` прежней
    ревизии и тот же рестарт.
 
