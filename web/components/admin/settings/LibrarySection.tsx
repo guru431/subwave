@@ -89,8 +89,14 @@ export function LibrarySection({ data, form, setForm, busy, saveSettings, adminF
         ollamaUrl: e.ollamaUrl,
         seedCount: parseInt(e.seedCount, 10) || 0,
         knnNeighbours: parseInt(e.knnNeighbours, 10) || 10,
-        moodVoteThreshold: parseFloat(e.moodVoteThreshold) || 0.4,
-        confidenceThreshold: parseFloat(e.confidenceThreshold) || 0.35,
+        // NaN-safe like audioFusionWeight below: both fields allow 0 and the
+        // controller stores it, but `|| 0.4` saved the default in its place.
+        moodVoteThreshold: Number.isFinite(parseFloat(e.moodVoteThreshold))
+          ? parseFloat(e.moodVoteThreshold)
+          : 0.4,
+        confidenceThreshold: Number.isFinite(parseFloat(e.confidenceThreshold))
+          ? parseFloat(e.confidenceThreshold)
+          : 0.35,
         maxActiveLearningRounds: parseInt(e.maxActiveLearningRounds, 10) || 0,
         // NaN-safe rather than `|| 0.5` — 0 is a deliberate value (fusion off)
         // and must not be coerced back to the default.
