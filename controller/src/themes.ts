@@ -8,6 +8,7 @@
 // the new key inherit the fallback. Themes that mention keys outside the
 // registry have those keys silently dropped, and per-token values are validated
 // by type — operators can't inject arbitrary CSS via a theme file.
+import { createHash } from 'node:crypto';
 import { promises as fs, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -202,6 +203,13 @@ export function slugifyThemeId(name: string): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 32)
     .replace(/-+$/g, '');
+  // Letters outside a-z are dropped above, so every all-Cyrillic name slugged
+  // to "t-" and a second such theme overwrote the first file. A short hash of
+  // the name keeps different names apart; the same name still maps to one id.
+  if (/[^\x00-\x7f]/.test(String(name || ''))) {
+    const hash = createHash('sha1').update(String(name).trim()).digest('hex').slice(0, 8);
+    return slug ? `${slug.slice(0, 23).replace(/-+$/g, '')}-${hash}` : `t-${hash}`;
+  }
   return /^[a-z0-9]/.test(slug) ? slug : `t-${slug}`.slice(0, 32) || 'theme';
 }
 
