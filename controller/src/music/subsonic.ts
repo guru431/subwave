@@ -280,12 +280,16 @@ export function isStationArchive(song: any): boolean {
 
 // The blocklist rides the same chokepoint, so blocked tracks drop out of every
 // picker source, agent tool and request path at once.
-const rejectArchive = (arr: any[]) =>
-  blocklist.rejectBlocked((arr || []).filter((s) => !isStationArchive(s)));
+const rejectArchive = (arr: any[], includeBlocked = false) => {
+  const songs = (arr || []).filter((s) => !isStationArchive(s));
+  return includeBlocked ? songs : blocklist.rejectBlocked(songs);
+};
 
-// `includeBlocked` is for the admin search surface only (/dj/search), so the
-// operator can review a blocked track; queue.push still refuses it. Every
-// airing path takes the default and never sees blocked songs.
+// `includeBlocked` is for the admin surfaces only — search (/dj/search), so the
+// operator can review a blocked track, and (fork) the operator block
+// (/dj/queue-block), so its response can NAME each never-play skip; queue.push
+// still refuses them. Every airing path takes the default and never sees
+// blocked songs.
 export async function search(query, { songCount = 20, songOffset = 0, includeBlocked = false } = {}) {
   const r = await call(
     'search3',
@@ -553,9 +557,9 @@ export async function getArtistInfo(id, { count = 10 } = {}) {
 
 // Last.fm "top songs" for an artist, intersected with the library. Keyed by
 // artist NAME, not id.
-export async function getTopSongs(artistName, { count = 10 } = {}) {
+export async function getTopSongs(artistName, { count = 10, includeBlocked = false } = {}) {
   const r = await call('getTopSongs', { artist: artistName, count }, RETRY_FAST_TRANSPORT);
-  return rejectArchive(r.topSongs?.song || []);
+  return rejectArchive(r.topSongs?.song || [], includeBlocked);
 }
 
 // Sortable release timestamp, most precise signal first: `originalReleaseDate`
@@ -579,7 +583,7 @@ function albumReleaseRank(a: any): number {
 // isn't in the library.
 export async function getRecentSongsByArtist(
   artistName: string,
-  { albums = 3, count = 20 }: { albums?: number; count?: number } = {},
+  { albums = 3, count = 20, includeBlocked = false }: { albums?: number; count?: number; includeBlocked?: boolean } = {},
 ) {
   const artist = await resolveArtist(artistName);
   if (!artist?.id) return [];
@@ -590,15 +594,15 @@ export async function getRecentSongsByArtist(
     .slice(0, albums);
   const songs: any[] = [];
   for (const a of albumList) {
-    try { songs.push(...(await getAlbum(a.id))); } catch {}
+    try { songs.push(...(await getAlbum(a.id, { includeBlocked }))); } catch {}
     if (songs.length >= count) break;
   }
   return songs.slice(0, count);
 }
 
-export async function getAlbum(id) {
+export async function getAlbum(id, { includeBlocked = false }: { includeBlocked?: boolean } = {}) {
   const r = await call('getAlbum', { id }, RETRY_FAST_TRANSPORT);
-  return rejectArchive(r.album?.song || []);
+  return rejectArchive(r.album?.song || [], includeBlocked);
 }
 
 // Single song lookup. The Child carries albumId, which is how manual album

@@ -11,7 +11,7 @@
 // Fail-open: an unreachable Icecast reads null and djCallsAllowed() treats the
 // station as occupied, so a stats outage never silences the DJ.
 
-import { appendFile, readFile, stat } from 'node:fs/promises';
+import { appendFile, open, readFile, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { config } from '../config.js';
@@ -263,23 +263,45 @@ export function startListenerMonitor(): Promise<void> {
 }
 
 // Listener history for the admin sparkline: rows newer than `since` (default
-// 24h ago), oldest-first. Read whole and filtered in memory (~1440 lines/day).
+// 24h ago), oldest-first. Filtered in memory (~1440 lines/day).
 export interface ListenerSample {
   t: string;
   count: number;
+}
+
+// Fork: nothing trims the file (~22 MB a year at one row a minute), and it used
+// to be parsed whole on every GET /listeners. Rows are appended in time order at
+// ~45 bytes a minute, so a window of N minutes lies within the last
+// N × ROW_BUDGET_BYTES — only that tail is read.
+const ROW_BUDGET_BYTES = 128;
+
+async function readTail(path: string, maxBytes: number): Promise<string> {
+  const fh = await open(path, 'r');
+  try {
+    const { size } = await fh.stat();
+    const len = Math.min(size, Math.ceil(maxBytes));
+    const buf = Buffer.alloc(len);
+    const { bytesRead } = await fh.read(buf, 0, len, size - len);
+    const text = buf.toString('utf8', 0, bytesRead);
+    // Started mid-file: the first line is a fragment.
+    return len < size ? text.slice(text.indexOf('\n') + 1) : text;
+  } finally {
+    await fh.close();
+  }
 }
 
 export async function history({
   since,
 }: { since?: Date } = {}): Promise<ListenerSample[]> {
   if (!existsSync(HISTORY_FILE)) return [];
+  const cutoffMs = (since || new Date(Date.now() - 24 * 60 * 60 * 1000)).getTime();
   let raw = '';
   try {
-    raw = await readFile(HISTORY_FILE, 'utf8');
+    const windowMinutes = Math.max(0, Date.now() - cutoffMs) / 60_000;
+    raw = await readTail(HISTORY_FILE, (windowMinutes + 1) * ROW_BUDGET_BYTES);
   } catch {
     return [];
   }
-  const cutoffMs = (since || new Date(Date.now() - 24 * 60 * 60 * 1000)).getTime();
   const out: ListenerSample[] = [];
   for (const line of raw.split('\n')) {
     if (!line) continue;

@@ -919,7 +919,9 @@ async function resolveBlockSource(body: QueueBlockBody): Promise<{ songs: BlockS
     const albumId = body.id || seed?.albumId;
     if (!albumId) throw fail(404, 'album not resolvable for this track');
 
-    const songs: BlockSong[] = await subsonic.getAlbum(albumId);
+    // Fork: includeBlocked — the fetchers drop never-play songs by default, and
+    // then the plan's hitOf never saw one to name (see the header above).
+    const songs: BlockSong[] = await subsonic.getAlbum(albumId, { includeBlocked: true });
     if (!songs.length) throw fail(404, 'that album has no tracks in the library');
     // Read the title off the RECORD rather than the seed: an `id` caller sent
     // no seed at all, and a track's own `album` tag can differ from its
@@ -942,12 +944,12 @@ async function resolveBlockSource(body: QueueBlockBody): Promise<{ songs: BlockS
   // never-play entries silently shorten the block instead of the next two
   // tracks taking their place.
   let songs: BlockSong[] = [];
-  try { songs = await subsonic.getTopSongs(name, { count: QUEUE_BLOCK_MAX_TRACKS }); } catch { /* fall through */ }
+  try { songs = await subsonic.getTopSongs(name, { count: QUEUE_BLOCK_MAX_TRACKS, includeBlocked: true }); } catch { /* fall through */ }
   if (!songs.length) {
     // getTopSongs is Last.fm-ranked and comes back EMPTY for an artist with no
     // coverage — which is most of a niche catalogue, i.e. exactly the libraries
     // #618 was measured on. Without this fallback the feature is dead there.
-    try { songs = await subsonic.getRecentSongsByArtist(name, { albums: 5, count: QUEUE_BLOCK_MAX_TRACKS }); } catch { /* reported below */ }
+    try { songs = await subsonic.getRecentSongsByArtist(name, { albums: 5, count: QUEUE_BLOCK_MAX_TRACKS, includeBlocked: true }); } catch { /* reported below */ }
   }
   if (!songs.length) throw fail(404, `nothing by "${name}" in the library`);
   return { songs, name, artist: name };

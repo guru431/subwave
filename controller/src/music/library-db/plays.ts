@@ -110,6 +110,8 @@ export interface TrackPlayStats {
 
 // Lifetime plays per artist, keyed by lowercased+trimmed name (the fold
 // lastAiredIndex's key half uses); there is no artist id to group on.
+// Fork: ulower, not LOWER — SQLite folds ASCII only, and library.ts looks the
+// key up by JS toLowerCase(), so "Кино" never matched (lifecycle.ts registers it).
 export interface ArtistPlayStats {
   count: number;
   lastPlayedAtMs: number;
@@ -119,9 +121,9 @@ export function artistPlayIndex(): Map<string, ArtistPlayStats> {
   const d = requireDb();
   const out = new Map<string, ArtistPlayStats>();
   for (const r of d.prepare(`
-    SELECT LOWER(TRIM(artist)) AS artist, COUNT(*) AS n, MAX(played_at) AS last_at
+    SELECT ulower(TRIM(artist)) AS artist, COUNT(*) AS n, MAX(played_at) AS last_at
     FROM plays WHERE artist IS NOT NULL AND TRIM(artist) != ''
-    GROUP BY LOWER(TRIM(artist))
+    GROUP BY ulower(TRIM(artist))
   `).all() as Array<{ artist: string; n: number; last_at: string }>) {
     const at = Date.parse(r.last_at);
     if (!Number.isFinite(at)) continue;

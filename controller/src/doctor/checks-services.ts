@@ -10,6 +10,7 @@ import * as subsonicLog from '../music/subsonic-log.js';
 import * as library from '../music/library.js';
 import * as embeddings from '../music/embeddings.js';
 import * as tts from '../audio/tts.js';
+import { rescueForbidden } from '../audio/tts-fallback.js';
 import { getStreamStatus } from '../broadcast/listeners.js';
 import { streamStatusFresh } from '../broadcast/liquidsoap-control.js';
 import {
@@ -332,17 +333,22 @@ export async function checkTts(s: StationSettings | null): Promise<Finding[]> {
   if (wanted.size === 0) wanted.add('piper');
 
   const unavailable = [...wanted].filter((e) => avail[e] === false);
+  // Fork (C05): with the substitution ban there is no Piper rescue — the line
+  // is dropped, so promising the fallback voice told the operator the opposite.
+  const silent = rescueForbidden(s?.tts?.fallback);
   out.push({
     label: 'configured engines',
     status: unavailable.length === 0 ? 'ok' : 'warn',
     detail:
       unavailable.length === 0
         ? `${[...wanted].join(', ')} — available`
-        : `unavailable: ${unavailable.join(', ')} (will fall back to Piper)`,
+        : `unavailable: ${unavailable.join(', ')} (${silent ? 'no fallback — the DJ stays silent' : 'will fall back to Piper'})`,
     hint:
       unavailable.length === 0
         ? undefined
-        : 'A configured voice engine is unavailable, so the DJ speaks in the Piper fallback voice. Enable the engine (e.g. the tts-heavy profile / cloud key) or pick an available one in Settings.',
+        : silent
+          ? 'A configured voice engine is unavailable and the voice fallback is off (tts.fallback.enabled: false), so the DJ stays silent until it returns; the music keeps playing. Bring the engine back or pick an available one in Settings.'
+          : 'A configured voice engine is unavailable, so the DJ speaks in the Piper fallback voice. Enable the engine (e.g. the tts-heavy profile / cloud key) or pick an available one in Settings.',
   });
 
   // Is the current persona's voice silently routing through a fallback?
