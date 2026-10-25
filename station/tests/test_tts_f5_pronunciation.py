@@ -102,6 +102,26 @@ def test_hand_entry_wins_over_the_llm(tmp_path):
     assert P.build(tmp_path, extra)[0]["phrases"]["dire straits"] == "Дайр Стрейтс"
 
 
+def test_parts_below_one_is_refused(tmp_path, monkeypatch):
+    # --parts -1 не писал ни одного файла и печатал «фраз: N», --parts 0 падал
+    # ZeroDivisionError'ом
+    import sqlite3
+    import pytest
+    db = tmp_path / "catalog.db"
+    conn = sqlite3.connect(db)
+    conn.execute("create table tracks (artist text, title text)")
+    conn.execute("insert into tracks values ('Queen', 'Bohemian Rhapsody')")
+    conn.commit()
+    conn.close()
+    for parts in ("0", "-1"):
+        out = tmp_path / f"parts{parts}"
+        monkeypatch.setattr(sys, "argv", ["pronunciation.py", "export", "--db", str(db),
+                                          "--out", str(out), "--parts", parts])
+        with pytest.raises(SystemExit) as e:
+            P.main()
+        assert e.value.code == 2 and not out.exists()
+
+
 def test_broken_hand_entry_stops_the_build(tmp_path):
     # ручную запись пишут по жалобе: отбросить её молча значит потерять жалобу
     extra = tmp_path / "extra.json"

@@ -156,6 +156,8 @@ def main() -> int:
                    default=Path(__file__).resolve().parent.parent / "pronunciation.json")
     args = ap.parse_args()
     if args.cmd == "export":
+        if args.parts < 1:      # 0 — ZeroDivisionError, меньше — ни одного файла
+            ap.error("--parts: целое от 1")
         print(f"фраз: {export(args.db, args.out, args.parts)} → {args.out}")
         return 0
     data, report = build(args.dir)

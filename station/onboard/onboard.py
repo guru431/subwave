@@ -126,7 +126,8 @@ def _drop_empty_secrets(value, keys: tuple = ()):
             dropped += sub
         return out, dropped
     if isinstance(value, list):
-        # как _snapshot_secrets: метка пустого секрета ложится и в элемент списка
+        # как _snapshot_secrets: метка пустого секрета ложится и в словарь — элемент
+        # списка (webhooks); скалярные элементы списков снимок не метит
         out = []
         for i, v in enumerate(value):
             v, sub = _drop_empty_secrets(v, keys + (i,))
