@@ -67,6 +67,22 @@ export function turnKey(turn: SessionTurn | null | undefined, i: number): string
   return `${turn?.t || 'x'}-${i}`;
 }
 
+// Fork: row keys for a feed shown newest-first (the booth drawer). `t` is
+// stamped once when a turn is made, so time + kind stays put as turns arrive;
+// turnKey's index does not — every new line shifted every key, and
+// AnimatePresence replayed the exit and entry of the whole feed. A repeated
+// stamp + kind gets #n, counted oldest-first so a new turn never renumbers an
+// older one. Pass the turns oldest-first, before reversing or filtering.
+export function stableTurnKeys<T extends SessionTurn>(turns: readonly T[]): Array<{ turn: T; key: string }> {
+  const seen = new Map<string, number>();
+  return turns.map((turn) => {
+    const base = `${turn?.t || 'x'}|${turn?.kind || ''}`;
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    return { turn, key: n ? `${base}#${n}` : base };
+  });
+}
+
 // `track` turns already carry a "▶ …" prefix; strip it so callers can supply
 // their own marker.
 export function turnText(turn: SessionTurn | null | undefined): string {

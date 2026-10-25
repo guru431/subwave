@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { AnimatePresence, m } from 'motion/react';
-import { turnClass, turnKey, turnText, isDjTurn, type TurnDisplayClass } from '@/lib/sessionFeed';
+import { turnClass, stableTurnKeys, turnText, isDjTurn, type TurnDisplayClass } from '@/lib/sessionFeed';
 import { cn } from '@/lib/cn';
 import { fmtClock } from '@/lib/format';
 import type { SessionTurn, StationLocale } from '@/lib/types';
@@ -42,15 +42,16 @@ export interface BoothDrawerProps {
 export default function BoothDrawer({ items, timezone, locale }: BoothDrawerProps) {
   const [filter, setFilter] = useState<FilterId>('all');
 
-  const filtered = useMemo<SessionTurn[]>(() => {
+  // Fork: keyed before reversing — an index in the newest-first list moved
+  // every row's key on each new turn (lib/sessionFeed.ts stableTurnKeys).
+  const filtered = useMemo<Array<{ turn: SessionTurn; key: string }>>(() => {
     if (!items?.length) return [];
     // System turns (session cues, pick prompts) are operator-facing and never
     // reach listeners.
-    const ordered = [...items]
-      .filter((turn) => turnClass(turn) !== 'system')
+    const ordered = stableTurnKeys(items.filter((turn) => turnClass(turn) !== 'system'))
       .reverse();
     if (filter === 'all') return ordered;
-    return ordered.filter((turn) =>
+    return ordered.filter(({ turn }) =>
       filter === 'dj' ? isDjTurn(turn) : turnClass(turn) === 'track');
   }, [items, filter]);
 
@@ -84,14 +85,14 @@ export default function BoothDrawer({ items, timezone, locale }: BoothDrawerProp
       )}
 
       <AnimatePresence initial={false} mode="popLayout">
-        {filtered.map((turn, i) => {
+        {filtered.map(({ turn, key }) => {
           const cls = turnClass(turn);
           const isVoice = cls === 'voice';
           const color = CLASS_COLOR[cls];
           const text = turnText(turn);
           return (
             <m.div
-              key={turnKey(turn, i)}
+              key={key}
               layout
               initial={{ opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}

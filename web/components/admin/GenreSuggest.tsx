@@ -33,7 +33,10 @@ interface Props {
 
 const POPULAR = 12;
 const MATCHES = 10;
-const norm = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+// Fork: letters of any script — with [a-z0-9] «Рок», «Поп» and «Шансон» all
+// folded to '', so a typed Cyrillic genre matched nothing and got "popular".
+export const genreMatchKey = (s: string) => s.trim().toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+const norm = genreMatchKey;
 export const genreSelectionKey = (s: string) => s.trim().toLowerCase();
 
 export default function GenreSuggest({ adminFetch, value, onSelect, selected, disabled }: Props) {
