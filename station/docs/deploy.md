@@ -61,12 +61,17 @@ Navidrome — на debian (`<debian-host>`). Собственные образы
 `piper-voices/` и `.env`. Без Caddyfile Docker создаст на его месте **каталог**, и Caddy
 не стартует; без `piper-voices/` том подменит `/opt/piper/voices` пустым каталогом, и у
 Piper не останется ни одного голоса. `room/` (база комнаты) и `state/` Docker заводит сам.
+Ещё override монтирует всем контейнерам, кроме прокси сокета docker, хранилище корней УЦ
+хоста (`/etc/ssl/certs`, `/usr/share/ca-certificates`, пакет `ca-certificates`) вместо
+бандла образа: бандлы образов апстрима доверяли скомпрометированным промежуточным eMudhra.
+Процессы держат корни в памяти, поэтому после обновления пакета —
+`sudo docker compose up -d --force-recreate`.
 
 ```bash
 mkdir -p <stack-dir>/caddy <stack-dir>/piper-voices
 cd <stack-dir>
 cp <репозиторий>/docker-compose.yml .                               # версия апстрима под форком
-cp <репозиторий>/station/deploy/docker-compose.override.yml .      # наши образы, голоса Piper, комната
+cp <репозиторий>/station/deploy/docker-compose.override.yml .      # наши образы, голоса Piper, комната, корни УЦ
 cp <репозиторий>/station/deploy/caddy/Caddyfile caddy/              # маршрут /room/*
 cp <репозиторий>/station/deploy/.env.example .env && chmod 600 .env
 # заполнить .env: ADMIN_PASS, PUSH_SUBJECT, NAVIDROME_* и прочее — из менеджера секретов

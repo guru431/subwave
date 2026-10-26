@@ -35,18 +35,55 @@
 #
 # Тег точно так же обязан совпадать с версией апстрима.
 
+# Пятое: корни УЦ — хранилище хоста, а не бандл образа. Пробы 2026-10-26: адрес с
+# цепочкой скомпрометированных промежуточных eMudhra открывали urllib комнаты и
+# анализатора, curl broadcast и wget caddy, а хост отказывал. Бандл образа обновляет
+# только пересборка, хранилище хоста (`/etc/ssl/certs` и `/usr/share/ca-certificates`,
+# только чтение) — apt; после его обновления контейнеры пересоздать. SSL_CERT_FILE —
+# OpenSSL, Python ssl и Go (у OpenSSL сборки Node корни могут искаться в своём
+# /usr/local/ssl); Node — ещё `--use-openssl-ca` (встроенные корни мимо файлов),
+# certifi — REQUESTS_CA_BUNDLE. Прокси сокета docker наружу не ходит, tts-heavy
+# на станции не запущен. Сторожит station/tests/test_deploy_ca_store.py.
+
 services:
   controller:
     image: subwave-controller:1.17.0-ru
     # Свой образ собран локально — не тянуть из реестра.
     pull_policy: never
+    environment:
+      NODE_OPTIONS: --use-openssl-ca
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
     volumes:
       - ./piper-voices:/opt/piper/voices:ro
+      - /etc/ssl/certs:/etc/ssl/certs:ro
+      - /usr/share/ca-certificates:/usr/share/ca-certificates:ro
 
   web:
     image: subwave-web:1.17.0-ru
     # Свой образ собран локально — не пытаться тянуть его из реестра.
     pull_policy: never
+    environment:
+      NODE_OPTIONS: --use-openssl-ca
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+    volumes:
+      - /etc/ssl/certs:/etc/ssl/certs:ro
+      - /usr/share/ca-certificates:/usr/share/ca-certificates:ro
+
+  broadcast:
+    environment:
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+    volumes:
+      - /etc/ssl/certs:/etc/ssl/certs:ro
+      - /usr/share/ca-certificates:/usr/share/ca-certificates:ro
+
+  analyzer:
+    environment:
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+      # тяжёлый вариант (ANALYZER_HEAVY): transformers → huggingface_hub → certifi
+      REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
+    volumes:
+      - /etc/ssl/certs:/etc/ssl/certs:ro
+      - /usr/share/ca-certificates:/usr/share/ca-certificates:ro
 
   # Четвёртое: комната. Чат станции — отдельный контейнер, а не часть
   # контроллера: у апстрима такого понятия нет вовсе, а слушателю нужен путь,
@@ -80,13 +117,20 @@ services:
       # а `${CONTROLLER_URL}` без дефолта при незаданной переменной даёт пустую
       # строку и одно предупреждение compose. Путь без /api — его снимает Caddy.
       CONTROLLER_URL: http://controller:7701
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
     volumes:
       - ./room:/data
+      - /etc/ssl/certs:/etc/ssl/certs:ro
+      - /usr/share/ca-certificates:/usr/share/ca-certificates:ro
 
   # Caddy подменяется ФАЙЛОМ, а не образом: Dockerfile.caddy апстрима состоит
   # из одной строки COPY с комментарием «mount your own file over
   # /etc/caddy/Caddyfile». Свой файл — копия апстримного с одним маршрутом
   # /room/*; обновлять его надо вместе с тегом апстрима (см. caddy/Caddyfile).
   caddy:
+    environment:
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /etc/ssl/certs:/etc/ssl/certs:ro
+      - /usr/share/ca-certificates:/usr/share/ca-certificates:ro
