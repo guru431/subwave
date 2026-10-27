@@ -45,9 +45,12 @@ export default definePickerTool({
         // A lexical miss is often just a spelling/transliteration variance —
         // resolve the query as an artist and retry with the library's actual
         // spelling ("Sikandar Kahlon" → the tagged "Sikander Kahlon").
+        // Fork (C07): the retry reads as wide as the first search did — on the
+        // request path an inflected name ("Агату Кристи") misses lexically on
+        // every ask, and 25 rows of the resolved artist cut the shelf short.
         if (songs.length === 0) {
           const artist = await subsonic.resolveArtist(query);
-          if (artist) songs = await subsonic.search(artist.name, { songCount: 25 });
+          if (artist) songs = await subsonic.search(artist.name, { songCount: PAGE });
         }
         const out = collect(songs);
         if (out.length > 0) return out;
