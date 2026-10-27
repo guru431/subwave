@@ -147,6 +147,11 @@ GPU-платформы): среда `/opt/ai/venv/f5` (Python 3.12, пакеты
    `sudo python3 /opt/srvllm-services/radio/tts-f5/tools/stress_corpus.py <state/logs стека станции> > /tmp/corpus.json`,
    затем `sudo -u aiservice /opt/ai/venv/f5/bin/python /opt/srvllm-services/radio/tts-f5/tools/stress_audit.py /tmp/corpus.json /opt/ai/data/tts/ruaccent`.
 3. `tools/smoke.py --url http://localhost:4126 --voices /opt/ai/data/tts/voices`.
+   Пересборка словаря ударений (после обновления `accents.json.gz` RUAccent) — тоже с явным
+   каталогом: умолчание `tools/accents_db.py` — раскладка gpu-host, на srvllm оно указало бы в
+   `/opt/srvllm-services/radio/ruaccent`:
+   `sudo -u aiservice /opt/ai/venv/f5/bin/python /opt/srvllm-services/radio/tts-f5/tools/accents_db.py /opt/ai/data/tts/ruaccent`,
+   затем рестарт `srvllm-tts.service`.
 4. Приёмка — фразы через мостик `:4124`, распознавание — служба `asr` того же хоста
    (`:8000/v1/audio/transcriptions`, large-v3, `language=ru`) вместо whisper-small. С 2026-10-13
    `asr` — слот по требованию: до распознавания поднять его у контроллера

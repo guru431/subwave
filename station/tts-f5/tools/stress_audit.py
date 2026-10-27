@@ -13,7 +13,8 @@ r"""Аудит ударений на настоящих репликах вед�
 corpus.json — список строк, реплики ведущей: его собирает tools/stress_corpus.py на
 хосте станции, отдельную реплику берут из `docker logs sub-wave-controller`. workdir —
 модели RUAccent и dictionary\accents.sqlite, по умолчанию `ruaccent` в каталоге
-службы (рядом с `app`, где лежит этот `tools`).
+службы (рядом с `app`, где лежит этот `tools`) — раскладка gpu-host; на srvllm каталог
+передаётся явно — /opt/ai/data/tts/ruaccent (README, «На srvllm»).
 Запускать на хосте gpu-host в венве с ruaccent и num2words (D:\Temp\f5-probe\venv);
 модули службы (f5_accent, f5_service, f5_text) берутся из каталога над tools — копию
 до выкатки можно проверить где угодно. Словарь коллекции — тот же, что у службы:

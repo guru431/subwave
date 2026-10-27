@@ -3,7 +3,9 @@ r"""Словарь ударений RUAccent → SQLite для службы (f5_
     accents_db.py [workdir]
 
 workdir — каталог моделей RUAccent, по умолчанию `ruaccent` в каталоге службы
-(рядом с `app`, где лежит этот `tools`).
+(рядом с `app`, где лежит этот `tools`) — это раскладка gpu-host. На srvllm код и данные
+разнесены, умолчание туда не попадает: каталог передаётся явно — /opt/ai/data/tts/ruaccent
+(README, «На srvllm»).
 Запускать на хосте gpu-host в венве с numpy (D:\Temp\f5-probe\venv) до выкатки образа:
 без dictionary\accents.sqlite служба не стартует, а в контейнере разбор json занял бы
 661 МБ — те самые, ради которых база и заведена.
