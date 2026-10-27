@@ -299,9 +299,11 @@ export default function AdminShell({ children, defaultOpen = true }: AdminShellP
       .catch(() => {});
   }, [hydrated, pathname, router]);
 
+  // Fork (W01): the root layout says lang="ru" for the player page; every
+  // admin-root below puts the untranslated console back to lang="en".
   if (!hydrated) {
     return (
-      <div className="admin-root paper flex min-h-screen items-center justify-center">
+      <div lang="en" className="admin-root paper flex min-h-screen items-center justify-center">
         <span className="caption">loading…</span>
       </div>
     );
@@ -309,7 +311,7 @@ export default function AdminShell({ children, defaultOpen = true }: AdminShellP
 
   if (!auth || needsAuth) {
     return (
-      <div className="admin-root paper min-h-screen">
+      <div lang="en" className="admin-root paper min-h-screen">
         <SignedOutHeader />
         <div className="mx-auto max-w-[1440px] px-7 py-12">
           <SignInForm onSubmit={handleSignIn} />
@@ -320,7 +322,7 @@ export default function AdminShell({ children, defaultOpen = true }: AdminShellP
 
   return (
     <AdminQueryProvider key={auth}>
-      <div className="admin-root paper">
+      <div lang="en" className="admin-root paper">
         <SidebarProvider defaultOpen={defaultOpen} style={{ '--sidebar-width': '13rem' } as CSSProperties}>
           <AdminSidebar pathname={pathname} onSignOut={signOut} adminFetch={adminFetch} />
           <SidebarInset className="min-w-0 bg-transparent">

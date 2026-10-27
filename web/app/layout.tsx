@@ -185,8 +185,10 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
+    // Fork (W01): the player page is Russian, so screen readers pick a Russian
+    // voice; the untranslated admin console sets lang="en" on its own root.
     <html
-      lang="en"
+      lang="ru"
       className={`${fraunces.variable} ${plusJakarta.variable} ${jetbrainsMono.variable} ${doto.variable} ${spaceGrotesk.variable} ${instrumentSerif.variable} ${anton.variable} ${chakraPetch.variable} ${sairaStencilOne.variable} ${ibmPlexMono.variable} ${spaceMono.variable} ${firaCode.variable} ${courierPrime.variable} ${overpassMono.variable}`}
       suppressHydrationWarning
     >
