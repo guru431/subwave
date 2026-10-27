@@ -1,7 +1,8 @@
 // Fork: a persona tone dial written as null. The station edits personas from
 // hand-written JSON (station/onboard), where `"humour": null` reads as "leave
 // it alone" — but Number(null) is 0, the far end of the dial, and a dial at 3 or
-// below turns into a prompt directive. null and '' are the absent value.
+// below turns into a prompt directive. null and a blank string are the absent
+// value (Number('  ') is 0 too).
 // Run: npm test -- persona-dial-null
 
 import assert from 'node:assert/strict';
@@ -12,6 +13,8 @@ import { PERSONA_DIAL_NEUTRAL, clampPersonaDial, personaSchema } from '../src/sc
 test('null and empty read as the neutral dial, not as 0', () => {
   assert.equal(clampPersonaDial(null), PERSONA_DIAL_NEUTRAL);
   assert.equal(clampPersonaDial(''), PERSONA_DIAL_NEUTRAL);
+  assert.equal(clampPersonaDial('  '), PERSONA_DIAL_NEUTRAL);
+  assert.equal(clampPersonaDial('\t'), PERSONA_DIAL_NEUTRAL);
   assert.equal(clampPersonaDial(undefined), PERSONA_DIAL_NEUTRAL);
 });
 

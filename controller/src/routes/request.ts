@@ -85,13 +85,19 @@ async function pickByArtistAndSort({ artistName, sort, scope: _scope, recentIds 
     }
     // sort=popular leaves Subsonic's order. Walk down the list when the
     // top album's tracks are all recently played.
+    // Fork: the loop used to return from the first non-empty album whatever it
+    // held, so the walk never happened — a one-track single on air answered
+    // "more like this" with itself. Only when no album has a fresh track does
+    // the first one still answer (requests stay near-unfiltered).
+    let stale: any[] | null = null;
     for (const album of albums.slice(0, 5)) {
       const songs = await subsonic.getAlbum(album.id);
       if (songs.length === 0) continue;
       const fresh = songs.filter(s => !recentIds.has(s.id));
-      const pool = fresh.length > 0 ? fresh : songs;
-      return pool[Math.floor(Math.random() * pool.length)];
+      if (fresh.length > 0) return fresh[Math.floor(Math.random() * fresh.length)];
+      stale ??= songs;
     }
+    if (stale) return stale[Math.floor(Math.random() * stale.length)];
   } catch (err) {
     queue.log('error', `pickByArtistAndSort failed: ${err.message}`);
   }

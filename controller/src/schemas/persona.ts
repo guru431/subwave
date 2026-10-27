@@ -66,9 +66,9 @@ export const PERSONA_DIAL_NEUTRAL = 5;
 /** Clamp to an integer dial, neutral when unparseable. Never throws, on either
  *  path: a garbage dial cannot fail a persona save. */
 export function clampPersonaDial(v: unknown): number {
-  // Fork: null and '' are the absent value, not 0 — Number() would send them to
-  // the far end of the dial, which is a prompt directive.
-  if (v === null || v === '') return PERSONA_DIAL_NEUTRAL;
+  // Fork: null and a blank string are the absent value, not 0 — Number() would
+  // send them to the far end of the dial, which is a prompt directive.
+  if (v === null || (typeof v === 'string' && !v.trim())) return PERSONA_DIAL_NEUTRAL;
   const n = Math.round(Number(v));
   return Number.isFinite(n)
     ? Math.min(PERSONA_DIAL_MAX, Math.max(PERSONA_DIAL_MIN, n))
