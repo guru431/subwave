@@ -3,6 +3,10 @@
 Замена Chatterbox. Спека: [2026-09-23-tts-f5-migration-design.md](../docs/specs/2026-09-23-tts-f5-migration-design.md).
 Движок — F5-TTS в русском дообучении ESpeech-TTS-1 RL-V2 (fp16 safetensors, 643 МБ).
 
+Windows-скрипт `tts-bridge-run.ps1` передаёт `GPU_CTL_TOKEN` Docker через окружение,
+а в аргументах процесса оставляет только имя переменной. После запуска он
+восстанавливает прежнее окружение вызывающей PowerShell-сессии.
+
 ## Ручки
 
 | Ручка | Клиент | Контракт |

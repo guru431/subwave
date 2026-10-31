@@ -1,4 +1,4 @@
-# Start the new TTS bridge on :4124 in front of F5 (spec music 2026-09-23, stage 3).
+﻿# Start the new TTS bridge on :4124 in front of F5 (spec music 2026-09-23, stage 3).
 # ASCII only: PS 5.1 reads BOM-less UTF-8 as ANSI.
 # Everything that can fail is checked BEFORE the live bridge is removed: once it is
 # gone the air has no TTS, so a failed start must end with a throw, not exit code 0.
@@ -44,12 +44,19 @@ if ($old) {
   docker rm -f tts-bridge | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "docker rm -f tts-bridge failed (exit $LASTEXITCODE)" }
 }
-docker run -d --name tts-bridge --restart unless-stopped --memory 256m --memory-swap 256m `
-  -p 4124:4124 `
-  --label com.docker.compose.project=tts-bridge --label com.docker.compose.service=tts-bridge `
-  -e PORT=4124 -e UPSTREAM=http://host.docker.internal:4126 `
-  -e GPU_CTL_URL=http://host.docker.internal:8119 -e "GPU_CTL_TOKEN=$Token" -e GPU_CTL_SLOT=tts `
-  -v "${dir}:/bridge:ro" --entrypoint python3 $image /bridge/bridge.py | Out-Null
+$previousGpuCtlToken = $env:GPU_CTL_TOKEN
+try {
+  # Docker inherits the value from its environment; argv contains only its name.
+  $env:GPU_CTL_TOKEN = $Token
+  docker run -d --name tts-bridge --restart unless-stopped --memory 256m --memory-swap 256m `
+    -p 4124:4124 `
+    --label com.docker.compose.project=tts-bridge --label com.docker.compose.service=tts-bridge `
+    -e PORT=4124 -e UPSTREAM=http://host.docker.internal:4126 `
+    -e GPU_CTL_URL=http://host.docker.internal:8119 -e GPU_CTL_TOKEN -e GPU_CTL_SLOT=tts `
+    -v "${dir}:/bridge:ro" --entrypoint python3 $image /bridge/bridge.py | Out-Null
+} finally {
+  $env:GPU_CTL_TOKEN = $previousGpuCtlToken
+}
 if ($LASTEXITCODE -ne 0) { throw "docker run tts-bridge failed (exit $LASTEXITCODE): the air has NO TTS bridge now" }
 
 # 5. Health. The bridge answers 503 while F5 behind it is not ready, so an HTTP error

@@ -24,6 +24,17 @@ function restore() {
   invalidateWeatherCache();
 }
 
+test('snow showers are snow rather than a thunderstorm', async (t) => {
+  t.after(restore);
+  for (const code of [85, 86]) {
+    invalidateWeatherCache();
+    stubFetch(() => new Response(JSON.stringify({
+      current: { weather_code: code, temperature_2m: -2, is_day: 1 },
+    })));
+    assert.equal((await getWeather()).condition, 'snowy', `WMO ${code}`);
+  }
+});
+
 test('неудача помнится: второй вызов не ждёт Open-Meteo', async (t) => {
   t.after(restore);
   invalidateWeatherCache();

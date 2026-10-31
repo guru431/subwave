@@ -5,16 +5,22 @@
 // picker tools — and read to the model as never played.
 
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-test('Cyrillic artists keep their play stats whatever the case', async () => {
-  process.env.STATE_DIR = mkdtempSync(join(tmpdir(), 'subwave-artist-play-cyr-'));
+test('Cyrillic artists keep their play stats whatever the case', async (t) => {
+  const stateDir = mkdtempSync(join(tmpdir(), 'subwave-artist-play-cyr-'));
+  process.env.STATE_DIR = stateDir;
+  let library: typeof import('../src/music/library.js') | undefined;
+  t.after(() => {
+    library?.shutdown();
+    rmSync(stateDir, { recursive: true, force: true });
+  });
 
   const db = await import('../src/music/library-db.js');
-  const library = await import('../src/music/library.js');
+  library = await import('../src/music/library.js');
   const { slim } = await import('../src/llm/internal/tools/picker/slim.js');
 
   await library.load();
@@ -45,6 +51,4 @@ test('Cyrillic artists keep their play stats whatever the case', async () => {
   // Latin artists keep folding the same way they always did.
   const beatles = slim({ id: 'let-it-be', title: 'Let It Be', artist: 'the beatles' });
   assert.equal(beatles.artist_play_count, 1);
-
-  library.shutdown();
 });

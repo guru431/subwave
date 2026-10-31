@@ -38,6 +38,12 @@ test('substitution fills every occurrence', () => {
   assert.ok(!out.includes('{'), 'no braces should survive');
 });
 
+test('substituted values are literal text, including placeholder-shaped braces', () => {
+  const topic = 'A show called {topic}, with {station} in the title';
+  assert.equal(instruction('picker', 'show-brief', { topic }),
+    `Current show brief — follow this for every pick:\n${topic}`);
+});
+
 test('a numeric value substitutes', () => {
   assert.ok(instruction('picker', 'finding-candidates-multi', { rounds: 3 }).includes('up to 3 discovery rounds'));
 });

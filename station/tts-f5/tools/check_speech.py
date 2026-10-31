@@ -14,6 +14,7 @@ import argparse
 import re
 import sys
 import wave
+from collections import Counter
 
 import numpy as np
 
@@ -55,8 +56,8 @@ def main(argv=None) -> int:
     print(f"{a.wav}: {len(x) / sr:.1f} с, плоскость спектра {flatness(x):.3f}\n  услышано: «{heard}»")
     if not a.expect:
         return 0
-    want, got = words(a.expect), set(words(heard))
-    share = sum(w in got for w in want) / max(1, len(want))
+    want, got = Counter(words(a.expect)), Counter(words(heard))
+    share = sum((want & got).values()) / max(1, want.total())
     print(f"  совпало слов: {share:.0%}")
     return 0 if share >= 0.4 else 1
 

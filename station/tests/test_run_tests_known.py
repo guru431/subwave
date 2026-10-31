@@ -33,6 +33,19 @@ def _known_block() -> str:
     return text[start:end] + "\n" + func + "\n"
 
 
+@pytest.mark.parametrize("args", [["--src"], ["--image"], ["--src", "--patch"], ["--image", ""]])
+def test_missing_option_value_has_a_readable_error(tmp_path, args):
+    source = SCRIPT.read_text(encoding="utf-8")
+    start = source.index("IMAGE=subwave-controller:")
+    end = source.index("\n# Падение —")
+    parser = tmp_path / "args.sh"
+    parser.write_bytes(("set -u\n" + source[start:end]).encode("utf-8"))
+    result = subprocess.run([_bash(), str(parser), *args], capture_output=True, timeout=5)
+    assert result.returncode == 2
+    assert "требует аргумент" in result.stdout.decode("utf-8")
+    assert "unbound variable" not in result.stderr.decode("utf-8")
+
+
 def _known(tmp_path, src: str, keys: list[str]) -> dict[str, bool]:
     script = tmp_path / "known.sh"
     script.write_bytes(("set -u\nSRC=$1\n" + _known_block() + """

@@ -358,7 +358,7 @@ export default function ImagingPanel() {
   const jingleCount = data?.jingles?.length;
   const sfxCount = sfxData?.sfx?.length;
   const bedCount = bedsData?.beds?.length;
-  const totalAssets = (jingleCount ?? 0) + (sfxCount ?? 0) + (bedCount ?? 0);
+  const totalAssets = (jingleCount ?? 0) + (sfxCount ?? 0) + (bedCount ?? 0) + (voicesData?.voices?.length ?? 0);
   const ratioVal = data?.values?.jingleRatio;
   const ratioMetric = ratioVal == null ? '—' : ratioVal === 0 ? 'off' : `1 : ${ratioVal}`;
   const tabs = [

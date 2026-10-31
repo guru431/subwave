@@ -6,3 +6,4 @@
 # git сливает файл с NUL как двоичный даже при `merge=text` (проверено,
 # git 2.55), — рецепт в station/docs/controller-changes.md, «Обновление апстрима».
 controller/src/music/show-filter.ts diff
+station/tts-f5/tts-bridge-run.ps1 text eol=crlf

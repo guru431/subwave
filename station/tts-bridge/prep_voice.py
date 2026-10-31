@@ -14,6 +14,7 @@
 Адреса — из окружения: `TTS_BRIDGE_URL` (мостик, `http://<station-host>:4124`) и
 `CHATTERBOX_VOICES_URL` (библиотека голосов, `http://<gpu-host>:4123/voices`).
 """
+import argparse
 import json
 import os
 import re
@@ -198,9 +199,14 @@ def speak(text: str, voice: str, dst: Path, attempts: int = 3) -> None:
         return
 
 
-def main() -> int:
-    src, voice = Path(sys.argv[1]), sys.argv[2]
-    has_music = "--no-music" not in sys.argv[3:]
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("src", type=Path, help="ролик диктора")
+    ap.add_argument("voice", help="имя голоса")
+    ap.add_argument("--no-music", action="store_true", help="источник уже без музыки")
+    args = ap.parse_args(argv)
+    src, voice = args.src, args.voice
+    has_music = not args.no_music
     LISTEN_DIR.mkdir(parents=True, exist_ok=True)
     print(f"{src.name} -> {voice}")
 

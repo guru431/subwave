@@ -4,14 +4,19 @@
 // Run: npm test -- verified-facts-history
 
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
-process.env.STATE_DIR = mkdtempSync(join(tmpdir(), 'subwave-verified-facts-history-'));
+const stateDir = mkdtempSync(join(tmpdir(), 'subwave-verified-facts-history-'));
+process.env.STATE_DIR = stateDir;
 
 const library = await import('../src/music/library.js');
+after(() => {
+  library.shutdown();
+  rmSync(stateDir, { recursive: true, force: true });
+});
 const { linkPrompt } = await import('../src/llm/internal/prompts/scripts.js');
 
 test('Verified Facts labels the real lifetime play count truthfully when a prior play was today', async () => {

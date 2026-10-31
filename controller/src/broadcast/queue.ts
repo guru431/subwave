@@ -3978,6 +3978,13 @@ class Queue {
       // Non-empty read → the queue is live; reset the desync streak.
       this._emptyDjQueueStreak = 0;
 
+      // The mixer pops a request before the metadata watcher handles its start.
+      // Read the marker itself: the watcher's cached value can still name the
+      // outgoing track. Preserve the matching item's request/intro state until
+      // onTrackStarted consumes it through the ordinary bookkeeping path.
+      const nowPlaying = await this.readNowPlayingFromDisk();
+      const onAir = this.upcoming[this.matchUpcomingIndex(nowPlaying)];
+
       // Pass 1: confirm items that ARE currently in dj_queue.
       for (const item of this.upcoming) {
         if (item.sent && item.track?.id && liveIds.has(item.track.id)) {
@@ -3988,6 +3995,7 @@ class Queue {
       // Pass 2: drop only items that were confirmed-present and are now gone.
       const beforeCount = this.upcoming.length;
       this.upcoming = this.upcoming.filter(item => {
+        if (item === onAir) return true;
         if (!item.sent) return true;
         if (!item.confirmedInLiquidsoap) return true;  // grace period — keep
         const id = item.track?.id;

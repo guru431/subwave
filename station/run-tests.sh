@@ -38,8 +38,12 @@ while [ $# -gt 0 ]; do
         echo "TESTS_ENV наши коммиты не трогают controller/scripts поверх $UPSTREAM_BASE"; exit 2
       fi
       FILTERS+=("${patch_tests[@]}"); shift ;;
-    --src) SRC=$2; shift 2 ;;
-    --image) IMAGE=$2; shift 2 ;;
+    --src|--image)
+      if [ $# -lt 2 ] || [ -z "$2" ] || [[ "$2" == --* ]]; then
+        echo "TESTS_ENV $1 требует аргумент"; exit 2
+      fi
+      if [ "$1" = --src ]; then SRC=$2; else IMAGE=$2; fi
+      shift 2 ;;
     -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
     *) FILTERS+=("$1"); shift ;;
   esac

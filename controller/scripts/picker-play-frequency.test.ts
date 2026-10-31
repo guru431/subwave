@@ -3,17 +3,22 @@
 // wired to track metadata instead of the plays table cannot pass unnoticed.
 
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-test('picker candidates carry song and artist play frequency from station history', async () => {
+test('picker candidates carry song and artist play frequency from station history', async (t) => {
   const stateDir = mkdtempSync(join(tmpdir(), 'subwave-picker-frequency-'));
   process.env.STATE_DIR = stateDir;
+  let library: typeof import('../src/music/library.js') | undefined;
+  t.after(() => {
+    library?.shutdown();
+    rmSync(stateDir, { recursive: true, force: true });
+  });
 
   const db = await import('../src/music/library-db.js');
-  const library = await import('../src/music/library.js');
+  library = await import('../src/music/library.js');
   const { slim } = await import('../src/llm/internal/tools/picker/slim.js');
 
   await library.load();
@@ -51,6 +56,4 @@ test('picker candidates carry song and artist play frequency from station histor
   assert.equal(fresh.last_played_days_ago, undefined);
   assert.equal(fresh.unaired, true);
   assert.equal(fresh.artist_play_count, 3);
-
-  library.shutdown();
 });

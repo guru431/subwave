@@ -20,6 +20,7 @@ corpus.json — список строк, реплики ведущей: его �
 до выкатки можно проверить где угодно. Словарь коллекции — тот же, что у службы:
 F5_PRONUNCIATION, без неё — pronunciation.json рядом с f5_text.
 """
+import argparse
 import collections
 import json
 import re
@@ -27,6 +28,11 @@ import sys
 from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
+SERVICE = Path(__file__).resolve().parents[2]          # <каталог службы>\app\tools
+ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+ap.add_argument("corpus", type=Path, help="JSON со списком реплик")
+ap.add_argument("workdir", nargs="?", type=Path, default=SERVICE / "ruaccent")
+args = ap.parse_args()
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import f5_text  # noqa: E402
 from f5_accent import Accentizer  # noqa: E402
@@ -71,8 +77,7 @@ GOLDEN = [
 ]
 
 VOWELS = set("аеёиоуыэюя")
-SERVICE = Path(__file__).resolve().parents[2]          # <каталог службы>\app\tools
-acc = Accentizer(Path(sys.argv[2]) if len(sys.argv) > 2 else SERVICE / "ruaccent")
+acc = Accentizer(args.workdir)
 acc.load()
 m = acc._model
 
@@ -85,7 +90,7 @@ for text, *expected in GOLDEN:
         print(f"ЭТАЛОН: нет {', '.join(lost)} | {marked}")
 print(f"эталон: {len(GOLDEN) - misses} из {len(GOLDEN)}")
 
-with open(sys.argv[1], encoding="utf-8") as f:
+with args.corpus.open(encoding="utf-8") as f:
     texts = json.load(f)
 missing, nn, omo, rest = collections.Counter(), {}, collections.Counter(), collections.Counter()
 total = 0

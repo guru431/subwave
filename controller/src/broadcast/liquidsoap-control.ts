@@ -49,7 +49,12 @@ export function sendCommand(cmd: string, timeoutMs = 3000): Promise<string> {
       // Liquidsoap terminates responses with END\r\n
       if (/END\r?\n/.test(buf)) finish(null, buf.replace(/END\r?\n.*$/s, '').trim());
     });
-    sock.on('close', () => finish(null, buf.trim()));
+    sock.on('close', () => {
+      // shutdown() can close without a reply. A non-empty, unfinished reply is
+      // not a queue snapshot: callers must take their unknown/error path.
+      if (buf) finish(new Error('incomplete liquidsoap telnet response'));
+      else finish(null, '');
+    });
   });
 }
 
@@ -86,7 +91,7 @@ export async function restartLiquidsoap() {
     } catch (err) {
       // A reset/timeout is expected as Liquidsoap tears the socket down;
       // anything else is a real failure.
-      if (!/ECONNRESET|EPIPE|timeout/i.test(err.message)) throw err;
+      if (!/ECONNRESET|EPIPE|timeout|incomplete liquidsoap telnet response/i.test(err.message)) throw err;
       lastErr = err as Error;
     }
     // shutdown() is async; a genuine restart drops within a couple of seconds,
@@ -261,6 +266,9 @@ async function fetchDjQueue(): Promise<DjQueueSnapshot> {
       if (/subwave_kind=\\?"bed/.test(meta)) bedRids.add(rid);
     } catch (ridErr: any) {
       console.warn(`[liquidsoap] request.metadata ${rid} failed: ${ridErr.message}`);
+      // A transport failure is not proof this request disappeared. Refuse the
+      // entire snapshot so reconciliation cannot remove a healthy queued item.
+      throw ridErr;
     }
   }
 

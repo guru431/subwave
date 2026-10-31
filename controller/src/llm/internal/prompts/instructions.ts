@@ -82,12 +82,13 @@ export function instruction(file: string, section: string, vars: Record<string, 
   if (!sections) throw new Error(`instructions: no such file "${file}.md" (have: ${[...FILES.keys()].join(', ')})`);
   const body = sections.get(section);
   if (body == null) throw new Error(`instructions: ${file}.md has no section "${section}" (have: ${[...sections.keys()].join(', ')})`);
+  const missing: string[] = [];
   const filled = body.replace(PLACEHOLDER, (whole, key: string) => {
     const v = vars[key];
+    if (v == null) missing.push(whole);
     return v == null ? whole : String(v);
   });
-  const leftover = filled.match(PLACEHOLDER);
-  if (leftover) throw new Error(`instructions: ${file}.md section "${section}" left ${leftover.join(', ')} unsubstituted`);
+  if (missing.length) throw new Error(`instructions: ${file}.md section "${section}" left ${missing.join(', ')} unsubstituted`);
   return filled;
 }
 
