@@ -159,7 +159,7 @@ export async function runArtistGuard<T extends CandidateLike>(
   if (!cause) return { kind: 'none' };
 
   let pool: AlternativePool<T>;
-  if (cause === 'window') {
+  if (windowRoots?.size) {
     // The re-pick steps around the whole window AND the anchor act. Starved, the
     // bare set alternativeCandidates hands back could hold the anchor artist — a
     // back-to-back repeat bought to avoid one hours later — so it offers nothing,

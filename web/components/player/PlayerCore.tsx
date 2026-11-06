@@ -1,4 +1,5 @@
 'use client';
+import { rememberReceipt } from '@/lib/listenerLibrary';
 
 // The headless player core -- the per-station singletons every skin shares,
 // split into three contexts by update cadence:
@@ -148,7 +149,10 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
             message: parsed.error.issues[0]?.message,
           });
         }
-        return client.submitRequest(parsed.data.text, parsed.data.name, parsed.data.songId);
+        return client.submitRequest(parsed.data.text, parsed.data.name, parsed.data.songId).then(result => {
+          if (result.success && result.requestId) rememberReceipt(result.requestId);
+          return result;
+        });
       },
       pollRequest: requestId => client.requestStatus(requestId),
       likeCurrent: songId => client.likeCurrent(songId),

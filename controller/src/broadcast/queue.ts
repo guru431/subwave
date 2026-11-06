@@ -16,6 +16,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { basename } from 'node:path';
 import { config } from '../config.js';
+import { saveReceipt } from './request-receipts.js';
 import { writeFileAtomic } from '../util/atomic-file.js';
 import * as subsonic from '../music/subsonic.js';
 import * as mix from '../music/mix.js';
@@ -929,8 +930,9 @@ class Queue {
   // Fork: `pickShowAt` is the look-ahead moment an auto-pick's rules were
   // resolved at (runPickCycle's `showAt`; null → now, as pickViaAgent reads
   // it). It is stamped as `pickedForShow` — see dropStalePicks.
-  async push({ track, requestedBy = null, operator = false, block = null, intent = null, introScript = null, introLabelChecked = false, introKind = 'dj-speak', introPersona = null, introHostSpeech = null, aiPicked = false, allowDuplicate = false, linkPrev = null, linkClockAt = null, pickShowAt = null }: {
+  async push({ track, requestId = null, requestedBy = null, operator = false, block = null, intent = null, introScript = null, introLabelChecked = false, introKind = 'dj-speak', introPersona = null, introHostSpeech = null, aiPicked = false, allowDuplicate = false, linkPrev = null, linkClockAt = null, pickShowAt = null }: {
     track: Track;
+    requestId?: string | null;
     requestedBy?: string | null;
     operator?: boolean;
     block?: QueueItem['block'] | null;
@@ -991,7 +993,7 @@ class Queue {
       introScript = normalizeForDisplay(stripSpeakerLabel(introScript, speaker?.name ? [speaker.name] : []));
     }
     const item = {
-      track, requestedBy, operator, intent, introScript, introLabelChecked: true, introKind, introPersona, introHostSpeech,
+      track, requestId, requestedBy, operator, intent, introScript, introLabelChecked: true, introKind, introPersona, introHostSpeech,
       // Links are editorially scoped to the session that wrote them. Preserve
       // the key alongside the persona: persona alone cannot distinguish two
       // adjacent shows hosted by the same DJ.
@@ -1035,6 +1037,10 @@ class Queue {
     // Position of THIS item, not the tail: callers report it to the listener
     // ("you're number N"), and after an insert the tail is somebody else.
     const position = insertAt >= 0 ? insertAt + 1 : this.upcoming.length;
+    if (requestId) {
+      try { saveReceipt(requestId, { phase: 'queued', track }); }
+      catch (err) { this.log('error', `Request receipt save failed: ${(err as Error).message}`); }
+    }
     // A block's members are deliberately SILENT here and the route logs one
     // summary line instead (#1622 FR 4). The booth log is a 200-entry ring the
     // operator reads back through, and thirty consecutive "queued" lines off a
@@ -3407,6 +3413,10 @@ class Queue {
       }
       const source = item.aiPicked ? 'ai' : 'request';
       this.current = { ...item, startedAt: new Date().toISOString(), source };
+      if (item.requestId) {
+        try { saveReceipt(item.requestId, { phase: 'aired', airedAt: this.current.startedAt! }); }
+        catch (err) { this.log('error', `Request air receipt failed: ${(err as Error).message}`); }
+      }
       // A timed-out intro pre-render is keyed by the queued item. The current
       // item is a spread clone, so carry the lifecycle across that identity
       // hand-off before airIntro tries to reuse it.

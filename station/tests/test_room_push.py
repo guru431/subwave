@@ -475,6 +475,20 @@ def test_player_gets_the_public_key(room):
     assert call(base, "/push/key") == (200, {"key": notifier.vapid.public_key})
 
 
+def test_receipt_push_validates_capability_without_subscribing_to_chat(room, monkeypatch):
+    base, store, _, _ = room
+    asked = []
+    request_id = "11111111-1111-4111-8111-111111111111"
+    monkeypatch.setattr(server_mod.receipt_push, "fetch_receipt",
+                        lambda url, key: asked.append(key) or {"phase": "queued"})
+    assert call(base, "/push/request", {"requestId": request_id, "subscription": _subscription()})[0] == 201
+    assert asked == [request_id] and len(store.pending_request_push()) == 1
+    assert store.subscriptions() == []
+    assert call(base, "/push/request", {"requestId": "../settings", "subscription": _subscription()})[0] == 400
+    assert asked == [request_id]
+    assert call(base, "/push/request", {"requestId": request_id, "subscription": _subscription("http://127.0.0.1/x")})[0] == 400
+
+
 def test_subscribe_then_a_message_from_another_reaches_the_subscriber(room):
     base, store, notifier, delivered = room
     # Комната отвечает 201 раньше, чем зовёт уведомитель (отправитель не ждёт

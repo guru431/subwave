@@ -4,6 +4,7 @@ import type { ChangeEvent } from 'react';
 import { useState } from 'react';
 import { Btn, Eyebrow, Pill, Seg } from '../ui';
 import { cn } from '../../../lib/cn';
+import { RotationDiagnostic } from './RotationDiagnostic';
  
 import { SkeletonText } from '@/components/ui/skeleton';
 import type { Track } from './types';
@@ -75,6 +76,7 @@ export function ManualTagEditor(props: {
   return (
     // Renders as a sibling of .lib-row, so the testid is the only way to scope to it.
     <div data-testid="manual-tag-editor" className="grid gap-3 border-b border-ink bg-[var(--ink-softer)] px-4 py-3">
+      <RotationDiagnostic id={track.id} />
       <div className="grid gap-1.5">
         <Eyebrow>moods · up to 3</Eyebrow>
         <div className="flex flex-wrap gap-1.5">
@@ -160,4 +162,3 @@ export function ManualTagEditor(props: {
     </div>
   );
 }
-

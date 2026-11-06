@@ -13,9 +13,8 @@ Navidrome (путь относительно корня коллекции, с �
 может жить на другом хосте: тогда его соответствие id → путь приходит готовым
 JSON-файлом (`--navidrome-paths`, его снимает `run.py`), а не базой.
 
-Если анализатор станции когда-нибудь запустят, он перепишет колонку своим
-замером по началу трека. Следующий прогон этого скрипта вернёт замер по
-файлу целиком: значения расходятся, и строка обновится.
+Полный замер помечается loudness_source = 'full': анализатор короткого окна
+сохраняет эти LUFS и true peak при последующих запусках.
 
 Без внешних зависимостей: на хосте станции системный python3.
 """
@@ -83,6 +82,8 @@ def run(cache: Path, navidrome_db: Path, library_db: Path, dry_run: bool = False
     # таймаут — ожидание блокировки: контроллер пишет в ту же базу сам
     conn = sqlite3.connect(library_db, timeout=15)
     try:
+        if "loudness_source" not in {r[1] for r in conn.execute("PRAGMA table_info(tracks)")}:
+            raise SystemExit("сначала обновите контроллер: нет tracks.loudness_source")
         rows = conn.execute("SELECT id, loudness_lufs, peak_db FROM tracks").fetchall()
         updates, stats = plan_updates(rows, id_to_path, measurements)
         unmatched = stats["unknown_id"] + stats["no_measurement"]
@@ -91,10 +92,12 @@ def run(cache: Path, navidrome_db: Path, library_db: Path, dry_run: bool = False
                 f"замера нет у {unmatched} из {len(rows)} треков станции — это не "
                 "пополнение коллекции, а разошедшиеся пути или чужой кэш; "
                 "в базу ничего не записано")
-        if updates and not dry_run:
+        if not dry_run:
             with conn:
                 conn.executemany(
                     "UPDATE tracks SET loudness_lufs = ?, peak_db = ? WHERE id = ?", updates)
+                conn.executemany("UPDATE tracks SET loudness_source = 'full' WHERE id = ?",
+                                 [(tid,) for tid, *_ in rows if id_to_path.get(tid) in measurements])
     finally:
         conn.close()
     return {"tracks": len(rows), "measurements": len(measurements),

@@ -33,7 +33,7 @@ import { linkClockAt, linkClockStampFor, seamLinkShowAt } from './queue/pure.js'
 import { djObject, nearestId, modelTolerant } from '../llm/sdk.js';
 import * as budget from './dj-budget.js';
 import { withTrace, logEvent } from '../observability/events.js';
-import { recencyWindowsForLibrary } from '../music/recency.js';
+import { artistRootKey, recencyWindowsForLibrary } from '../music/recency.js';
 import { showNoRepeatGuard } from '../music/show-recency.js';
 import { EXPLORE_SEED_PROBABILITY } from '../music/airing.js';
 import { ARTIST_VARIETY_WINDOW, artistWindowRoots, runArtistGuard } from './dj-agent/artist-guard.js';
@@ -460,7 +460,8 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, pickAn
       song, object,
       seen: extras.seen,
       recentAlbums: queue.recentAlbumKeys(albumHours),
-      avoidArtistRoots: neighbourRoots,
+      avoidArtistRoots: new Set([...windowRoots, artistRootKey(pickAnchor || {})].filter(Boolean)),
+      preserveArtists: true,
       // The run's `seen` values are the MODEL's projection and carry no
       // compilation flags (adding them would put them in a re-pick prompt), so
       // the key is resolved against the library — the same resolver the pool
@@ -949,7 +950,7 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, pickA
 // so its failures are the same symptom.
 // The caller (routes/request.js) owns the request `event` turn — it posts one
 // for every request path, so the agent only appends its own `dj` reply here.
-export async function runRequest(queue: any, ctx: any, { requester, text }: { requester: string; text: string }) {
+export async function runRequest(queue: any, ctx: any, { requester, text, requestId }: { requester: string; text: string; requestId?: string }) {
   if (!settings.get().llm?.pickerAgent || breakerOpen()) return null;
   // Over the hard token cap the request agent only runs when requests are
   // exempt (llm.exemptRequests, on by default); otherwise return null and let
@@ -957,7 +958,7 @@ export async function runRequest(queue: any, ctx: any, { requester, text }: { re
   if (!budget.requestsAllowed()) return null;
 
   try {
-    const out = await runRequestViaAgent(queue, { requester, text });
+    const out = await runRequestViaAgent(queue, { requester, text, requestId });
     breakerSuccess();
     return out;
   } catch (err) {
@@ -966,7 +967,7 @@ export async function runRequest(queue: any, ctx: any, { requester, text }: { re
   }
 }
 
-async function runRequestViaAgent(queue: any, { requester, text }: { requester: string; text: string }) {
+async function runRequestViaAgent(queue: any, { requester, text, requestId }: { requester: string; text: string; requestId?: string }) {
   return withTrace({ kind: 'request', requester }, async () => {
     const requestSpeech = session.captureAutomaticHostSpeech(session.onAirPersona());
     // Requests stay near-unfiltered — listeners must be able to re-request a
@@ -1123,6 +1124,7 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
     const guardVerdict = [guarded.guard, screened.guard].filter(Boolean).join('+') || null;
     const pos = await queue.push({
       track: trackFields(song),
+      requestId,
       requestedBy: requester,
       intent: 'listener request',
       introScript: intro || null,

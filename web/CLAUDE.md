@@ -4,6 +4,12 @@ Loaded when working under `web/`. Station-wide architecture lives in the root `C
 
 ### Web UI (`web/`)
 
+Fork listener regression checks: `python web/scripts/verify-listener-library.py <artifact-dir>`
+against an isolated web dev server at `127.0.0.1:7793`. Uses synthetic API
+responses and Chromium/WebKit at 320/393 px; covers browser-local bookmarks,
+receipt recovery, stale song IDs and resolve failures. Browser dependencies
+are Playwright; it never writes to the live station.
+
 Next.js 15 App Router + Tailwind. Routes:
 
 - `/` — `PlayerApp` or `Landing`, chosen at request time by `SUBWAVE_HOMEPAGE` (`player` default).

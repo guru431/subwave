@@ -30,12 +30,22 @@ import { validateBody, validateBodyAsync } from '../middleware/validate.js';
 import { blockEntrySchema, blockRuleSchema } from '../schemas/blocklist.js';
 import { manualTagSchema, originalYearSchema, sceneMergeSchema } from '../schemas/library.js';
 import type { z } from 'zod';
+import { diagnoseTrackRotation } from '../music/track-rotation-diagnostic.js';
 
 type ManualTagBody = z.output<ReturnType<typeof manualTagSchema>>;
 type OriginalYearBody = z.output<ReturnType<typeof originalYearSchema>>;
 type SceneMergeBody = z.output<ReturnType<typeof sceneMergeSchema>>;
 
 export const router = express.Router();
+
+router.get('/library/rotation/:id', requireAdmin, async (req, res) => {
+  try {
+    const result = await diagnoseTrackRotation(req.params.id, typeof req.query.showId === 'string' ? req.query.showId : undefined);
+    res.setHeader('Cache-Control', 'no-store');
+    if (!result) return res.status(404).json({ error: 'Трек отсутствует в индексе станции' });
+    res.json(result);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
 
 interface LibrarySong {
   id: string;

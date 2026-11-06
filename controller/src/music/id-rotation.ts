@@ -4,7 +4,8 @@
 // readable so an interrupted run from the first implementation can recover.
 
 import { existsSync } from 'node:fs';
-import { readFile, rename, rm } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { config } from '../config.js';
 import * as db from './library-db.js';
@@ -16,6 +17,7 @@ import * as likes from '../broadcast/likes.js';
 import * as settings from '../settings.js';
 import { canonicalId } from './id-canonical.js';
 import { reportRotation } from './tagger-progress.js';
+import { writeFileAtomic } from '../util/atomic-file.js';
 
 export interface RotationManifest {
   version: 1;
@@ -123,6 +125,15 @@ async function applyRotation(): Promise<RotationApplyResult> {
   const liked = await likes.remapTrackIds(trackMap);
   const recipes = playlistRecipes.remapIds(trackMap, mapPlaylistId);
   const shows = await remapShowPlaylistIds(mapPlaylistId);
+  // Durable outbox for the fork's separate room DB. The consumer removes a
+  // batch only AFTER its SQLite commit; replaying a batch is harmless.
+  if (process.env.ROOM_ROTATION_SYNC === '1' && trackMap.size) {
+    const body = JSON.stringify({ version: 1, trackMap: Object.fromEntries([...trackMap].sort()) });
+    const dir = path.join(config.stateDir, 'room-rotations');
+    await mkdir(dir, { recursive: true });
+    const id = createHash('sha256').update(body).digest('hex');
+    await writeFileAtomic(path.join(dir, `${id}.json`), body);
+  }
 
   let complete = livePlaylists !== null;
   if (complete) {

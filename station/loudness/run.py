@@ -109,7 +109,8 @@ def _last_json(out: str) -> dict:
     return json.loads(lines[-1])
 
 
-def run(cfg: dict, dry_run: bool = False, workers: int = 8, runner=_run) -> tuple[dict, dict]:
+def run(cfg: dict, dry_run: bool = False, workers: int = 8, runner=_run,
+        retry_errors: bool = False) -> tuple[dict, dict]:
     gpu, station = cfg["GPU_SSH"], cfg["STATION_SSH"]
     measure_remote = cfg["LOUDNESS_MEASURE_REMOTE"]
     runner(_scp(cfg, HERE / "measure.py", gpu, measure_remote.replace("\\", "/")))
@@ -117,7 +118,8 @@ def run(cfg: dict, dry_run: bool = False, workers: int = 8, runner=_run) -> tupl
     # ветвь иначе навсегда выключала бы запись громкости новых треков
     measured = _last_json(runner(
         _ssh(cfg, gpu, f"python {measure_remote} --root {cfg['LOUDNESS_GPU_MUSIC_ROOT']} "
-                       f"--cache {cfg['LOUDNESS_GPU_CACHE']} --workers {workers}"),
+                       f"--cache {cfg['LOUDNESS_GPU_CACHE']} --workers {workers}"
+                       + (" --retry-errors" if retry_errors else "")),
         timeout=MEASURE_TIMEOUT_SEC, ok_codes=(0, MEASURE_PARTIAL_EXIT)))
     apply_dir = cfg["LOUDNESS_APPLY_DIR"]
     with tempfile.TemporaryDirectory() as tmp:
@@ -147,10 +149,13 @@ def main(argv=None) -> int:
     ap.add_argument("--dry-run", action="store_true",
                     help="замерить, но в базу станции не писать")
     ap.add_argument("--workers", type=int, default=8, help="параллельных ffmpeg на GPU-хосте")
+    ap.add_argument("--retry-errors", action="store_true", help="повторить и постоянные ошибки замера")
     args = ap.parse_args(argv)
-    measured, applied = run(load_config(), dry_run=args.dry_run, workers=args.workers)
+    measured, applied = run(load_config(), dry_run=args.dry_run, workers=args.workers,
+                            retry_errors=args.retry_errors)
     print(f"замер: файлов {measured['files']}, измерено сейчас {measured['measured']} "
-          f"(ошибок {measured['errors']}), в кэше {measured['cached']}, "
+          f"(ошибок {measured['errors']}), в кэше {measured['cached']} "
+          f"(сохранённых ошибок {measured.get('cached_errors', 0)}), "
           f"{measured['seconds']} с")
     print(f"станция: треков {applied['tracks']}, записано {applied['updated']}, "
           f"без изменений {applied['unchanged']}, без замера {applied['no_measurement']}, "

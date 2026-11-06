@@ -178,3 +178,22 @@ export async function disablePush(): Promise<void> {
     /* комната забудет подписку сама — по первому 410 от push-сервиса */
   }
 }
+
+/** Separate, explicit consent for one receipt. Does not subscribe to chat. */
+export async function watchRequestPush(requestId: string): Promise<boolean> {
+  if (!pushSupported()) return false;
+  try {
+    if (await Notification.requestPermission() !== 'granted') return false;
+    const reg = await navigator.serviceWorker.ready;
+    const keyReply = await fetch(`${ROOM}/push/key`);
+    if (!keyReply.ok) return false;
+    const { key } = await keyReply.json();
+    const sub = await reg.pushManager.getSubscription() || await reg.pushManager.subscribe({
+      userVisibleOnly: true, applicationServerKey: keyBytes(key),
+    });
+    const response = await fetch(`${ROOM}/push/request`, {
+      method: 'POST', headers: headers(), body: JSON.stringify({ requestId, subscription: sub.toJSON() }),
+    });
+    return response.ok;
+  } catch { return false; }
+}

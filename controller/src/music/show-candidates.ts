@@ -54,7 +54,7 @@ export function buildShowCandidateDiagnostic({ show, libraryRows, playlistRows, 
   };
 }
 
-export async function diagnoseShowCandidates(show: any): Promise<ShowCandidateDiagnostic> {
+export async function prepareShowCandidateInputs(show: any) {
   await library.load();
   const libraryRows = library.candidateFilterTracks();
   const coverage = candidateCoverage(libraryRows);
@@ -80,5 +80,9 @@ export async function diagnoseShowCandidates(show: any): Promise<ShowCandidateDi
   // broken library.
   const minTrackSec = settings.effectiveMinTrackSec(show);
   if (minTrackSec) warnings.push(`Minimum track length is ${minTrackSec}s, so shorter tracks are excluded from the counts below. If that leaves nothing, the station still plays: the pool picker and the offline fallback both keep going rather than go quiet.`);
-  return buildShowCandidateDiagnostic({ show, libraryRows, playlistRows: playlistPool?.tracks ?? null, excludedIds, locks, minTrackSec, warnings });
+  return { show, libraryRows, playlistRows: playlistPool?.tracks ?? null, excludedIds, locks, minTrackSec, warnings };
+}
+
+export async function diagnoseShowCandidates(show: any): Promise<ShowCandidateDiagnostic> {
+  return buildShowCandidateDiagnostic(await prepareShowCandidateInputs(show));
 }

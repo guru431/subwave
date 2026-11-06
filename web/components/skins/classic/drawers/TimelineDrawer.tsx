@@ -7,6 +7,7 @@ import { ruAgo } from '@/lib/ru';
 import { cn } from '@/lib/cn';
 import { downloadUrl } from '@/lib/download';
 import DislikeMenu from '../DislikeMenu';
+import { SaveTrackButton } from '../SavedTracks';
 import type { QueueEntry } from '@/lib/types';
 
 export interface TimelineDrawerProps {
@@ -82,6 +83,7 @@ export default function TimelineDrawer({ upcoming, history }: TimelineDrawerProp
               {t.subsonic_id && (
                 <span className="flex shrink-0 items-center gap-[10px]">
                   <DislikeMenu songId={t.subsonic_id} title={t.title} artist={t.artist} size={14} />
+                  <SaveTrackButton track={{ id: t.subsonic_id, title: t.title || '', artist: t.artist || '', album: t.album || '', airedAt: t.t || (typeof t.startedAt === 'string' ? t.startedAt : '') }} />
                   <a
                     href={downloadUrl(t.subsonic_id)}
                     download

@@ -462,6 +462,10 @@ export async function migrate(embeddingDim: number, reseed = false, adoptStoredD
   if (!trackCols.some((c) => c.name === 'path')) {
     runDdl(d, `ALTER TABLE tracks ADD COLUMN path TEXT;`);
   }
+  // Fork: full-file loudness must survive the analyzer's short excerpt pass.
+  if (!trackCols.some((c) => c.name === 'loudness_source')) {
+    runDdl(d, `ALTER TABLE tracks ADD COLUMN loudness_source TEXT;`);
+  }
 
   // Reconcile the requested embedding dim against what physically exists. The
   // vec0 table's FLOAT[N] schema is the authority for what inserts accept, not

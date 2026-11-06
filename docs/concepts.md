@@ -113,8 +113,10 @@ Two related behaviours worth knowing, whichever you pick:
   discovery tools carry no artist filter on purpose — filtering inside them
   gutted the similarity pool on niche catalogues. Instead, a pick that repeats
   an artist from the last few slots triggers a re-pick. So an eight-of-eight
-  same-artist candidate set is expected, and the guard is what stops it
-  reaching air.
+  same-artist candidate set is expected. The guard re-picks through the full
+  artist window and tries the fallback pool; if both are exhausted it can
+  explicitly relax the window to keep music playing. Every relaxation is logged.
+  An album re-pick preserves the artist window. Listener requests are exempt.
 - **The daily token cap degrades in tiers.** Past the soft threshold the
   station drops to the candidate pool and mutes optional segments; at the cap
   it stops calling the model at all and coasts on the fallback playlist. Music

@@ -29,7 +29,7 @@
 // handler deletes every cache whose key isn't the current CACHE, which is what
 // evicts a previous version's (now-poisoned) HTML.
 
-const CACHE = 'subwave-shell-v2';
+const CACHE = 'subwave-shell-v3';
 
 self.addEventListener('install', (event) => {
   // Take over straight away so a freshly-deployed shell isn't stuck behind
@@ -133,9 +133,14 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     (async () => {
       const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-      const visible = wins.some((w) => w.visibilityState === 'visible');
+      const visible = wins.some((w) => {
+        const at = new URL(w.url);
+        return w.visibilityState === 'visible' && at.origin === self.location.origin
+          && PLAYER_PATHS.includes(at.pathname);
+      });
       const webkit = isWebKit((self.navigator && self.navigator.userAgent) || '');
-      if (visible && !webkit) return;
+      const isRequest = typeof data.tag === 'string' && data.tag.startsWith('subwave-request-');
+      if (visible && !webkit && !isRequest) return;
       const tag = data.tag || 'subwave-chat';
       await self.registration.showNotification(data.title || 'AI радио', {
         body: data.body || '',
@@ -146,7 +151,7 @@ self.addEventListener('push', (event) => {
         badge: '/icons/badge',
         data: { url: data.url || '/?chat=1' },
       });
-      if (!visible) return;
+      if (!visible || isRequest) return;
       const shown = await self.registration.getNotifications({ tag });
       for (const n of shown) n.close();
     })()
@@ -172,7 +177,7 @@ self.addEventListener('notificationclick', (event) => {
         const at = new URL(w.url);
         if (at.origin === target.origin && PLAYER_PATHS.includes(at.pathname) && 'focus' in w) {
           await w.focus();
-          w.postMessage({ type: 'room:open-chat' });
+          w.postMessage({ type: target.searchParams.has('request') ? 'room:open-request' : 'room:open-chat' });
           return;
         }
       }

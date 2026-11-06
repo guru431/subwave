@@ -39,6 +39,7 @@ import collections
 import http.client
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -54,6 +55,8 @@ import naming
 import navidrome
 import notify
 import push
+import rotations
+import receipt_push
 import station
 import subsonic
 from store import RETENTION_DAYS, Store
@@ -84,6 +87,7 @@ PASS_HEADERS = ("Content-Type", "Content-Length", "Content-Range",
 
 @dataclass
 class Config:
+    rotation_dir: str = ""
     rate_seconds: int = 60
     rate_max: int = 10
     # Потолок сообщений всей комнаты за то же окно `rate_seconds`. Личный
@@ -378,7 +382,7 @@ def build_handler(store: Store, config: Config):
                     # состоялась»: первое — ответ, второе — повод не скрывать
                     # ошибку за пустым списком. Текст исключения — только в
                     # лог: в нём бывает URL запроса с токеном и солью Subsonic.
-                    print(f"room: /resolve: {e!r}", file=sys.stderr, flush=True)
+                    print(f"room: /resolve: {type(e).__name__}", file=sys.stderr, flush=True)
                     self._send(502, {"error": "сверка не удалась"})
             elif path == "/download":
                 self._download(query)
@@ -391,6 +395,8 @@ def build_handler(store: Store, config: Config):
                 self._marks()
             elif path == "/admin/dislikes":
                 if not self._admin_refused():
+                    if not self._sync_rotations():
+                        return
                     self._send(200, dislikes.suggestions(store.all_dislikes(),
                                                          store.decisions()))
             else:
@@ -398,7 +404,7 @@ def build_handler(store: Store, config: Config):
 
         def do_POST(self) -> None:
             path = self._path()
-            if path not in ("/messages", "/push/subscribe", "/push/unsubscribe",
+            if path not in ("/messages", "/push/subscribe", "/push/unsubscribe", "/push/request",
                             "/dislikes", "/admin/dislikes/decide"):
                 self._send(404, {"error": "not found"}, close=True)
                 return
@@ -415,6 +421,8 @@ def build_handler(store: Store, config: Config):
                 self._push_subscribe(body, listener)
             elif path == "/push/unsubscribe":
                 self._push_unsubscribe(body)
+            elif path == "/push/request":
+                self._watch_request(body, listener)
             elif path == "/dislikes":
                 self._dislike(body, listener)
             elif not self._admin_refused():
@@ -518,6 +526,31 @@ def build_handler(store: Store, config: Config):
                 return
             self._send(201, {"ok": True})
 
+        def _watch_request(self, body: dict, listener: str) -> None:
+            if config.notifier is None:
+                self._send(404, {"error": "push не настроен"})
+                return
+            request_id = body.get("requestId")
+            sub, problem = push.check_subscription(body.get("subscription"))
+            if problem or not isinstance(request_id, str) or not re.fullmatch(r"[a-f0-9-]{36}", request_id):
+                self._send(400, {"error": "неверная подписка или квитанция"})
+                return
+            if not resolves.take(time.monotonic()):
+                self._send(429, {"error": "слишком много запросов"})
+                return
+            try:
+                receipt = receipt_push.fetch_receipt(config.controller_url, request_id)
+            except Exception:
+                self._send(502, {"error": "станция не ответила"})
+                return
+            if receipt is None:
+                self._send(404, {"error": "квитанция не найдена"})
+                return
+            if not store.watch_request(request_id, sub, listener, config.push_max, config.push_per_listener):
+                self._send(429, {"error": "слишком много ожидающих уведомлений"})
+                return
+            self._send(201, {"ok": True})
+
         def _push_unsubscribe(self, body: dict) -> None:
             endpoint = body.get("endpoint")
             if not isinstance(endpoint, str) or not endpoint:
@@ -535,11 +568,21 @@ def build_handler(store: Store, config: Config):
         def _window(self) -> dict | None:
             """Окно станции; None — отказ 502 уже отправлен."""
             try:
+                rotations.sync(store, config.rotation_dir)
                 return station.window(config.controller_url)
             except Exception as e:                       # noqa: BLE001
                 print(f"room: окно станции: {e!r}", file=sys.stderr, flush=True)
                 self._send(502, {"error": "станция не ответила"})
                 return None
+
+        def _sync_rotations(self) -> bool:
+            try:
+                rotations.sync(store, config.rotation_dir)
+                return True
+            except Exception as e:
+                print(f"room: ротация: {type(e).__name__}", file=sys.stderr, flush=True)
+                self._send(502, {"error": "перенос отметок пока не завершён"})
+                return False
 
         def _marks(self) -> None:
             listener = (self.headers.get("X-Listener-Id") or "").strip()[:64]
@@ -616,6 +659,8 @@ def build_handler(store: Store, config: Config):
             return True
 
         def _decide(self, body: dict) -> None:
+            if not self._sync_rotations():
+                return
             kind, key, action = body.get("kind"), body.get("key"), body.get("action")
             if (kind not in dislikes.KINDS or action not in dislikes.ACTIONS
                     or not isinstance(key, str) or not key):
@@ -645,6 +690,7 @@ def main() -> None:
     store = Store(os.environ.get("ROOM_DB", "/data/room.db"),
                   retention_days=int(os.environ.get("RETENTION_DAYS", RETENTION_DAYS)))
     config = Config(
+        rotation_dir=os.environ.get("ROTATION_DIR", ""),
         rate_seconds=int(os.environ.get("RATE_SECONDS", "60")),
         rate_max=int(os.environ.get("RATE_MAX", "10")),
         rate_global=int(os.environ.get("RATE_GLOBAL", "30")),
@@ -660,6 +706,9 @@ def main() -> None:
     vapid = push.Vapid.load_or_create(os.environ.get("VAPID_KEY", "/data/vapid.pem"))
     config.notifier = notify.Notifier(store, vapid, push_subject(os.environ))
     if config.controller_url:
+        receipt_watch = receipt_push.RequestWatch(store, config.notifier,
+            lambda request_id: receipt_push.fetch_receipt(config.controller_url, request_id))
+        threading.Thread(target=receipt_watch.run, daemon=True).start()
         watch = notify.DjWatch(lambda: notify.fetch_session(config.controller_url),
                                config.notifier, store)
         threading.Thread(target=watch.run, daemon=True).start()

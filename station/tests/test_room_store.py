@@ -27,6 +27,53 @@ def store(tmp_path):
     s.close()
 
 
+def test_rotation_merges_votes_and_keeps_newer_keep_decision(store):
+    store.set_dislike(dis(target="old", song_id="old"), cap=20, now=T0)
+    store.set_dislike(dis(target="new", song_id="new"), cap=20, now=T0 + timedelta(seconds=1))
+    store.set_dislike(dis(kind="artist", target="кино", song_id="old"), cap=20, now=T0)
+    store.decide("track", "new", "blocked", now=T0)
+    store.decide("track", "old", "keep", now=T0 + timedelta(seconds=2))
+    store.remap_song_ids({"old": "mid", "mid": "new"})
+    before = store.all_dislikes()
+    assert len(before) == 2 and all(r["song_id"] == "new" for r in before)
+    assert {r["target"] for r in before} == {"new", "кино"}
+    assert tuple(store.db.execute("SELECT target, action FROM dislike_decisions").fetchone()) == ("new", "keep")
+    store.remap_song_ids({"old": "mid", "mid": "new"})
+    assert store.all_dislikes() == before
+    with pytest.raises(ValueError):
+        store.remap_song_ids({"new": "old", "old": "new"})
+    assert store.all_dislikes() == before
+
+
+def test_rotation_outbox_combines_batches_before_commit(store, tmp_path):
+    import json
+    spec = importlib.util.spec_from_file_location("room_rotations", ROOT_ROTATIONS)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    store.set_dislike(dis(target="old", song_id="old"), cap=20, now=T0)
+    directory = tmp_path / "rotations"
+    directory.mkdir()
+    for name, mapping in [("a", {"mid": "new"}), ("z", {"old": "mid"})]:
+        (directory / f"{name}.json").write_text(json.dumps({"version": 1, "trackMap": mapping}), encoding="utf-8")
+    mod.sync(store, str(directory))
+    assert store.all_dislikes()[0]["target"] == "new"
+    assert list(directory.iterdir()) == []
+
+
+def test_failed_rotation_rolls_back_votes_and_decisions(store):
+    store.set_dislike(dis(target="old", song_id="old"), cap=20, now=T0)
+    store.decide("track", "old", "keep", now=T0)
+    store.db.execute("CREATE TRIGGER fail_rotation BEFORE DELETE ON dislikes BEGIN SELECT RAISE(ABORT, 'fixture'); END")
+    before = store.all_dislikes()
+    decisions = store.decisions()
+    with pytest.raises(sqlite3.IntegrityError):
+        store.remap_song_ids({"old": "new"})
+    assert store.all_dislikes() == before and store.decisions() == decisions
+
+
+ROOT_ROTATIONS = STORE.parent / "rotations.py"
+
+
 def test_added_message_comes_back(store):
     rec = store.add("l1", "Аня", "привет", now=T0)
     assert rec["id"] == 1 and rec["name"] == "Аня" and rec["text"] == "привет"

@@ -39,6 +39,23 @@ def test_empty_result_is_an_empty_list_not_an_error():
     assert sub.candidates(payload) == []
 
 
+def test_failed_envelope_stops_search_without_disclosing_credentials(monkeypatch):
+    import io
+    import json
+    calls = []
+
+    def reply(url, **kwargs):
+        calls.append(url)
+        return io.BytesIO(json.dumps({"subsonic-response": {
+            "status": "failed", "error": {"code": 40, "message": "DUMMY_SECRET"}}}).encode())
+
+    monkeypatch.setattr(sub.urllib.request, "urlopen", reply)
+    with pytest.raises(ValueError, match="Subsonic") as exc:
+        sub.resolve("Включи Кино Группа крови пожалуйста", "http://nd", "user", "password")
+    assert len(calls) == 1
+    assert "DUMMY_SECRET" not in str(exc.value) and "http" not in str(exc.value)
+
+
 def test_exact_needs_the_whole_artist_and_title():
     got = sub.match("Кино — Звезда по имени Солнце", SONGS)
     assert got["exact"]["id"] == "a1"

@@ -63,6 +63,8 @@ export interface Track {
 // `history` are the same shape with the runtime-stamped startedAt/endedAt/
 // source added.
 export interface QueueItem {
+  /** Private receipt capability for THIS occurrence, omitted from snapshot(). */
+  requestId?: string | null;
   track: Track;
   requestedBy?: string | null;
   // This item was queued by the OPERATOR, not by a listener. It exists because

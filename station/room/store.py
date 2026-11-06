@@ -9,10 +9,19 @@
 календаря, зелёный через раз — тоже правило проекта.
 """
 import sqlite3
+import json
 import threading
 from datetime import datetime, timedelta, timezone
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS request_push (
+  request_id TEXT NOT NULL,
+  endpoint TEXT NOT NULL,
+  listener_id TEXT NOT NULL,
+  subscription TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (request_id, endpoint)
+);
 CREATE TABLE IF NOT EXISTS messages (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   at          TEXT NOT NULL,
@@ -353,6 +362,72 @@ class Store:
                 "SELECT kind, target FROM dislikes WHERE listener_id = ?",
                 (listener_id,)).fetchall()
         return [dict(r) for r in rows]
+
+    def remap_song_ids(self, mapping: dict[str, str]) -> None:
+        """Подтверждённая ротация id; последний голос/решение побеждает при слиянии."""
+        resolved = {}
+        for old in mapping:
+            target, seen = old, set()
+            while target in mapping and mapping[target] != target:
+                if target in seen:
+                    raise ValueError("цикл в карте ротации")
+                seen.add(target)
+                target = mapping[target]
+            resolved[old] = target
+        with self.lock, self.db:
+            for row in self.db.execute("SELECT * FROM dislikes").fetchall():
+                target = resolved.get(row["target"], row["target"]) if row["kind"] == "track" else row["target"]
+                song = resolved.get(row["song_id"], row["song_id"])
+                if target == row["target"] and song == row["song_id"]:
+                    continue
+                self.db.execute(
+                    "INSERT INTO dislikes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(listener_id, kind, target) DO UPDATE SET "
+                    "name=excluded.name, artist_key=excluded.artist_key, song_id=excluded.song_id, "
+                    "title=excluded.title, artist=excluded.artist, album=excluded.album, at=excluded.at "
+                    "WHERE excluded.at >= dislikes.at",
+                    (row["listener_id"], row["name"], row["kind"], target, row["artist_key"],
+                     song, row["title"], row["artist"], row["album"], row["at"]))
+                if target != row["target"]:
+                    self.db.execute("DELETE FROM dislikes WHERE listener_id=? AND kind=? AND target=?",
+                                    (row["listener_id"], row["kind"], row["target"]))
+            for row in self.db.execute("SELECT * FROM dislike_decisions WHERE kind='track'").fetchall():
+                target = resolved.get(row["target"], row["target"])
+                if target == row["target"]:
+                    continue
+                self.db.execute(
+                    "INSERT INTO dislike_decisions VALUES ('track', ?, ?, ?) "
+                    "ON CONFLICT(kind, target) DO UPDATE SET action=excluded.action, decided_at=excluded.decided_at "
+                    "WHERE excluded.decided_at > dislike_decisions.decided_at OR "
+                    "(excluded.decided_at = dislike_decisions.decided_at AND excluded.action='keep')",
+                    (target, row["action"], row["decided_at"]))
+                self.db.execute("DELETE FROM dislike_decisions WHERE kind='track' AND target=?", (row["target"],))
+
+    def watch_request(self, request_id: str, sub: dict, listener: str, cap: int,
+                      per_listener: int, now: datetime | None = None) -> bool:
+        moment = now or datetime.now(timezone.utc)
+        with self.lock, self.db:
+            self.db.execute("DELETE FROM request_push WHERE created_at < ?", (_iso(moment - timedelta(days=7)),))
+            if self.db.execute("SELECT 1 FROM request_push WHERE request_id=? AND endpoint=?",
+                               (request_id, sub["endpoint"])).fetchone():
+                return True
+            total, own = self.db.execute(
+                "SELECT COUNT(*), COALESCE(SUM(listener_id=?), 0) FROM request_push", (listener,)).fetchone()
+            if total >= cap or own >= per_listener:
+                return False
+            self.db.execute("INSERT INTO request_push VALUES (?, ?, ?, ?, ?)",
+                            (request_id, sub["endpoint"], listener, json.dumps(sub), _iso(moment)))
+        return True
+
+    def pending_request_push(self, now: datetime | None = None) -> list[dict]:
+        moment = now or datetime.now(timezone.utc)
+        with self.lock, self.db:
+            self.db.execute("DELETE FROM request_push WHERE created_at < ?", (_iso(moment - timedelta(days=7)),))
+            return [dict(r) for r in self.db.execute("SELECT * FROM request_push")]
+
+    def finish_request_push(self, request_id: str, endpoint: str) -> None:
+        with self.lock, self.db:
+            self.db.execute("DELETE FROM request_push WHERE request_id=? AND endpoint=?", (request_id, endpoint))
 
     def all_dislikes(self) -> list[dict]:
         with self.lock:

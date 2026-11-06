@@ -33,6 +33,7 @@ SKIP_DIRS = {".stfolder", ".stversions", ".sync"}
 FFMPEG_TIMEOUT_SEC = 600      # час звука меряется за ~25 с; больше — зависание
 CHECKPOINT_EVERY = 200        # первый прогон идёт ~15 минут, обрыв не должен
                               # стоить всей сделанной работы
+TRANSIENT_RETRY_SEC = 3600
 # фоновый приоритет: на gpu-host рядом живут сервисы с GPU и эфирный TTS
 BELOW_NORMAL = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
 # Обход неполный, но замер честный: что видно — измерено и записано, чистка кэша
@@ -118,19 +119,24 @@ def save_cache(path: Path, cache: dict) -> None:
     os.replace(tmp, path)
 
 
-def plan(files: dict[str, tuple[int, int]], cached: dict, retry_errors: bool = False
+def plan(files: dict[str, tuple[int, int]], cached: dict, retry_errors: bool = False,
+         now: float | None = None
          ) -> tuple[list[str], list[str]]:
     """Что мерить заново и что убрать из кэша.
 
     `files` — ключ → (размер, mtime_ns) по текущему обходу. Файл без изменений
-    не перемеряется, даже если прошлый замер упал: ошибка на неизменном файле
-    повторится, и каждую ночь тратить на неё ffmpeg незачем (`retry_errors`).
+    не перемеряется после постоянной ошибки декодирования (`retry_errors`
+    снимает запрет). Таймауты и ошибки запуска повторяются после выдержки.
     """
+    now = time.time() if now is None else now
     todo = []
     for key, (size, mtime_ns) in files.items():
         entry = cached.get(key)
+        transient = entry and (entry.get("error_kind") == "transient" or
+                               str(entry.get("error", "")).startswith(("OSError:", "TimeoutExpired:")))
+        retry = retry_errors or (transient and now >= entry.get("retry_after", 0))
         if (entry and entry.get("size") == size and entry.get("mtime_ns") == mtime_ns
-                and (entry.get("error") is None or not retry_errors)):
+                and (entry.get("error") is None or not retry)):
             continue
         todo.append(key)
     removed = [key for key in cached if key not in files]
@@ -138,7 +144,7 @@ def plan(files: dict[str, tuple[int, int]], cached: dict, retry_errors: bool = F
 
 
 def run(root: Path, cache_path: Path, workers: int, limit: int | None = None,
-        retry_errors: bool = False, measure=ffmpeg_measure, log=print) -> dict:
+        retry_errors: bool = False, measure=ffmpeg_measure, log=print, now=time.time) -> dict:
     started = time.monotonic()
     walk_errors = []
     paths = walk_mp3(root, walk_errors.append)
@@ -157,7 +163,7 @@ def run(root: Path, cache_path: Path, workers: int, limit: int | None = None,
             walk_errors.append(e)
             continue
         files[rel_key(p, root)] = (st.st_size, st.st_mtime_ns)
-    todo, removed = plan(files, tracks, retry_errors)
+    todo, removed = plan(files, tracks, retry_errors, now())
     if walk_errors:
         # недоступная ветвь неотличима от удалённой: чистить кэш по такому
         # обходу значит потерять замеры, которые завтра снова понадобятся
@@ -182,6 +188,10 @@ def run(root: Path, cache_path: Path, workers: int, limit: int | None = None,
             entry["lufs"], entry["true_peak_db"] = measure(root / key)
         except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as e:
             entry["error"] = f"{type(e).__name__}: {e}"[:300]
+            transient = isinstance(e, (OSError, subprocess.TimeoutExpired))
+            entry["error_kind"] = "transient" if transient else "permanent"
+            if transient:
+                entry["retry_after"] = now() + TRANSIENT_RETRY_SEC
         return key, entry
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
@@ -197,7 +207,8 @@ def run(root: Path, cache_path: Path, workers: int, limit: int | None = None,
     save_cache(cache_path, cache)
     return {"files": len(files), "measured": measured, "errors": errors,
             "removed": len(removed), "walk_errors": len(walk_errors),
-            "cached": len(tracks), "seconds": round(time.monotonic() - started, 1)}
+            "cached": len(tracks), "cached_errors": sum(bool(t.get("error")) for t in tracks.values()),
+            "seconds": round(time.monotonic() - started, 1)}
 
 
 def main(argv=None) -> int:

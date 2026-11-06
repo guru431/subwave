@@ -37,6 +37,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -93,12 +94,27 @@ REDACTED_NOT_EXPORTED = ("llm.keys", "llm.keys.*", "webhooks.*.authHeader")
 EMPTY_SECRET = "<пусто>"
 
 
-def _secret_path(keys: tuple) -> bool:
-    for pattern in REDACTED_PATHS:
+def _declared_secret_path(keys: tuple) -> bool:
+    if keys and keys[0] in ("values", "defaults"):
+        keys = keys[1:]
+    for pattern in REDACTED_PATHS + REDACTED_NOT_EXPORTED:
         parts = pattern.split(".")
         if len(parts) == len(keys) and all(p in ("*", k) for p, k in zip(parts, keys)):
             return True
-    return any(s in str(keys[-1]).lower() for s in SECRET_KEYS)
+    return False
+
+
+def _secret_path(keys: tuple) -> bool:
+    return _declared_secret_path(keys) or (bool(keys) and any(s in str(keys[-1]).lower() for s in SECRET_KEYS))
+
+
+def _path_keys(path: str) -> tuple:
+    # Header names may themselves contain dots/brackets: the wildcard consumes
+    # the whole name, not a made-up nested settings object.
+    for prefix in ("llm.headers.", "llm.fallback.headers.", "llm.keys."):
+        if path.startswith(prefix):
+            return tuple(prefix.rstrip(".").split(".")) + (path[len(prefix):],)
+    return tuple(re.sub(r"\[\d+\]", ".*", path).split(".")) if path else ()
 
 
 def _snapshot_secrets(value, keys: tuple = ()):
@@ -144,18 +160,18 @@ def env(required: tuple[str, ...] = REQUIRED) -> dict[str, str]:
     return {k: os.environ[k] for k in required}
 
 
-def mask(value):
+def mask(value, keys: tuple = ()):
     """Прячет секреты в выводе (снимок маскирует `_snapshot_secrets`).
 
     Число, флаг и null секретом не бывают: `llm.dailyTokenCap` и
     `llm.maxOutputTokens` попадают под «token» по имени.
     """
+    if _declared_secret_path(keys) or (_secret_path(keys) and not isinstance(value, (int, float, type(None)))):
+        return "***"
     if isinstance(value, dict):
-        return {k: ("***" if not isinstance(v, (int, float, type(None)))
-                    and any(s in k.lower() for s in SECRET_KEYS) else mask(v))
-                for k, v in value.items()}
+        return {k: mask(v, keys + (k,)) for k, v in value.items()}
     if isinstance(value, list):
-        return [mask(v) for v in value]
+        return [mask(v, keys + ("*",)) for v in value]
     return value
 
 
@@ -331,11 +347,8 @@ def export_settings(e: dict[str, str], path: str) -> int:
 
 
 def _show(path: str, value) -> str:
-    """Значение для вывода: секрет по имени последнего сегмента — звёздочками."""
-    leaf = path.rsplit(".", 1)[-1].lower()
-    if any(s in leaf for s in SECRET_KEYS):
-        return "***"
-    return json.dumps(value, ensure_ascii=False)
+    """Маскирует и листовой секрет, и секреты внутри целого объекта/списка."""
+    return json.dumps(mask(value, _path_keys(path)), ensure_ascii=False)
 
 
 def _settings_values(body):
@@ -360,14 +373,25 @@ def _subset_problems(want, got, prefix=""):
     не касается. Словари сверяются вглубь, списки (`personas`, `shows`) —
     целиком: они и передаются целиком.
     """
+    if isinstance(want, list):
+        if not isinstance(got, list) or len(want) != len(got):
+            yield prefix, want, got
+        else:
+            for i, value in enumerate(want):
+                yield from _subset_problems(value, got[i], f"{prefix}[{i}]")
+        return
+    if not isinstance(want, dict):
+        if _declared_secret_path(_path_keys(prefix)) and isinstance(want, str) and want and got == "set":
+            return  # GET подтверждает наличие, но не равенство секрета
+        if want != got:
+            yield prefix, want, got
+        return
     for key, want_value in want.items():
         path = f"{prefix}.{key}" if prefix else key
         if not isinstance(got, dict) or key not in got:
             yield path, want_value, None
-        elif isinstance(want_value, dict) and isinstance(got[key], dict):
+        else:
             yield from _subset_problems(want_value, got[key], path)
-        elif got[key] != want_value:
-            yield path, want_value, got[key]
 
 
 def apply_patch(e: dict[str, str], path: str, dry_run: bool = False) -> int:
@@ -420,6 +444,9 @@ def apply_patch(e: dict[str, str], path: str, dry_run: bool = False) -> int:
               file=sys.stderr)
         return 1
     print("применено и сверено")
+    if any(_declared_secret_path(_path_keys(p))
+           and isinstance(v, str) and v for p, v in _flatten(patch)):
+        print("секрет установлен; совпадение значения через редактированный GET не проверяется")
     return 0
 
 

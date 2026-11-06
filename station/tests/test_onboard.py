@@ -500,6 +500,28 @@ def test_llm_patch_is_not_compared_with_the_provider_list(api, tmp_path):
     assert onboard.apply_patch(PATCH_ENV, str(patch)) == 0
 
 
+def test_patch_redacts_full_paths_and_verifies_presence(api, tmp_path, capsys):
+    _, answers = api
+    payload = {"llm": {"headers": {"Authorization": "AUDIT_DUMMY_HEADER", "X.Custom[1]": "AUDIT_DUMMY_DOTTED"},
+                       "fallback": {"headers": {"X-Custom": "AUDIT_DUMMY_FALLBACK"}}},
+               "scrobble": {"lastfm": {"sessionKey": "AUDIT_DUMMY_SESSION"}},
+               "webhooks": [{"url": "https://example.test", "authHeader": "AUDIT_DUMMY_HOOK"}]}
+    patch = tmp_path / "patch.json"
+    patch.write_text(json.dumps(payload), encoding="utf-8")
+    assert onboard.apply_patch(PATCH_ENV, str(patch), dry_run=True) == 0
+    answers[("GET", "/settings")] = (200, {"values": {
+        "llm": {"headers": {"Authorization": "set", "X.Custom[1]": "set"}, "fallback": {"headers": {"X-Custom": "set"}}},
+        "scrobble": {"lastfm": {"sessionKey": "set"}},
+        "webhooks": [{"url": "https://example.test", "authHeader": "set"}]}})
+    assert onboard.apply_patch(PATCH_ENV, str(patch)) == 0
+    output = capsys.readouterr()
+    assert "совпадение значения" in output.out
+    answers[("GET", "/settings")] = (200, {"values": {}})
+    assert onboard.apply_patch(PATCH_ENV, str(patch)) == 1
+    failed = capsys.readouterr()
+    assert "AUDIT_DUMMY" not in output.out + output.err + failed.out + failed.err
+
+
 def test_persona_roster_is_read_from_values(api):
     calls, answers = api
     answers[("GET", "/settings")] = (200, _wrapped(ROSTER))

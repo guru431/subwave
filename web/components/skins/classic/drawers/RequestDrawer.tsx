@@ -7,6 +7,7 @@ import { cn } from '@/lib/cn';
 import type { NowPlayingTrack, RequestResult, StationContext } from '@/lib/types';
 import { REQUEST_NAME_MAX } from '@/lib/schemas.generated';
 import { bindExact, bindPick, pickedSongId, type RequestPick } from '@/lib/requestPick';
+import { RequestReceipts } from '../RequestReceipts';
 
 const SUCCESS_HOLD_MS = 2800;
 const POLL_INTERVAL_MS = 1500;
@@ -111,6 +112,7 @@ const RESOLVE_DEBOUNCE_MS = 400;
 const RESOLVE_MIN_CHARS = 3;
 
 export interface RequestDrawerProps {
+  expectedSongId?: string;
   requestText: string;
   setRequestText: (text: string) => void;
   requesterName: string;
@@ -124,6 +126,7 @@ export interface RequestDrawerProps {
 }
 
 export default function RequestDrawer({
+  expectedSongId,
   requestText, setRequestText,
   requesterName, setRequesterName,
   isSubmitting, onSubmit, onPoll, onClose,
@@ -133,7 +136,8 @@ export default function RequestDrawer({
   // Null while idle. On accept it holds a `pending` success card with the
   // templated ack; polling fills in the real track + on-air ack.
   const [result, setResult] = useState<RequestResult | null>(null);
-  const [resolved, setResolved] = useState<ResolveResult | null>(null);
+  const [resolution, setResolution] = useState<{ query: string; body: ResolveResult } | null>(null);
+  const resolved = resolution?.query === requestText.trim() ? resolution.body : null;
   // songId привязан к тексту, при котором выбран (lib/requestPick.ts): правка
   // человеком его отвязывает, подстановка альтернативы в поле — нет.
   const [pick, setPick] = useState<RequestPick | null>(null);
@@ -145,27 +149,32 @@ export default function RequestDrawer({
   useEffect(() => {
     const query = requestText.trim();
     if (query.length < RESOLVE_MIN_CHARS) {
-      setResolved(null);
+      setResolution(null);
       return;
     }
     let cancelled = false;
+    const abort = new AbortController();
+    setResolution(null);
     const timer = setTimeout(async () => {
       try {
-        const r = await fetch(`/room/resolve?q=${encodeURIComponent(query)}`);
+        const r = await fetch(`/room/resolve?q=${encodeURIComponent(query)}`, { signal: abort.signal });
         if (!r.ok || cancelled) return;
-        const body = (await r.json()) as ResolveResult;
+        let body = (await r.json()) as ResolveResult;
         if (cancelled) return;
-        setResolved(body);
+        if (expectedSongId && body.exact && body.exact.id !== expectedSongId) {
+          body = { exact: null, alternatives: [body.exact, ...body.alternatives] };
+        }
+        setResolution({ query, body });
         const exact = body.exact;
         if (exact) setPick((prev) => bindExact(prev, exact.id, query));
       } catch {
         // Комната недоступна — заказ всё равно уйдёт текстом, и каскад станции
         // его разберёт. Подсказка не обязательна для отправки.
-        if (!cancelled) setResolved(null);
+        if (!cancelled) setResolution(null);
       }
     }, RESOLVE_DEBOUNCE_MS);
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [requestText]);
+    return () => { cancelled = true; abort.abort(); clearTimeout(timer); };
+  }, [requestText, expectedSongId]);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollStopRef = useRef(false);
@@ -252,6 +261,7 @@ export default function RequestDrawer({
 
   return (
     <m.div layout>
+      <RequestReceipts />
       <AnimatePresence mode="wait" initial={false}>
         {result?.success ? (
           <m.div
@@ -327,6 +337,7 @@ export default function RequestDrawer({
             {/* Результат сверки скринридер объявляет сам: обёртка в DOM всегда,
                 иначе живую область, появившуюся вместе с текстом, не озвучат. */}
             <div aria-live="polite">
+              {expectedSongId && resolved && !resolved.exact && <p className="mt-3 text-[11px] text-muted">Запись из закладки не подтверждена. Выберите нужную версию заново или отправьте запрос текстом.</p>}
               {resolved?.exact && (
                 <p className="mt-3 text-[11px] leading-relaxed text-muted">
                   Нашёл в коллекции:{' '}
@@ -355,7 +366,7 @@ export default function RequestDrawer({
                           : 'border-soft-border text-muted',
                       )}
                     >
-                      {c.artist} — {c.title}
+                      {c.artist} — {c.title}{c.album ? ` · ${c.album}` : ''}{c.year ? ` (${c.year})` : ''}
                     </button>
                   ))}
                 </div>

@@ -24,6 +24,7 @@ import { validatePublicBody } from '../middleware/validate.js';
 import { listenerRequestSchema } from '../schemas/request.js';
 import { shuffle } from '../util/shuffle.js';
 import { requestWaitClause } from '../broadcast/queue/pure.js';
+import { readReceipt, saveReceipt } from '../broadcast/request-receipts.js';
 
 export const router = express.Router();
 
@@ -45,8 +46,8 @@ function sanitizeRequestText(raw: string): string {
     .trim();
 }
 
-// In-memory request ledger, ephemeral by design: a restart drops in-flight
-// requests, and the track is either already queued or it isn't.
+// Resolution working data is process-local. The compact listener receipt is
+// durable in request-receipts; the queue occurrence carries its private id.
 const requests = new Map();
 const REQUEST_TTL_MS = 10 * 60 * 1000;
 
@@ -146,6 +147,10 @@ async function resolveGenre(name) {
 // resolveRequest's terminal closures and the crash catch below.
 function recordOutcome(entry) {
   try {
+    saveReceipt(entry.id, {
+      phase: entry.status === 'failed' ? 'failed' : entry.refused ? 'declined' : entry.track ? 'queued' : 'answered',
+      track: entry.track, ack: entry.ack, message: entry.message,
+    });
     requestLog.record({
       t: new Date(entry.createdAt).toISOString(),
       id: String(entry.id).slice(0, 8),
@@ -223,6 +228,7 @@ function withWaitNotice(ack: string | null | undefined, trackId: string | null |
 async function resolveRequest(entry) {
   const { requester, text } = entry;
   entry.startedAt = Date.now();
+  saveReceipt(entry.id, { phase: 'searching' });
 
   const resolved = ({ ack, track, queuePosition }) => {
     entry.status = 'resolved';
@@ -309,6 +315,7 @@ async function resolveRequest(entry) {
       track: pick,
       requestedBy: requester,
       intent: 'song',
+      requestId: entry.id,
       introScript,
       introKind: 'dj-speak',
       introPersona: generatedIntro.introPersona,
@@ -391,6 +398,7 @@ async function resolveRequest(entry) {
     const introScript = generatedIntro.introScript;
     const pos = await queue.push({
       track: pick, requestedBy: requester, intent: 'more_like_this', introScript,
+      requestId: entry.id,
       introKind: 'dj-speak',
       // Voice it as whoever wrote it: render and air happen later and would
       // otherwise re-resolve the speaker off the wall clock.
@@ -432,7 +440,7 @@ async function resolveRequest(entry) {
   // Conversational DJ agent. On any failure fall through to the stateless
   // cascade below, so a request is never dropped.
   try {
-    const agentRes = await djAgent.runRequest(queue, ctx, { requester, text });
+    const agentRes = await djAgent.runRequest(queue, ctx, { requester, text, requestId: entry.id });
     if (agentRes) {
       // Thread the agent's own echo-guard verdict into the durable log; the
       // other paths set it inline.
@@ -721,6 +729,7 @@ async function resolveRequest(entry) {
     track: pick,
     requestedBy: requester,
     intent: matched.intent,
+    requestId: entry.id,
     introScript,
     introKind: 'dj-speak',
     introPersona: generatedIntro.introPersona,
@@ -864,6 +873,10 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
     ack: null, track: null, queuePosition: null, message: null,
     createdAt: Date.now(),
   };
+  try { saveReceipt(id, { phase: 'accepted' }); }
+  catch {
+    return res.status(503).json({ success: false, message: 'Не удалось сохранить заказ — попробуйте позже.' });
+  }
   requests.set(id, entry);
   lastByIp.set(ip, entry);
   queue.log('request', `${requester}: "${text}" (id ${id.slice(0, 8)})${stripped.injection ? ` [${stripped.injection} stripped]` : ''}`);
@@ -882,17 +895,32 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
 
 // Poll for the outcome of a submitted request.
 router.get('/request/:id', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
   const entry = requests.get(req.params.id);
-  if (!entry) {
+  let receipt = readReceipt(req.params.id);
+  if (!receipt) {
     // Never existed, or pruned / lost to a restart; the UI stops polling.
     return res.status(404).json({ status: 'unknown' });
   }
-  res.json({
-    status: entry.status,
-    success: entry.status === 'resolved',
-    ack: entry.ack,
-    track: entry.track,
-    queuePosition: entry.queuePosition,
-    message: entry.message,
+  const item = queue.upcoming.find(i => i.requestId === receipt!.id);
+  const aired = [queue.current, ...queue.history].find(i => i?.requestId === receipt!.id);
+  if (aired?.startedAt) {
+    saveReceipt(receipt.id, { phase: 'aired', airedAt: aired.startedAt });
+  } else if (item) {
+    saveReceipt(receipt.id, { phase: 'queued', track: item.track });
+  } else if (receipt.phase === 'queued') {
+    saveReceipt(receipt.id, { phase: 'removed', message: 'Заказ снят или прошёл во время перезапуска; подтверждения начала эфира нет.' });
+  } else if (!entry && (receipt.phase === 'accepted' || receipt.phase === 'searching')) {
+    saveReceipt(receipt.id, { phase: 'failed', message: 'Поиск прерван перезапуском. Можно отправить заказ снова.' });
+  }
+  receipt = readReceipt(receipt.id)!;
+  const pending = receipt.phase === 'accepted' || receipt.phase === 'searching';
+  res.json({ ...receipt, requestId: receipt.id,
+    status: pending ? 'pending' : ['failed', 'removed'].includes(receipt.phase) ? 'failed' : 'resolved',
+    success: !pending && !['failed', 'removed', 'declined'].includes(receipt.phase),
+    queuePosition: item ? queue.upcoming.indexOf(item) + 1 : null,
+    estimatedWaitSec: item ? queue.airForecastSec(item) : null,
+    waitReason: item ? (queue.upcoming.slice(0, queue.upcoming.indexOf(item)).some(i => i.block)
+      ? 'Перед заказом играет блок треков.' : 'Ожидает своей очереди и уже переданных микшеру треков.') : null,
   });
 });

@@ -17,6 +17,7 @@ import DotRail from './DotRail';
 import CommandPalette, { type PlayerDrawer } from './CommandPalette';
 import ShortcutsDialog from './ShortcutsDialog';
 import TimelineDrawer from './drawers/TimelineDrawer';
+import { SavedTracks } from './SavedTracks';
 import BoothDrawer from './drawers/BoothDrawer';
 import RequestDrawer from './drawers/RequestDrawer';
 import ScheduleDrawer from './drawers/ScheduleDrawer';
@@ -89,6 +90,7 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
   });
 
   const [requestText, setRequestText] = useState('');
+  const [savedRequest, setSavedRequest] = useState<{ query: string; id: string } | null>(null);
   const [requesterName, setRequesterName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [drawer, setDrawer] = useState<PlayerDrawer | null>(null);
@@ -109,6 +111,11 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
   useEffect(() => {
     if (listener().notify) void enablePush();
     const params = new URLSearchParams(window.location.search);
+    if (params.get('request') === '1') {
+      setDrawer('request');
+      params.delete('request');
+      window.history.replaceState(null, '', window.location.pathname + (params.size ? `?${params}` : '') + window.location.hash);
+    }
     if (params.get('chat') === '1') {
       openChat();
       params.delete('chat');
@@ -118,6 +125,7 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
     }
     if (!('serviceWorker' in navigator)) return;
     const onMessage = (e: MessageEvent) => {
+      if ((e.data as { type?: string } | null)?.type === 'room:open-request') setDrawer('request');
       if ((e.data as { type?: string } | null)?.type === 'room:open-chat') openChat();
     };
     navigator.serviceWorker.addEventListener('message', onMessage);
@@ -376,12 +384,17 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
         container={portalNode}
       >
         {drawer === 'timeline' && (
-          <TimelineDrawer upcoming={state.upcoming} history={state.history} />
+          <><SavedTracks onRequest={track => {
+            const query = `${track.artist} — ${track.title}`;
+            setSavedRequest({ query, id: track.id }); setRequestText(query); setDrawer('request');
+          }} />
+            <TimelineDrawer upcoming={state.upcoming} history={state.history} /></>
         )}
         {drawer === 'booth'   && <BoothDrawer items={stageBoothFeed} timezone={timezone} locale={locale} />}
         {drawer === 'request' && (
           <RequestDrawer
-            requestText={requestText} setRequestText={setRequestText}
+              requestText={requestText} setRequestText={setRequestText}
+              expectedSongId={savedRequest?.query === requestText ? savedRequest.id : undefined}
             requesterName={requesterName} setRequesterName={setRequesterName}
             isSubmitting={isSubmitting}
             onSubmit={submitRequest}

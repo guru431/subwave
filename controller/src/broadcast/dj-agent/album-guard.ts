@@ -73,6 +73,8 @@ export interface AlbumGuardDeps<T> {
   recentAlbums: Set<string>;
   /** queue.neighbourArtistRoots(window). */
   avoidArtistRoots: Set<string>;
+  /** Keep an already artist-safe pick rather than waive the artist window for an album. */
+  preserveArtists?: boolean;
   albumKeyOf: AlbumKeyOf<T>;
   /** settings.picker.albumHours, carried only for the log text. */
   hours: number;
@@ -98,11 +100,11 @@ export async function runAlbumGuard<T extends CandidateLike>(
     seen, recentAlbums, albumKeyOf, avoidArtistRoots,
   );
 
-  if (!alt.size) {
+  if (!alt.size || (starved && deps.preserveArtists)) {
     logEvent('pick.albumGuard', {
-      relaxed: true, reason: 'no-other-album', album: song.album, artist: song.artist, hours,
+      relaxed: true, reason: starved ? 'artist-window' : 'no-other-album', album: song.album, artist: song.artist, hours,
     });
-    log(`recently-played album "${song.album}" allowed — every candidate in the run came off it (album cooldown ${hours}h)`);
+    log(`recently-played album "${song.album}" allowed — ${starved ? 'all other albums violate the artist window' : 'no other album in the run'} (album cooldown ${hours}h)`);
     return { kind: 'kept' };
   }
 

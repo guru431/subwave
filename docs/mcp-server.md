@@ -5,8 +5,8 @@ tracks, and driving the DJ (voice, segments, skills, sound effects) on-air over
 the [Model Context Protocol](https://modelcontextprotocol.io).
 
 The server lives at [`mcp-subwave/`](../mcp-subwave/). For the always-on
-broadcast pipeline see [`streaming-flow.md`](./streaming-flow.md); for the
-human listener request path see [`request-flow.md`](./request-flow.md). For the
+broadcast pipeline and listener request path see
+[`internals/broadcast.md`](./internals/broadcast.md). For the
 whole HTTP API (and a live playground), see [`api.md`](./api.md) or the admin
 **Connect** page (`/admin/connect`).
 

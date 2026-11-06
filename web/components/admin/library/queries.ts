@@ -17,6 +17,7 @@ export interface BrowseKeyFilters {
 // non-Track list there (history rows are PlayEntry, blocklist rows BlockEntry).
 export const libraryKeys = {
   all: ['library'] as const,
+  rotation: (id: string, showId: string) => ['library', 'rotation', id, showId] as const,
   rows: ['library', 'rows'] as const,
   browse: (f: BrowseKeyFilters) => ['library', 'rows', 'browse', f] as const,
   browseAll: ['library', 'rows', 'browse'] as const,

@@ -71,8 +71,8 @@ const GROUPS: Array<{ anchor: string; cols: string[] }> = [
   { anchor: 'moods', cols: ['moods', 'energy', 'source', 'confidence', 'tagger_version', 'prompt_hash', 'model', 'tagged_at'] },
   {
     anchor: 'analysis_version',
-    cols: ['bpm', 'musical_key', 'intro_ms', 'analysis_confidence', 'analysis_version', 'loudness_lufs',
-      'peak_db', 'structure_json', 'pace_json', 'beats_json', 'bars_json', 'key_ranges_json',
+    cols: ['bpm', 'musical_key', 'intro_ms', 'analysis_confidence', 'analysis_version',
+      'structure_json', 'pace_json', 'beats_json', 'bars_json', 'key_ranges_json',
       'lead_silence_ms', 'analyze_error', 'analyze_failed_at', 'analyze_fail_count'],
   },
   { anchor: 'audio_moods', cols: ['audio_moods', 'audio_mood_scores_json'] },
@@ -81,7 +81,8 @@ const GROUPS: Array<{ anchor: string; cols: string[] }> = [
 
 // Columns whose value can't be decided by "is it null" alone. Each is handled
 // explicitly in mergeRow(); listed here so columnPlan() can account for them.
-const SPECIAL = ['original_year', 'original_year_source', 'text_vector_dirty'];
+const SPECIAL = ['original_year', 'original_year_source', 'text_vector_dirty',
+  'loudness_lufs', 'peak_db', 'loudness_source'];
 
 // Carried as `new ?? old`, mirroring their own write-path COALESCE: each is
 // written only by a pass that could measure it (a complete-file decode, a
@@ -175,6 +176,11 @@ function mergeRow(plan: ColumnPlan, oldRow: Row, newRow: Row, movedTextVector: b
     for (const c of g.cols) merged[c] = take ? oldRow[c] : newRow[c];
   }
   for (const c of plan.coalesced) merged[c] = newRow[c] ?? oldRow[c];
+  // Full-file LUFS and true peak are a pair and outrank excerpt analysis,
+  // including when the freshly walked successor was already analysed.
+  const loudness = newRow.loudness_source === 'full' ? newRow
+    : oldRow.loudness_source === 'full' || newRow.analysis_version == null ? oldRow : newRow;
+  for (const col of ['loudness_lufs', 'peak_db', 'loudness_source']) merged[col] = loudness[col];
 
   // Mirror upsertTrackMeta's precedence: a per-track 'musicbrainz' or 'manual'
   // resolution on the old row outranks the walk-time album-tag year the new

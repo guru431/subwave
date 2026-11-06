@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -60,9 +60,18 @@ async function scenario(mode: string) {
     await likes.load();
     recipes.list();
     if (mode === 'recover-boot') {
+      process.env.ROOM_ROTATION_SYNC = '1';
       assert.equal(db.isOpen(), false, 'boot recovery must work before library.load');
       assert.equal(existsSync(rotation.manifestPath()), false);
+      const outbox = join(state, 'room-rotations');
+      writeFileSync(outbox, 'fixture obstruction');
+      await assert.rejects(rotation.applyPendingRotation());
+      assert.equal(db.pendingIdRotations().has(OLD), true, 'room handoff failure must retain the recovery map');
+      rmSync(outbox);
       assert.deepEqual(await rotation.applyPendingRotation(), { applied: true, complete: true });
+      const batches = readdirSync(outbox).filter(n => n.endsWith('.json'));
+      assert.equal(batches.length, 1);
+      assert.deepEqual(JSON.parse(readFileSync(join(outbox, batches[0]), 'utf8')).trackMap, { [OLD]: NEW });
       assert.equal(read('blocklist.json').entries[0].id, NEW);
       const stems = await import('../src/music/stem-cache.js');
       assert.equal(readFileSync(join(stems.dirFor(NEW), 'vocals.wav'), 'utf8'), 'cached audio');

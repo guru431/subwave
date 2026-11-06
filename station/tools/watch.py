@@ -132,7 +132,7 @@ def _clock(epoch_ms) -> str:
         return ""
 
 
-def _stream_problem(code, body, err, now: float) -> str | None:
+def _stream_problem(code, body, err, now: float, clock: dict | None = None) -> str | None:
     """Эфир по самому потоку, а не по флагам микшера.
 
     Упавший broadcast не виден ни в одной другой проверке: music-starved.json
@@ -151,6 +151,17 @@ def _stream_problem(code, body, err, now: float) -> str | None:
     started = track.get("timestamp") if isinstance(track, dict) else None
     if not isinstance(started, (int, float)):
         return "нет текущего трека — микшер не пишет now-playing"
+    if clock is None:
+        clock = {}
+    if body.get("streamIdle") is True:
+        clock.update(since=now, alerted=False, idle=True)
+        clock.pop("resumedAt", None)
+        return None
+    if clock.get("idle") is True:
+        clock.update(idle=False, resumedAt=now)
+    resumed = clock.get("resumedAt")
+    if isinstance(resumed, (int, float)) and 0 <= now - resumed < STALE_MARGIN:
+        return None
     duration = track.get("duration")
     known = isinstance(duration, (int, float)) and duration > 0
     age = now - started
@@ -162,7 +173,8 @@ def _stream_problem(code, body, err, now: float) -> str | None:
             + " — микшер стоит")
 
 
-def check(cfg: dict[str, str], now: float, get=fetch) -> dict[str, str | None]:
+def check(cfg: dict[str, str], now: float, get=fetch,
+          stream_clock: dict | None = None) -> dict[str, str | None]:
     """Имя проверки → None (в порядке) или текст сбоя."""
     station = cfg["WATCH_STATION_URL"].rstrip("/")
     out = {}
@@ -173,6 +185,7 @@ def check(cfg: dict[str, str], now: float, get=fetch) -> dict[str, str | None]:
                      else _http_problem(code, body))
 
     code, body, err = get(station + "/api/state")
+    idle = code == 200 and not err and isinstance(body, dict) and body.get("streamIdle") is True
     if err:
         out["air"] = f"/api/state не отвечает ({err})"
     elif code != 200 or not isinstance(body, dict):
@@ -182,7 +195,10 @@ def check(cfg: dict[str, str], now: float, get=fetch) -> dict[str, str | None]:
     else:
         out["air"] = None
 
-    out["stream"] = _stream_problem(*get(station + "/api/now-playing"), now)
+    code, body, err = get(station + "/api/now-playing")
+    if isinstance(body, dict):
+        body = {**body, "streamIdle": idle}
+    out["stream"] = _stream_problem(code, body, err, now, stream_clock)
 
     for name, path in (("room", "/room/health"), ("api", "/api/health")):
         code, body, err = get(station + path)
@@ -306,15 +322,17 @@ def main(argv=None, now=time.time, get=fetch, environ=os.environ,
     cfg = load_config(environ, env_file)
     state_path = Path(cfg["WATCH_STATE_FILE"])
     old = load_state(state_path)
+    stream_clock = old.pop("_streamClock", {})
     t = now()
-    results = check(cfg, t, get)
+    results = check(cfg, t, get, stream_clock)
     new, alerts, recovered = step(results, old, t)
     text = render(alerts, recovered)
     delivered = True
     if text:
         print(text)
         delivered = notify(cfg["WATCH_NOTIFY_CMD"], text)
-    save_state(state_path, settle(new, old, alerts, recovered, delivered))
+    saved = settle(new, old, alerts, recovered, delivered)
+    save_state(state_path, {**saved, **({"_streamClock": stream_clock} if stream_clock else {})})
 
     for name, problem in results.items():
         entry = new.get(name)

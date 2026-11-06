@@ -405,6 +405,17 @@ def retag_patches_rows(page):
         })
 
 
+@check
+def rotation_diagnostic(page):
+    """Read the selected track's rules through the authenticated query owner."""
+    goto_tab(page, "?tab=browse")
+    page.locator(ROW).first.locator('[title="Edit moods manually"]').click()
+    page.get_by_role("button", name="Почему не звучит?", exact=True).click()
+    page.get_by_role("button", name="Проверить снова", exact=True).wait_for()
+    assert page.get_by_label("Шоу для диагностики").is_visible()
+    assert "Причина выбора LLM неизвестна" in page.locator('[data-testid="manual-tag-editor"]').inner_text()
+
+
 # ---------------------------------------------------------------------------
 
 

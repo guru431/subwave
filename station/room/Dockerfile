@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir cryptography==46.0.3
 
 WORKDIR /app
 COPY guard.py store.py subsonic.py naming.py station.py navidrome.py \
-     push.py notify.py admin.py dislikes.py normalize.py server.py ./
+     push.py notify.py admin.py dislikes.py normalize.py rotations.py receipt_push.py server.py ./
 
 # База — на томе; путь по умолчанию совпадает с точкой монтирования в compose.
 ENV ROOM_DB=/data/room.db PORT=8080

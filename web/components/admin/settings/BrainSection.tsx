@@ -5,6 +5,7 @@ import { useRef, useState } from 'react';
 import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
 import { cn } from '../../../lib/cn';
+import { adminJson } from '../../../lib/admin-query';
 import { Card, Btn } from '../ui';
 import { PERSONA_TTS_INHERIT, personasPinningOtherEngine } from '../../../lib/schemas.generated';
 import {
@@ -128,12 +129,13 @@ export function BrainSection({ data, form, saveSettings, adminFetch, refresh, bu
     setTesting(true);
     setTest(null);
     try {
-      const r = await adminFetch('/settings/llm/probe-compat', {
+      // admin-query-imperative: brain-connection-probe
+      const result = await adminJson<{ ok: boolean; message: string; latencyMs: number }>(adminFetch, '/settings/llm/probe-compat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiKey: token.trim(), baseUrl: baseUrl.trim(), model: chatModel.trim() }),
       });
-      setTest(await r.json() as { ok: boolean; message: string; latencyMs: number });
+      setTest(result);
     } catch (e) {
       setTest({ ok: false, message: e instanceof Error ? e.message : String(e), latencyMs: 0 });
     } finally {

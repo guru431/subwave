@@ -202,7 +202,10 @@ def search_attempts(query: str):
 
 def candidates(payload: dict) -> list[dict]:
     """Разобрать конверт Subsonic в плоский список кандидатов."""
-    body = (payload or {}).get("subsonic-response") or {}
+    body = payload.get("subsonic-response") if isinstance(payload, dict) else None
+    if not isinstance(body, dict) or body.get("status") != "ok" or body.get("error"):
+        # Сообщение сервера и URL могут содержать учётные данные.
+        raise ValueError("Subsonic: отказ или неверный конверт ответа")
     songs = (body.get("searchResult3") or {}).get("song") or []
     return [{k: s.get(k) for k in FIELDS} for s in songs]
 

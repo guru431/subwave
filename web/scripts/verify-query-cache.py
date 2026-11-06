@@ -13,6 +13,7 @@ verify-library.py's docstring. Run it the same way:
 import base64
 import json
 import pathlib
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -336,11 +337,14 @@ def row_mutations_patch_all_cache_shapes(_page):
         client.clear();
     """)
     result = subprocess.run(
-        [str(web_root.parent / "controller/node_modules/.bin/tsx"), "--eval", program],
+        [shutil.which("node") or "node", "--import",
+         (web_root.parent / "controller/node_modules/tsx/dist/loader.mjs").resolve().as_uri(),
+         "--input-type=module", "--eval", program],
         cwd=web_root,
         text=True,
         capture_output=True,
         check=False,
+        timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 

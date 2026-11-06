@@ -118,6 +118,20 @@ def _now_playing(started: float, duration=None, online=True) -> dict:
     return {"nowPlaying": track, "streamOnline": online, "listeners": {"current": 1}}
 
 
+def test_idle_freezes_only_track_clock_and_resume_grace_is_bounded():
+    clock = {}
+    body = {**_now_playing(T0 - 3600, 240), "streamIdle": True}
+    assert watch._stream_problem(200, body, "", T0, clock) is None
+    assert watch._stream_problem(200, body, "", T0 + 7200, clock) is None
+    assert watch._stream_problem(200, {**body, "streamOnline": False}, "", T0, clock)
+    assert watch._stream_problem(502, {}, "", T0, clock)
+    resumed = {**body, "streamIdle": False}
+    assert watch._stream_problem(200, resumed, "", T0 + 7200, clock) is None
+    assert watch._stream_problem(200, resumed, "", T0 + 7200 + watch.STALE_MARGIN + 1, clock)
+    fresh = {**_now_playing(T0 + 7500, 240), "streamIdle": False}
+    assert watch._stream_problem(200, fresh, "", T0 + 7501, clock) is None
+
+
 @pytest.fixture
 def station():
     routes = {"/b/health": (200, {"ok": True}),
@@ -149,6 +163,14 @@ def test_checks_read_the_real_fields(station):
     assert got["bridge"].startswith("HTTP 503")
     assert got["air"] == "музыка на аварийной петле"
     assert got["room"].startswith("HTTP 502") and got["api"] is None
+
+
+def test_check_reads_idle_from_state_and_still_reports_emergency_loop(station):
+    cfg, routes = station
+    routes["/api/state"] = (200, {"streamIdle": True, "musicStarved": True})
+    routes["/api/now-playing"] = (200, _now_playing(T0 - 7200, 240))
+    got = watch.check(cfg, T0)
+    assert got["stream"] is None and "аварийной петле" in got["air"]
 
 
 def test_bridge_answering_200_without_ok_is_not_healthy(station):

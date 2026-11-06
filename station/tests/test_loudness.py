@@ -180,6 +180,24 @@ def test_failed_measurement_is_kept_as_error_and_not_retried_nightly(tmp_path):
     assert m.calls == ["one.mp3"]
 
 
+def test_transient_error_retries_after_backoff_without_remeasuring_success(tmp_path):
+    root, cache = tmp_path / "Music", tmp_path / "loudness.json"
+    _collection(root)
+
+    def broken(path):
+        if path.name == "one.mp3":
+            raise measure.subprocess.TimeoutExpired("ffmpeg", 600)
+        return (-9.0, -0.1)
+
+    measure.run(root, cache, workers=1, measure=broken, log=quiet, now=lambda: 1000)
+    m = fake_measure({})
+    stats = measure.run(root, cache, workers=1, measure=m, log=quiet, now=lambda: 1001)
+    assert m.calls == [] and stats["cached_errors"] == 1
+    stats = measure.run(root, cache, workers=1, measure=m, log=quiet,
+                        now=lambda: 1000 + measure.TRANSIENT_RETRY_SEC)
+    assert m.calls == ["one.mp3"] and stats["cached_errors"] == 0
+
+
 # --- запись в базу станции -------------------------------------------------
 
 def _station(tmp_path: Path, cache_tracks: dict, nd_rows, lib_rows):
@@ -196,6 +214,7 @@ def _station(tmp_path: Path, cache_tracks: dict, nd_rows, lib_rows):
     c.execute("CREATE TABLE tracks (id TEXT PRIMARY KEY, title TEXT, "
               "loudness_lufs REAL, peak_db REAL)")
     c.executemany("INSERT INTO tracks VALUES (?, ?, ?, ?)", lib_rows)
+    c.execute("ALTER TABLE tracks ADD COLUMN loudness_source TEXT")
     c.commit()
     c.close()
     return cache, nd, lib
@@ -400,7 +419,7 @@ def test_crashed_measure_does_not_apply(monkeypatch):
 
 def test_main_warns_and_fails_after_partial_walk(monkeypatch, capsys):
     monkeypatch.setattr(run_mod, "load_config", lambda: CFG)
-    monkeypatch.setattr(run_mod, "run", lambda cfg, dry_run, workers: (
+    monkeypatch.setattr(run_mod, "run", lambda cfg, dry_run, workers, retry_errors: (
         {**STATS, "walk_errors": 2}, APPLIED))
     assert run_mod.main([]) != 0
     captured = capsys.readouterr()
@@ -437,14 +456,14 @@ def test_main_passes_flags_and_prints_summary(monkeypatch, capsys):
     got = {}
     monkeypatch.setattr(run_mod, "load_config", lambda: CFG)
 
-    def fake_run(cfg, dry_run, workers):
-        got.update(cfg=cfg, dry_run=dry_run, workers=workers)
+    def fake_run(cfg, dry_run, workers, retry_errors):
+        got.update(cfg=cfg, dry_run=dry_run, workers=workers, retry_errors=retry_errors)
         return ({"files": 1, "measured": 0, "errors": 0, "cached": 1, "seconds": 0.1},
                 {"tracks": 1, "updated": 0, "unchanged": 1, "no_measurement": 0,
                  "unknown_id": 0, "dry_run": True})
     monkeypatch.setattr(run_mod, "run", fake_run)
-    assert run_mod.main(["--dry-run", "--workers", "2"]) == 0
-    assert got == {"cfg": CFG, "dry_run": True, "workers": 2}
+    assert run_mod.main(["--dry-run", "--workers", "2", "--retry-errors"]) == 0
+    assert got == {"cfg": CFG, "dry_run": True, "workers": 2, "retry_errors": True}
     assert "холостой прогон" in capsys.readouterr().out
 
 

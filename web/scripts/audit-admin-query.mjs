@@ -165,6 +165,9 @@ const allowed = new Map([
       path: /^\/settings\/llm\/discover\?baseUrl=\$\{\}$/,
     }],
   ])],
+  ['settings/BrainSection.tsx', new Map([
+    ['brain-connection-probe', { callee: 'adminJson', method: 'POST', path: /^\/settings\/llm\/probe-compat$/ }],
+  ])],
   ['settings/shared.tsx', new Map([
     ['protected-audio-preview', { callee: 'adminResponse', method: 'GET', path: /^path$/ }],
   ])],
@@ -174,6 +177,7 @@ const allowed = new Map([
 ]);
 const used = new Map([...allowed].map(([file]) => [file, new Set()]));
 const violations = [];
+const relativeFile = file => path.relative(root, file).split(path.sep).join('/');
 
 function filesAt(directory) {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
@@ -299,7 +303,7 @@ function location(file, sourceFile, call) {
 }
 
 function validateImperative(file, sourceFile, call, canonical, method, endpoint, classification) {
-  const relative = path.relative(root, file);
+  const relative = relativeFile(file);
   const spec = allowed.get(relative)?.get(classification);
   const prefix = location(file, sourceFile, call);
   if (!spec) {
@@ -331,7 +335,7 @@ function containingFunction(node) {
 const ownedReadUse = ownershipRegistry.map(spec => spec.reads.map(() => 0));
 
 function validateRegisteredRead(file, sourceFile, call, canonical, method, endpoint) {
-  const relative = path.relative(root, file);
+  const relative = relativeFile(file);
   const functionNode = containingFunction(call);
   const functionName = functionNode?.name?.text ?? null;
   for (let specIndex = 0; specIndex < ownershipRegistry.length; specIndex += 1) {
@@ -436,7 +440,7 @@ function withoutExtension(file) {
 
 function helperLocalNames(sourceFile, consumerFile, spec) {
   const names = new Set();
-  if (spec.file === path.relative(root, consumerFile)) names.add(spec.function);
+  if (spec.file === relativeFile(consumerFile)) names.add(spec.function);
   const specTarget = withoutExtension(path.resolve(root, spec.file));
   for (const statement of sourceFile.statements) {
     if (!ts.isImportDeclaration(statement) || !ts.isStringLiteralLike(statement.moduleSpecifier)) continue;
@@ -685,7 +689,7 @@ function isHelperDefinitionReference(node, names) {
 
 function rejectOutsideHelperReferences(spec, allowedReferences) {
   for (const file of filesAt(root)) {
-    const relative = path.relative(root, file);
+    const relative = relativeFile(file);
     const parsed = sourceFor(relative);
     if (!parsed) continue;
     const { sourceFile } = parsed;
