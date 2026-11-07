@@ -114,6 +114,8 @@ KNOWN=(
   "settings-talk-placement-route.test.ts :: DJ recap controls hydrate, save and display nested validation errors"
   "show-boundary-drain.test.ts :: a boundary cut is a plain crossfade — every gesture stands down"
   "skill-schema.test.ts :: the mirror carries the skill schema to the browser"
+  # Проверяет service worker из web/public/sw.js, которого в образе нет.
+  "sw-push-player.test.ts :: visible admin never suppresses chat push; visible player does, on Chromium and WebKit"
   "transition-effects.test.ts :: the admin form names the same six gestures the controller does"
   "${KNOWN_SRC[@]}"
 )

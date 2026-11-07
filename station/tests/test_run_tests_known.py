@@ -60,26 +60,29 @@ done
 
 # Ключи в формате, в каком их собирает failures(): «файл» или «файл :: тест».
 READS_ABSENT = "show-boundary-drain.test.ts :: a boundary cut is a plain crossfade — every gesture stands down"
+SW_PUSH = "sw-push-player.test.ts :: visible admin never suppresses chat push; visible player does, on Chromium and WebKit"
 NEIGHBOURS = [
     "show-boundary-drain.test.ts :: a re-drain takes a stale flag back off again",
     "transition-effects.test.ts :: the drain strips only the switched-off gesture, never its partner",
     "settings-talk-placement-route.test.ts :: GET /settings returns saved DJ behaviour for authoritative form hydration",
     "gemini-tts.test.ts :: gemini still reads the standard key, never the pool",
     "gemini-tts-settings.test.ts :: the real choices round-trip",
+    "sw-push-player.test.ts :: a new push regression",
 ]
 
 
 def test_image_run_knows_only_the_tests_that_read_absent_dirs(tmp_path):
-    got = _known(tmp_path, "-", [READS_ABSENT, "jingle-play.test.ts", "gen-schemas.test.ts", *NEIGHBOURS])
+    got = _known(tmp_path, "-", [READS_ABSENT, SW_PUSH, "jingle-play.test.ts", "gen-schemas.test.ts", *NEIGHBOURS])
     assert got[READS_ABSENT] and got["jingle-play.test.ts"] and got["gen-schemas.test.ts"]
+    assert got[SW_PUSH]
     assert [k for k in NEIGHBOURS if got[k]] == []
 
 
 def test_src_run_knows_only_what_the_image_lacks(tmp_path):
-    keys = ["gen-schemas.test.ts", "analyzer-python.test.ts", "jingle-play.test.ts", READS_ABSENT]
+    keys = ["gen-schemas.test.ts", "analyzer-python.test.ts", "jingle-play.test.ts", READS_ABSENT, SW_PUSH]
     got = _known(tmp_path, "/home/u/radio", keys)
     assert got == {"gen-schemas.test.ts": True, "analyzer-python.test.ts": True,
-                   "jingle-play.test.ts": False, READS_ABSENT: False}
+                   "jingle-play.test.ts": False, READS_ABSENT: False, SW_PUSH: False}
 
 
 def test_remote_watchdog_polls_proc_not_kill_0():
