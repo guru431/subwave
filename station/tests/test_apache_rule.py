@@ -30,7 +30,7 @@ docker-шлюза (Caddy не верит X-Forwarded-For от Apache). `requireA
   `MergeSlashes On` в vhost (`test_merge_slashes_explicit`);
 - несколько `Require` в секции без контейнера — неявный `<RequireAny>`:
   хватает одного выполненного;
-- провайдеры — только `ip` (сети IPv4/IPv6) и `method` (GET и HEAD для него
+- провайдеры — только `all denied`, `ip` (сети IPv4/IPv6) и `method` (GET и HEAD для него
   одно и то же); незнакомый провайдер роняет тест, а не пропускается;
 - путь, не совпавший ни с одной секцией, разрешён: авторизации на нём нет,
   так работает весь остальной vhost (`ProxyPass /` без `Require`);
@@ -56,6 +56,8 @@ CONTROLLER_SRC = REPO / "controller" / "src"
 EXTERNAL = "203.0.113.7"   # TEST-NET-3: клиент из интернета
 LAN = "10.20.30.40"        # клиент из приватной сети
 
+CLOSED_EVERYWHERE = ["/admin", "/Admin", "/admin/dash", "//admin", "///ADMIN//dash"]
+
 # Открытые ручки контроллера (без requireAdmin), которые снаружи не нужны
 # никому из слушателей и потому закрыты правилом вместе с прочим /api/*.
 NOT_FOR_LISTENERS = {
@@ -77,9 +79,6 @@ NOT_FOR_LISTENERS = {
 LISTENER_EXTRA = ["/persona-avatar/p_x1"]
 
 CLOSED_OUTSIDE = [
-    ("/admin", "GET"),
-    ("/Admin", "GET"),
-    ("/admin/dash", "GET"),
     ("/room/admin/dislikes", "GET"),
     ("/ROOM/admin", "GET"),
     ("/Room/Admin/dislikes/decide", "POST"),
@@ -110,7 +109,6 @@ CLOSED_OUTSIDE = [
     ("///API/stations", "GET"),
     ("//room/admin/dislikes", "GET"),
     ("/room//admin/dislikes", "GET"),
-    ("//admin", "GET"),
     ("//api/schedule", "PUT"),
 ]
 
@@ -176,6 +174,8 @@ SECTIONS = _sections()
 
 
 def _satisfied(provider: str, args: list[str], method: str, client: str) -> bool:
+    if provider == "all" and args == ["denied"]:
+        return False
     if provider == "ip":
         addr = ipaddress.ip_address(client)
         return any(addr in ipaddress.ip_network(a, strict=False) for a in args)
@@ -369,6 +369,12 @@ def test_closed_outside_open_from_lan(path, method):
     assert not allowed(path, method, EXTERNAL)
     assert allowed(path, method, LAN)
     assert allowed(path, method, "127.0.0.1")
+
+
+@pytest.mark.parametrize("path", CLOSED_EVERYWHERE)
+def test_public_admin_denied_for_every_client(path):
+    for client in (EXTERNAL, LAN, "127.0.0.1", "::1"):
+        assert not allowed(path, "GET", client)
 
 
 @pytest.mark.parametrize("path,method", OPEN_OUTSIDE)

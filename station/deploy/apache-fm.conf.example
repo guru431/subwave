@@ -94,7 +94,8 @@
     Header always set X-Robots-Tag "noindex, nofollow, noarchive"
 
     # ─── Снаружи — только плеер; всё правящее — из приватных сетей ────────────
-    # Закрыты /admin, /room/admin и ВЕСЬ /api/*, кроме белого списка ручек,
+    # /admin закрыт на публичном домене для всех: админка — на отдельном внутреннем vhost.
+    # Из приватных сетей доступны /room/admin и ВЕСЬ /api/*, кроме белого списка ручек,
     # которые зовут плеер web/ и приложение app/. Страницы web, поток и /room/*
     # (кроме /room/admin) открыты.
     #
@@ -122,7 +123,7 @@
     # с одной, и порядок слияния (AuthMerging) роли не играет.
     #
     # /room/admin — предложения блокировки по дизлайкам слушателей (station/room).
-    # Пароль там проверяет контроллер; это правило — второй рубеж, как у /admin.
+    # Пароль там проверяет контроллер; это правило — второй рубеж.
     #
     # Проверено по логам соседнего vhost: NAT отдаёт Apache реальный адрес
     # клиента из интернета, а запрос из дома по этому же имени приходит с
@@ -147,7 +148,10 @@
     # (^/+, room/+admin; лишний слэш после api/ в белый список не попадает и
     # закрыт). Оба рубежа проверяет station/tests/test_apache_rule.py.
     MergeSlashes On
-    <LocationMatch "(?i)^/+(admin|room/+admin|api/(?!(now-playing|state|session|health|dj|schedule|themes|request|request/[^/]+|like|beacon|onboarding/status|cover/[^/]+|persona-avatar/[^/]+|station-auth|listen\.(pls|m3u))$))">
+    <LocationMatch "(?i)^/+admin">
+        Require all denied
+    </LocationMatch>
+    <LocationMatch "(?i)^/+(room/+admin|api/(?!(now-playing|state|session|health|dj|schedule|themes|request|request/[^/]+|like|beacon|onboarding/status|cover/[^/]+|persona-avatar/[^/]+|station-auth|listen\.(pls|m3u))$))">
         Require ip 127.0.0.1 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
     </LocationMatch>
     <LocationMatch "(?i)^/+api/(schedule|themes)$">
