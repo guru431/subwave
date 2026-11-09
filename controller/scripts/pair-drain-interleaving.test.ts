@@ -2,11 +2,12 @@
 // the pair-drain deadline pick is waiting on asynchronous agent selection.
 //
 // This deliberately drives the production runTrackEvent -> pickViaAgent ->
-// runArtistGuard -> enqueuePick -> queue.push path. Only pickerAgent.run is
-// deferred and made deterministic, so no model, station, or credentials are
-// involved. The assertions characterize the current race without promising
-// that the captured pick-cycle anchor remains the FIFO predecessor: the real
-// queue order and the softer guard result stay visible for a separate fix.
+// runArtistGuard -> enqueuePick -> queue.push path. pickerAgent.run is
+// deferred and Navidrome returns an empty pool, so no model, station, or
+// credentials are involved. The assertions characterize the current race
+// without promising that the captured pick-cycle anchor remains the FIFO
+// predecessor: the real queue order and the softer guard result stay visible
+// for a separate fix.
 //
 // Run: npm test -- pair-drain-interleaving
 
@@ -14,10 +15,15 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import test, { after, before } from 'node:test';
+import test, { after, before, mock } from 'node:test';
 
 const stateRoot = mkdtempSync(join(tmpdir(), 'subwave-pair-drain-interleaving-'));
 process.env.STATE_DIR = stateRoot;
+process.env.NAVIDROME_URL = 'http://navidrome.test';
+process.env.NAVIDROME_USER = 'fixture';
+process.env.NAVIDROME_PASS = 'fixture';
+const navidrome = mock.method(globalThis, 'fetch', async () =>
+  Response.json({ 'subsonic-response': { status: 'ok' } }));
 
 const settings = await import('../src/settings.js');
 const library = await import('../src/music/library.js');
@@ -26,6 +32,7 @@ const { pickerAgent, runTrackEvent } = await import('../src/broadcast/dj-agent.j
 const session = await import('../src/broadcast/session.js');
 
 after(() => {
+  mock.restoreAll();
   const q = queue as any;
   if (q._persistTimer) clearTimeout(q._persistTimer);
   if (q._recentPlaysTimer) clearTimeout(q._recentPlaysTimer);
@@ -171,6 +178,7 @@ test('the event prompt names the captured anchor without claiming current adjace
 
 test('the interleaved Bill Evans request puts the candidate inside the artist window, and the empty pool rescue lets it stand', () => {
   assert.ok(observed);
+  assert.ok(navidrome.mock.callCount() > 0, 'the empty pool rescue was exercised');
   // Fork: the station's hours window (ArtistGuardDeps.windowRoots) is a hard
   // rule, so the queued request's artist sends this pick to the pool rescue
   // first; the empty test pool then relaxes it — the same repeat, named by the

@@ -7,7 +7,7 @@
 // could choose an artist already waiting to air — the repeat C08 exists to stop.
 //
 // Drives the production runTrackEvent -> pickViaAgent -> runArtistGuard path,
-// as pair-drain-interleaving.test.ts does; only pickerAgent.run is faked. The
+// as pair-drain-interleaving.test.ts does; the agent and Navidrome are faked. The
 // run surfaces no other artist and the test library is empty, so a guard that
 // fires ends in the logged relaxation — the line is the assertion.
 //
@@ -17,13 +17,15 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import test, { after, before } from 'node:test';
+import test, { after, before, mock } from 'node:test';
 
 process.env.STATE_DIR = mkdtempSync(join(tmpdir(), 'subwave-artist-window-deep-queue-'));
-// The pool rescue asks Navidrome for candidates: refuse at once, not on a timeout.
-process.env.NAVIDROME_URL = 'http://127.0.0.1:9';
+// Pool rescue still runs, but an empty response avoids transport retries.
+process.env.NAVIDROME_URL = 'http://navidrome.test';
 process.env.NAVIDROME_USER = 'fixture';
 process.env.NAVIDROME_PASS = 'fixture';
+const navidrome = mock.method(globalThis, 'fetch', async () =>
+  Response.json({ 'subsonic-response': { status: 'ok' } }));
 
 const settings = await import('../src/settings.js');
 const library = await import('../src/music/library.js');
@@ -36,6 +38,7 @@ q.persist = () => {};
 const realRun = (pickerAgent as any).run;
 
 after(() => {
+  mock.restoreAll();
   (pickerAgent as any).run = realRun;
   if (q._recentPlaysTimer) clearTimeout(q._recentPlaysTimer);
   library.shutdown();
@@ -54,6 +57,7 @@ const track = (id: string, artist: string) => ({ id, title: `Title ${id}`, artis
 // A ten-deep queue (queue.lookahead 10) whose FIRST item is by the artist the
 // agent is about to pick again.
 async function pickBehindDeepQueue(window: number) {
+  const callsBefore = navidrome.mock.callCount();
   await settings.update({ llm: { artistVarietyWindow: window } } as never);
   q.current = { track: track('on-air', 'Someone Else'), source: 'ai', startedAt: new Date().toISOString() };
   q.upcoming = [
@@ -78,6 +82,7 @@ async function pickBehindDeepQueue(window: number) {
   } finally {
     q.senderBusy = false;
   }
+  assert.ok(navidrome.mock.callCount() > callsBefore, 'the empty pool rescue was exercised');
   return queue.djLog.find(e => e.kind === 'picker' && e.message.includes('artist "Kate Bush"'))?.message ?? null;
 }
 

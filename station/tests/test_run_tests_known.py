@@ -4,6 +4,7 @@
 тестов, что гоняют код форка. Сопоставление проверяется самой функцией
 is_known из скрипта, через bash; имена тестов — по исходникам controller/scripts.
 """
+import os
 import re
 import shutil
 import subprocess
@@ -18,6 +19,10 @@ TESTS = REPO / "controller" / "scripts"
 
 
 def _bash():
+    if os.name == "nt":
+        git_bash = Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Git/bin/bash.exe"
+        if git_bash.is_file():
+            return str(git_bash)
     bash = shutil.which("bash")
     # System32\bash.exe — запуск WSL, а не оболочка этой машины.
     if not bash or "system32" in bash.lower():
@@ -147,3 +152,17 @@ def test_a_failure_the_parser_missed_is_a_new_failure(tmp_path):
 def test_two_failures_with_one_name_are_not_a_parser_miss(tmp_path):
     r = _summary(tmp_path, _log(2, MIRROR, MIRROR))
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_durations_use_seconds_and_do_not_repeat_failure_recap(tmp_path):
+    r = _summary(tmp_path,
+                 "✔ scripts/plain.test.ts (1234.5ms)\n"
+                 "  ✔ быстрый тест (0.25ms)\n"
+                 f"✖ {MIRROR} (2.5ms)\n" + _log(1, MIRROR))
+    assert r.returncode == 0, r.stdout + r.stderr
+    durations = [line for line in r.stdout.splitlines() if line.startswith("TESTS_DURATION ")]
+    assert durations == [
+        "TESTS_DURATION 1.234500s scripts/plain.test.ts",
+        "TESTS_DURATION 0.000250s быстрый тест",
+        f"TESTS_DURATION 0.002500s {MIRROR}",
+    ]

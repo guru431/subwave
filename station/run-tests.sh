@@ -221,6 +221,18 @@ is_known() {
 }
 count() { grep -m1 "^ℹ $1 " "$out" | awk '{print $3} END {if (NR == 0) print 0}'; }
 
+# Spec prints milliseconds per test (or per file for plain-script tests).
+# Stop before the failure recap, which repeats those same timings.
+LC_ALL=C awk '
+  /^✖ failing tests:/ { exit }
+  /^[[:space:]]*(✔|✖) .* \([0-9.]+ms\)$/ {
+    name = $0; sub(/^[[:space:]]*(✔|✖) /, "", name)
+    ms = name; sub(/.* \(/, "", ms); sub(/ms\)$/, "", ms)
+    sub(/ \([0-9.]+ms\)$/, "", name)
+    printf "TESTS_DURATION %.6fs %s\n", ms / 1000, name
+  }
+' "$out"
+
 new=(); known=0
 while IFS= read -r key; do
   [ -n "$key" ] || continue

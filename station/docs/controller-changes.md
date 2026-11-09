@@ -780,12 +780,15 @@ inside the artist window, and the empty pool rescue lets it stand» (было а
 идёт в пул, окно старше слотов; RED → GREEN при переносе),
 `scripts/artist-guard.test.ts` — ключи `artistWindowRoots` и `queuedArtistRoots` (вся
 очередь, голова тоже), `scripts/artist-window-deep-queue.test.ts` — настоящий путь
-`runTrackEvent` → `pickViaAgent` → `runArtistGuard` (подделан только
-`pickerAgent.run`): очередь из десяти, артист на первой позиции, окно слотов 5 и 0 —
-пик того же артиста попадает в окно (RED → GREEN: страж молчал, пик вставал в
+`runTrackEvent` → `pickViaAgent` → `runArtistGuard` (подменены `pickerAgent.run`
+и ответы Navidrome пустой библиотекой): очередь из десяти, артист на первой
+позиции; при окне слотов 5 и 0 пик того же артиста попадает в окно
+(RED → GREEN: страж молчал, пик вставал в
 очередь). При переносе —
 `run-tests.sh --src`, `artist-guard*`, `picker*`, `pair-drain*`, `album*`, `request*`
-(130/130).
+(130/130). В `artist-window-deep-queue` и `pair-drain-interleaving` настоящий
+резервный подбор вызывается и проверяется, но не делает сетевых попыток: тесты
+проверяют выбор и очередь, а не обработку недоступного Navidrome.
 
 ## Стык — прогноз часов и голос заранее
 
