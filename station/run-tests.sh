@@ -87,6 +87,8 @@ KNOWN=(
   "aio-analyzer-heavy.test.ts"
   "aio-analyzer-replicas.test.ts"
   "aio-log-link.test.ts"
+  # CLI sources are outside /app in the controller-only image; --src runs it.
+  "cli-operator.test.ts"
   "jingle-play.test.ts"
   "max-listeners.test.ts"
   "observatory-genres.test.ts"

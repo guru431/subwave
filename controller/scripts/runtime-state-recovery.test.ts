@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createServer } from 'node:http';
 import fsPromises from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 
-const localTmp = fileURLToPath(new URL('../../.tmp/', import.meta.url));
+const localTmp = tmpdir();
 mkdirSync(localTmp, { recursive: true });
 const state = mkdtempSync(join(localTmp, 'runtime-recovery-'));
 process.env.STATE_DIR = state;

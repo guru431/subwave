@@ -71,6 +71,8 @@ services:
       - /usr/share/ca-certificates:/usr/share/ca-certificates:ro
 
   broadcast:
+    image: subwave-broadcast:1.17.0-ru
+    pull_policy: never
     environment:
       SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
     volumes:
@@ -78,6 +80,8 @@ services:
       - /usr/share/ca-certificates:/usr/share/ca-certificates:ro
 
   analyzer:
+    image: subwave-analyzer${ANALYZER_HEAVY:+-heavy}:1.17.0-ru
+    pull_policy: never
     environment:
       SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
       # тяжёлый вариант (ANALYZER_HEAVY): transformers → huggingface_hub → certifi

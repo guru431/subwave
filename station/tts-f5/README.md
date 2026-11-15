@@ -138,19 +138,23 @@ GPU-платформы): среда `/opt/ai/venv/f5` (Python 3.12, пакеты
 ограничения, `f5-tts==1.1.22 --no-deps`), код — копия ревизии этого репозитория в
 `/opt/srvllm-services/radio/tts-f5` (ревизия — в `/opt/srvllm-services/radio/REVISION`), данные —
 `/opt/ai/data/tts/{models,ruaccent,voices,koziev,pronunciation}`. Жизнью службы ведает контроллер
-карты `srvllm-slots` (слот `tts`, резидент; его гасит только gemma4). Образа и сборки больше
+карты `srvllm-slots` (слот `tts`); актуальная политика резидентности и конфликтов задана
+в `llm_routers/srvllm/deploy/slots.json`. Образа и сборки больше
 нет: контейнеры шага `interim` удалены 2026-10-10, `f5-tts:local` остаётся лишь откатом до
 подпроекта 7 llm_routers.
 
 1. Выкатка ревизии — с <workstation>: `bash llm_routers/srvllm/deploy/push-radio.sh [ревизия]` (уезжает
-   только закоммиченное, `git archive`), затем `sudo systemctl restart srvllm-tts.service`
-   (вместе с мостиком — и `srvllm-tts-bridge`). Перезапуск того же юнита занимает ту же память
+   только закоммиченное, `git archive`), затем `remote.sh run tts --switch` из
+   `llm_routers/srvllm/deploy` — штатная установка, перезапуск F5 и мостика и проверка.
+   Перезапуск того же юнита занимает ту же память
    карты — контроллер видит обычный прогрев; модель грузится ~15 с. Новые зависимости — правка
    `requirements.txt` и `remote.sh run tts` в llm_routers.
 2. Аудит ударений — средой службы, от `aiservice`, на процессоре:
-   `sudo python3 /opt/srvllm-services/radio/tts-f5/tools/stress_corpus.py <state/logs стека станции> > /tmp/corpus.json`,
-   затем `sudo -u aiservice /opt/ai/venv/f5/bin/python /opt/srvllm-services/radio/tts-f5/tools/stress_audit.py /tmp/corpus.json /opt/ai/data/tts/ruaccent`.
-3. `tools/smoke.py --url http://localhost:4126 --voices /opt/ai/data/tts/voices`.
+   `sudo python3 /opt/srvllm-services/radio/tts-f5/tools/stress_corpus.py <state/logs стека станции> > <project-root>/.tmp/corpus.json`,
+   затем `sudo -u aiservice /opt/ai/venv/f5/bin/python /opt/srvllm-services/radio/tts-f5/tools/stress_audit.py <project-root>/.tmp/corpus.json /opt/ai/data/tts/ruaccent`.
+   Каталог `.tmp` проекта создаётся заранее.
+3. Проверки синтеза идут через мостик `:4124`, как в следующем пункте. Параллельные
+   прямые вызовы F5 `:4126` обходят очередь мостика и не используются.
    Пересборка словаря ударений (после обновления `accents.json.gz` RUAccent) — тоже с явным
    каталогом: умолчание `tools/accents_db.py` — раскладка gpu-host, на srvllm оно указало бы в
    `/opt/srvllm-services/radio/ruaccent`:
@@ -159,7 +163,8 @@ GPU-платформы): среда `/opt/ai/venv/f5` (Python 3.12, пакеты
 4. Приёмка — фразы через мостик `:4124`, распознавание — служба `asr` того же хоста
    (`:8000/v1/audio/transcriptions`, large-v3, `language=ru`) вместо whisper-small. С 2026-10-13
    `asr` — слот по требованию: до распознавания поднять его у контроллера
-   (`POST :8119/ensure-up?slot=asr`, клиентский токен; на время работы он снимает gemma4). Порог —
+   (`POST :8119/ensure-up?slot=asr`, клиентский токен), соблюдая его admission и leases.
+   После проверки освободить lease и восстановить прежний resident через контроллер. Порог —
    `check_speech.py` (40 % слов); прослушивание владельцем. Откат — `push-radio.sh` прежней
    ревизии и тот же рестарт.
 

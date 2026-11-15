@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
 import { mkdtempSync, mkdirSync, readdirSync, rmSync, readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const localTmp = fileURLToPath(new URL('../../.tmp/', import.meta.url));
+const localTmp = tmpdir();
 mkdirSync(localTmp, { recursive: true });
 const state = mkdtempSync(join(localTmp, 'jingle-write-failure-'));
 process.env.STATE_DIR = state;

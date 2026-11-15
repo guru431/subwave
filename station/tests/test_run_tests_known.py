@@ -77,17 +77,18 @@ NEIGHBOURS = [
 
 
 def test_image_run_knows_only_the_tests_that_read_absent_dirs(tmp_path):
-    got = _known(tmp_path, "-", [READS_ABSENT, SW_PUSH, "jingle-play.test.ts", "gen-schemas.test.ts", *NEIGHBOURS])
+    got = _known(tmp_path, "-", [READS_ABSENT, SW_PUSH, "jingle-play.test.ts", "gen-schemas.test.ts", "cli-operator.test.ts", *NEIGHBOURS])
     assert got[READS_ABSENT] and got["jingle-play.test.ts"] and got["gen-schemas.test.ts"]
     assert got[SW_PUSH]
+    assert got["cli-operator.test.ts"]
     assert [k for k in NEIGHBOURS if got[k]] == []
 
 
 def test_src_run_knows_only_what_the_image_lacks(tmp_path):
-    keys = ["gen-schemas.test.ts", "analyzer-python.test.ts", "jingle-play.test.ts", READS_ABSENT, SW_PUSH]
+    keys = ["gen-schemas.test.ts", "analyzer-python.test.ts", "jingle-play.test.ts", "cli-operator.test.ts", READS_ABSENT, SW_PUSH]
     got = _known(tmp_path, "/home/u/radio", keys)
     assert got == {"gen-schemas.test.ts": True, "analyzer-python.test.ts": True,
-                   "jingle-play.test.ts": False, READS_ABSENT: False, SW_PUSH: False}
+                   "jingle-play.test.ts": False, "cli-operator.test.ts": False, READS_ABSENT: False, SW_PUSH: False}
 
 
 def test_remote_watchdog_polls_proc_not_kill_0():
