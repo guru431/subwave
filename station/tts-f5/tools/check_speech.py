@@ -37,6 +37,9 @@ def flatness(x) -> float:
     """Спектральная плоскость — справочно, не критерий: у шума F5 23.09 было 0.31–0.41,
     у его речи 0.21–0.24, но у заведомо чистого Chatterbox она доходит до 0.35 (замер
     music-17 по ffmpeg aspectralstats). Решает только сверка слов."""
+    if len(x) < 1024:
+        # No complete analysis frame; zero padding would invent a spectrum.
+        return float("nan")
     frames = x[: len(x) // 1024 * 1024].reshape(-1, 1024) * np.hanning(1024)
     spec = np.abs(np.fft.rfft(frames, axis=1)) + 1e-9
     return float(np.median(np.exp(np.mean(np.log(spec), axis=1)) / np.mean(spec, axis=1)))
@@ -49,6 +52,8 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8")
     x, sr = load(a.wav)
+    if len(x) < 1024:
+        raise SystemExit(f"{a.wav}: файл слишком короткий для проверки речи (меньше 1024 сэмплов)")
     from transformers import pipeline
     asr = pipeline("automatic-speech-recognition", model="openai/whisper-small", device="cpu")
     heard = asr({"array": x, "sampling_rate": sr},

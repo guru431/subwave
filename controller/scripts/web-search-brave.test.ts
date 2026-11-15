@@ -67,6 +67,11 @@ async function main() {
     }
   });
 
+  await test('nested entities decode only once and decimal entities stay decimal', () => {
+    const out = parseBraveResponse({ web: { results: [{ title: 'Fixture', description: '&amp;lt; &amp;amp; &amp;#39; &#39; &#x27; &#12ab;' }] } });
+    assert.equal(out.results[0].content, "&lt; &amp; &#39; ' ' &#12ab;");
+  });
+
   await test('results without a description are skipped', () => {
     const out = parseBraveResponse(fixture('brave-artist.json'));
     assert.ok(

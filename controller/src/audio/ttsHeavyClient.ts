@@ -182,6 +182,7 @@ export async function speakRemote(req: RemoteSpeakRequest): Promise<string> {
       out: req.out,
     }),
     timeoutMs: config.ttsHeavy.requestTimeoutMs,
+    bodyDeadline: true,
   });
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');

@@ -7,6 +7,8 @@ set -euo pipefail
 DIR=${1:?usage: prepare-playlist-mixer.sh NEW_DISPOSABLE_DIRECTORY}
 [ ! -e "$DIR" ] || { echo 'Refusing to overwrite an existing directory' >&2; exit 1; }
 mkdir -p "$DIR/image" "$DIR/rootfs"
+chmod 700 "$DIR"
+touch "$DIR/.subwave-1729-disposable"
 IMAGE=ghcr.io/perminder-klair/subwave-broadcast@sha256:d08a424b024914b1dce1441584ecdae1fb2831ddacaed21208ce8888c75d36fb
 skopeo copy --override-arch amd64 "docker://$IMAGE" "dir:$DIR/image"
 python3 - "$DIR" <<'PY'
@@ -21,9 +23,14 @@ for layer in json.loads((base / 'image/manifest.json').read_text())['layers']:
         for item in tar:
             p = pathlib.PurePosixPath(item.name)
             if p.name.startswith('.wh.'):
+                if p.is_absolute() or '..' in p.parts or p.name[4:] in ('', '.', '..'):
+                    raise ValueError(f'Unsafe OCI whiteout: {item.name}')
                 target = root / p.parent / p.name[4:]
+                parent = (root / p.parent).resolve()
+                if not parent.is_relative_to(root) or not target.resolve().is_relative_to(root):
+                    raise ValueError(f'OCI whiteout escapes rootfs: {item.name}')
                 if p.name == '.wh..wh..opq':
-                    for child in (root / p.parent).glob('*'):
+                    for child in parent.glob('*'):
                         subprocess.run(['sudo', '-n', 'rm', '-rf', str(child)], check=True)
                 else:
                     subprocess.run(['sudo', '-n', 'rm', '-rf', str(target)], check=True)
@@ -38,6 +45,8 @@ sudo -n mknod -m 666 "$ROOT/dev/urandom" c 1 9
 printf '127.0.0.1 localhost %s\n' "$(hostname)" | sudo -n tee "$ROOT/etc/hosts" >/dev/null
 sudo -n sed -i 's/bind_addr := "0.0.0.0"/bind_addr := "127.0.0.1"/' "$ROOT/etc/liquidsoap/radio.liq"
 sudo -n sed -i '/<port>7702<\/port>/a\        <bind-address>127.0.0.1</bind-address>' "$ROOT/etc/icecast2/icecast.xml.template"
+sudo -n grep -Fq 'bind_addr := "127.0.0.1"' "$ROOT/etc/liquidsoap/radio.liq" || { echo 'Loopback telnet binding was not applied' >&2; exit 1; }
+sudo -n grep -Fq '<bind-address>127.0.0.1</bind-address>' "$ROOT/etc/icecast2/icecast.xml.template" || { echo 'Loopback Icecast binding was not applied' >&2; exit 1; }
 sudo -n touch "$ROOT/.subwave-1729-disposable"
 sudo -n chroot "$ROOT" /usr/bin/liquidsoap --version
 printf '\nRun from the controller directory (requires host ffmpeg):\nSUBWAVE_MIXER_ROOTFS=%q npx tsx scripts/auto-playlist-mixer.ts\n' "$ROOT"

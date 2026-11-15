@@ -219,19 +219,23 @@ def build_dictionary_db(workdir) -> Path:
 
 
 def _hide_phrases(text):
-    """Сочетания из PHRASE_STRESS → по символу Private Use Area; размеченные — в список."""
-    marked = []
+    """Сочетания → свободные символы PUA; карта возвращает каждому его ударения."""
+    marked = {}
+    slots = (chr(i) for i in range(_PHRASE_SLOT, 0xF900) if chr(i) not in text)
 
     def hide(m):
-        marked.append(_restore_case(m.group(), PHRASE_STRESS[m.group().lower()]))
-        return chr(_PHRASE_SLOT + len(marked) - 1)
+        slot = next(slots, None)
+        if slot is None:
+            return m.group()  # Exhausted PUA: preserve the input verbatim.
+        marked[slot] = _restore_case(m.group(), PHRASE_STRESS[m.group().lower()])
+        return slot
 
     return _PHRASE.sub(hide, text), marked
 
 
 def _show_phrases(text, marked):
-    for i, phrase in enumerate(marked):
-        text = text.replace(chr(_PHRASE_SLOT + i), phrase)
+    for slot, phrase in marked.items():
+        text = text.replace(slot, phrase)
     return text
 
 

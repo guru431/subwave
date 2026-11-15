@@ -5,7 +5,7 @@ import express from 'express';
 import { requireAdmin } from '../middleware/auth.js';
 import { recentCalls, generationHealthSnapshot } from '../llm/log.js';
 import * as llmProvider from '../llm/provider.js';
-import * as settings from '../settings.js';
+import { agentDeadline } from '../broadcast/dj-agent/breaker.js';
 import { ttsCalls, summarizeLlm, summarizeTts, summarizeDjLog, summarizeRequests } from '../stats.js';
 import { queue } from '../broadcast/queue.js';
 import { recentRequests } from '../broadcast/request-log.js';
@@ -18,9 +18,9 @@ router.get('/stats', requireAdmin, (req, res) => {
     const llm: any = summarizeLlm(recentCalls);
     llm.provider = llmProvider.providerName();
     llm.activeModel = llmProvider.activeModelLabel();
-    // Mirror of agentDeadline() in broadcast/dj-agent.ts — the dash anchors its
+    // The dash anchors its
     // latency redline to it, so "red" means "hitting the pool-picker fallback".
-    llm.agentTimeoutMs = settings.get().llm?.agentTimeoutMs ?? 45000;
+    llm.agentTimeoutMs = agentDeadline();
     // Durable per-UTC-day tally, unlike the rings above. enabled:false with no cap.
     llm.budget = budgetStatus();
     llm.generation = generationHealthSnapshot();

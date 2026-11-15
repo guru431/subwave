@@ -8,10 +8,10 @@ import { CLI_VERSION } from './assets.ts';
 // publish-images.yml tags images with bare semver (git `v0.35.0` → image
 // `0.35.0`), which is what CLI_VERSION holds. Anything that doesn't look like a
 // published release returns null so the caller stays on :latest.
-export function cliImageTag(): string | null {
-  const v = CLI_VERSION.trim().replace(/^v/, '');
-  if (!/^\d+\.\d+\.\d+/.test(v)) return null;
-  if (v === '0.0.0' || v.startsWith('0.0.0-')) return null;
+export function cliImageTag(version: string = CLI_VERSION): string | null {
+  const v = version.trim().replace(/^v/, '');
+  if (!/^\d+\.\d+\.\d+$/.test(v)) return null;
+  if (v === '0.0.0') return null;
   return v;
 }
 

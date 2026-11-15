@@ -99,10 +99,18 @@ export default function ObservatoryApp({ adminFetch }: { adminFetch: AdminFetch 
   // useObservatory then omits ?max=.
   const [maxNodes, setMaxNodes] = useState<number | null>(() => {
     if (typeof window === 'undefined') return null;
-    const stored = Number(window.localStorage.getItem(MAX_STORAGE_KEY));
-    return Number.isFinite(stored) && stored > 0 ? stored : null;
+    try {
+      const stored = Number(window.localStorage.getItem(MAX_STORAGE_KEY));
+      return Number.isFinite(stored) && stored > 0 ? stored : null;
+    } catch { return null; }
   });
   const { data: lib, loading, error, reload } = useObservatory(adminFetch, true, maxNodes);
+  useEffect(() => {
+    if (!lib || lib.mock || maxNodes == null || maxNodes <= lib.hardMax) return;
+    setMaxNodes(lib.hardMax);
+    try { window.localStorage.setItem(MAX_STORAGE_KEY, String(lib.hardMax)); }
+    catch { /* The in-memory cap still follows the server. */ }
+  }, [lib, maxNodes]);
   const { detail, loadingId, fetchDetail } = useTrackDetail(adminFetch);
 
   const [q, setQ] = useState('');
@@ -361,7 +369,7 @@ export default function ObservatoryApp({ adminFetch }: { adminFetch: AdminFetch 
 
   // The ladder up to the server's hardMax, plus the current value.
   const hardMax = lib?.hardMax ?? 50000;
-  const effectiveMax = maxNodes ?? lib?.max ?? DEFAULT_MAX;
+  const effectiveMax = Math.min(maxNodes ?? lib?.max ?? DEFAULT_MAX, hardMax);
   const maxOptions = Array.from(new Set([...MAX_LADDER.filter((n) => n <= hardMax), effectiveMax])).sort(
     (a, b) => a - b,
   );

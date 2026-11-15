@@ -313,7 +313,9 @@ export function endingCrossSecondsFor(
     const barSec = (4 * 60) / endingTimingBpm;
     const bars = Math.max(1, Math.round(secs / barSec));
     const snapped = bars * barSec;
-    if (snapped >= 3 && snapped <= 14) secs = snapped;
+    // Keep normal bar alignment (e.g. 4.8s at 100 BPM), but a very slow
+    // single bar must not turn a cold cut into the fade's long overlap.
+    if (snapped >= 3 && snapped <= (ending === 'cold' ? 6 : 14)) secs = snapped;
   }
   secs = Math.max(Math.min(3, ceil), Math.min(ceil, secs));
   return Math.round(secs * 10) / 10;

@@ -238,7 +238,7 @@ export default function DebugPanel() {
             </Card>
           )}
 
-          <Card title="DJ log" sub={`${data.queue?.djLogCount} total · last 30${data.timezone ? ` · times in ${data.timezone}` : ''}`}>
+          <Card title="DJ log" sub={`${data.queue?.djLogCount ?? 0} total · last 30${data.timezone ? ` · times in ${data.timezone}` : ''}`}>
             <ScrollArea className="max-h-72">
               <div className="grid gap-1">
                 <AnimatePresence initial={false} mode="popLayout">

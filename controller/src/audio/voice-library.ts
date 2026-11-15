@@ -14,6 +14,7 @@
 import { readdir, stat, unlink, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { config } from '../config.js';
+import { writeFileAtomic } from '../util/atomic-file.js';
 import { slugify } from '../util/slug.js';
 import { uniqueFilename } from '../personas/bundle-pure.js';
 import { TTS_CHATTERBOX_VOICE_RE } from '../schemas/persona.js';
@@ -289,7 +290,7 @@ export async function adoptVoice(
   const dir = config.voices.dir;
   await mkdir(dir, { recursive: true });
   const outPath = path.join(dir, name);
-  await writeFile(outPath, buffer);
+  await writeFileAtomic(outPath, buffer);
 
   const durationSec = await probeDurationSec(outPath);
   const s = await stat(outPath);

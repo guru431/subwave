@@ -136,12 +136,16 @@ def _log(fail: int, *entries: str) -> str:
             f"✖ failing tests:\n\n{failing}")
 
 
+# Each end-to-end summary launches the real Bash parser and its subprocesses;
+# on Windows this takes over one second, so these belong to the full level.
+@pytest.mark.integration
 def test_summary_with_only_known_failures_passes(tmp_path):
     r = _summary(tmp_path, _log(1, MIRROR))
     assert r.returncode == 0, r.stdout + r.stderr
     assert "TESTS_RESULT pass=29 fail=0 skip=1" in r.stdout
 
 
+@pytest.mark.integration
 def test_a_failure_the_parser_missed_is_a_new_failure(tmp_path):
     # ℹ fail 2, а в списке одна строка: второе падение разбор не узнал.
     r = _summary(tmp_path, _log(2, MIRROR))
@@ -149,11 +153,13 @@ def test_a_failure_the_parser_missed_is_a_new_failure(tmp_path):
     assert "ℹ fail 2" in r.stdout and "TESTS_RESULT pass=28 fail=1" in r.stdout
 
 
+@pytest.mark.integration
 def test_two_failures_with_one_name_are_not_a_parser_miss(tmp_path):
     r = _summary(tmp_path, _log(2, MIRROR, MIRROR))
     assert r.returncode == 0, r.stdout + r.stderr
 
 
+@pytest.mark.integration
 def test_durations_use_seconds_and_do_not_repeat_failure_recap(tmp_path):
     r = _summary(tmp_path,
                  "✔ scripts/plain.test.ts (1234.5ms)\n"

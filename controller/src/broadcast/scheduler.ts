@@ -431,7 +431,7 @@ async function refreshAutoPlaylistInner(canPublish: () => boolean): Promise<Refr
   // loudness gain (same resolver, so both paths level identically), the
   // max-track cue_out cap (#447) and the silence trim (music/silence-trim.ts).
   // No loudness / off / unmeasured → no stamp → unity and an untouched entry.
-  for (const t of pool) await queue.applyLoudnessGain(t);
+  await mapPool(pool, 4, t => queue.applyLoudnessGain(t));
 
   const lines = ['#EXTM3U', ...pool.map((t: any) => {
     const trim = silenceTrim.resolveSilenceTrim(t);

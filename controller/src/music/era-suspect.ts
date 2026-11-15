@@ -61,7 +61,8 @@ function leadArtistProfile(artists: Array<string | null | undefined>): { leads: 
   const counts = new Map<string, number>();
   let tracks = 0;
   for (const raw of artists) {
-    const key = artistRootKey(String(raw ?? '')) || '(unknown)';
+    const key = artistRootKey(String(raw ?? ''));
+    if (!key) continue;
     counts.set(key, (counts.get(key) ?? 0) + 1);
     tracks += 1;
   }

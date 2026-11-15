@@ -60,6 +60,7 @@ const SQL_TAIL_GRID = (t: string) => `
              AND COALESCE(${t}.duration_sec, 0) > 0
         THEN (CASE WHEN COALESCE(json_array_length(${t}.outro_json, '$.bars'), 0) > 0
                     AND json_extract(${t}.outro_json, '$.ending') IN ('fade','cold')
+                    AND json_type(${t}.outro_json, '$.startMs') IN ('integer','real')
                     AND COALESCE(json_extract(${t}.outro_json, '$.startMs'), -1) >= 0
                    THEN 1 ELSE 0 END)
         ELSE 0 END)`;
@@ -249,8 +250,8 @@ function outroTailBars(s: string | null): boolean {
     const v = JSON.parse(s) as Record<string, unknown>;
     if (!Array.isArray(v?.bars) || v.bars.length === 0) return false;
     if (v.ending !== 'fade' && v.ending !== 'cold') return false;
-    const startMs = Number(v.startMs);
-    return Number.isFinite(startMs) && startMs >= 0;
+    const startMs = v.startMs;
+    return typeof startMs === 'number' && Number.isFinite(startMs) && startMs >= 0;
   } catch {
     return false;
   }

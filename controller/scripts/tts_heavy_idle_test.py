@@ -240,6 +240,24 @@ def main():
 
 
 def _cases():
+    async def case_pipe_dies_mid_request():
+        worker = make_worker()
+        worker.ready = True
+        worker.proc = FakeProc()
+
+        def broken_write(_data):
+            raise BrokenPipeError("fixture pipe closed")
+
+        worker.proc.stdin.write = broken_write
+        try:
+            await worker.request({"text": "hello"})
+        except RuntimeError as error:
+            assert "worker died mid-request" in str(error)
+            assert not worker.ready
+        else:
+            raise AssertionError("closed stdin must report worker unavailability")
+
+    test("stdin death is worker unavailability", lambda: run_async(case_pipe_dies_mid_request()))
     # --- window resolution --------------------------------------------------
     def case_per_engine_env_beats_shared():
         os.environ["TTS_HEAVY_IDLE_UNLOAD_S"] = "900"

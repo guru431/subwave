@@ -20,16 +20,20 @@ COMPOSE=(docker compose "${COMPOSE_ARGS[@]}")
 # services. Detect the file the running containers were launched from (the
 # com.docker.compose.project.config_files label, same signal cli/src/compose.ts
 # reads) and bail if it disagrees. Nothing running means nothing to protect.
-SELECTED_ABS="$(cd "$(dirname "${COMPOSE_FILES[0]}")" && pwd)/$(basename "${COMPOSE_FILES[0]}")"
+SELECTED_ABS=""
+for compose_file in "${COMPOSE_FILES[@]}"; do
+  absolute="$(cd "$(dirname "$compose_file")" && pwd)/$(basename "$compose_file")"
+  SELECTED_ABS="${SELECTED_ABS:+$SELECTED_ABS,}$absolute"
+done
 RUNNING_IDS="$("${COMPOSE[@]}" ps -q 2>/dev/null || true)"
 if [ -n "$RUNNING_IDS" ]; then
   ACTIVE_CFG=""
   for id in $RUNNING_IDS; do
-    # config_files can be a comma-separated list if the operator stacked -f
-    # flags; the first entry is the primary file.
+    # config_files records every -f in merge order. Both contents and order
+    # matter: an override can add/remove services.
     ACTIVE_CFG="$(docker inspect \
       --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' \
-      "$id" 2>/dev/null | cut -d, -f1)"
+      "$id" 2>/dev/null)"
     [ -n "$ACTIVE_CFG" ] && break
   done
   if [ -n "$ACTIVE_CFG" ] && [ "$ACTIVE_CFG" != "$SELECTED_ABS" ]; then

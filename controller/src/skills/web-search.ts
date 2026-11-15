@@ -262,17 +262,17 @@ function braveText(raw: unknown): string {
   if (typeof raw !== 'string') return '';
   return raw
     .replace(/<[^>]+>/g, '')
-    .replace(/&#(x?)([0-9a-fA-F]+);/g, (whole, x: string, digits: string) => {
-      const code = parseInt(digits, x ? 16 : 10);
+    .replace(/&(?:#(x[0-9a-f]+|[0-9]+)|amp|lt|gt|quot|apos);/gi, (whole, numeric: string | undefined) => {
+      if (numeric == null) {
+        const named: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'" };
+        return named[whole.toLowerCase()] ?? whole;
+      }
+      const code = parseInt(numeric.startsWith('x') || numeric.startsWith('X') ? numeric.slice(1) : numeric,
+        /^[xX]/.test(numeric) ? 16 : 10);
       return Number.isFinite(code) && code > 0 && code <= 0x10ffff
         ? String.fromCodePoint(code)
         : whole;
     })
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'")
     .trim();
 }
 

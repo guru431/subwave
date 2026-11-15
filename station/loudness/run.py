@@ -21,6 +21,7 @@
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -75,6 +76,8 @@ def load_config(environ=os.environ, env_file: Path = ENV_FILE) -> dict[str, str]
     if missing:
         raise SystemExit(f"не заданы {', '.join(missing)}: окружение или {env_file} "
                          f"(шаблон — station/.env.example)")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]*@[^\s]+", values["STATION_SSH"]):
+        raise SystemExit("STATION_SSH должен иметь формат user@host")
     return {k: values[k] for k in KEYS}
 
 
@@ -106,7 +109,10 @@ def _last_json(out: str) -> dict:
     lines = [ln for ln in out.splitlines() if ln.strip().startswith("{")]
     if not lines:
         raise SystemExit(f"скрипт не вернул итог: {out.strip()[-300:]}")
-    return json.loads(lines[-1])
+    try:
+        return json.loads(lines[-1])
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"итог не разобрать: {out.strip()[-300:]}") from exc
 
 
 def run(cfg: dict, dry_run: bool = False, workers: int = 8, runner=_run,

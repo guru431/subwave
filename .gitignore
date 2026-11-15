@@ -27,6 +27,10 @@ cli/dist/
 # Runtime state — file-based IPC, TTS output, archives, logs
 state/
 
+# Project-local task artifacts, verification logs and caches
+/.tmp/
+/output/
+
 # Claude Code worktrees + local runtime files
 .claude/worktrees/
 .claude/scheduled_tasks.lock

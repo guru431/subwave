@@ -353,10 +353,17 @@ function startWorker(): Promise<void> {
       if (t) console.error(`[analyze] ${t}`);
     });
     p.on('exit', (code) => {
+      clearTimeout(readyTimer);
       ready = false; proc = null; booting = null;
       const err = new Error(`analyze worker exited (${code})`);
+      reject(err);
       for (const { reject: rej, timer } of pending.values()) { clearTimeout(timer); rej(err); }
       pending.clear();
+    });
+    p.on('error', (err) => {
+      clearTimeout(readyTimer);
+      ready = false; proc = null; booting = null;
+      reject(err);
     });
   });
   return booting;
@@ -732,6 +739,7 @@ export async function embedTexts(
   const backend = await resolveBackend();
   if (!backend) return null;
   if (backend === 'sidecar' && _sidecarTextCapable === false) return null;
+  if (backend === 'local' && _localTextCapable === false) return null;
   const attempt = async (): Promise<number[][] | null> => {
     if (backend === 'sidecar') {
       const res = await fetchWithTimeout(`${_sidecarBase}/embed-text`, {
@@ -748,6 +756,7 @@ export async function embedTexts(
       return body?.ok ? parseVectors(body.embeddings, texts.length) : null;
     }
     if (!ready) await startWorker();
+    if (_localTextCapable === false) return null;
     return await localEmbedTexts(texts, timeoutMs);
   };
   try {

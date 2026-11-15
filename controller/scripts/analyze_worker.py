@@ -1428,8 +1428,12 @@ def write_stems(stems, window, dest_dir):
     for name, data in stems.items():
         path = os.path.join(dest_dir, f"{window}-{name}.flac")
         tmp = path + ".tmp"
-        sf.write(tmp, data.T, DEMUCS_SR, subtype="PCM_16", format="FLAC")
-        os.replace(tmp, path)
+        try:
+            sf.write(tmp, data.T, DEMUCS_SR, subtype="PCM_16", format="FLAC")
+            os.replace(tmp, path)
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
 
 
 def write_tail_meta(dest_dir, tail_start_s, duration_s):
@@ -1441,12 +1445,16 @@ def write_tail_meta(dest_dir, tail_start_s, duration_s):
     the stems and a render without it is a clean cache miss."""
     path = os.path.join(dest_dir, "tail-meta.json")
     tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump({
-            "tail_start_sec": round(float(tail_start_s), 3),
-            "duration_sec": round(float(duration_s), 3),
-        }, f)
-    os.replace(tmp, path)
+    try:
+        with open(tmp, "w") as f:
+            json.dump({
+                "tail_start_sec": round(float(tail_start_s), 3),
+                "duration_sec": round(float(duration_s), 3),
+            }, f)
+        os.replace(tmp, path)
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
 
 
 def render_transition(req):

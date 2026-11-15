@@ -148,6 +148,8 @@ async function main() {
     { id: 'malformed',      bars: '{oh no',  outro: 'not json at all',       duration: 200 },
     { id: 'bad-ending',     bars,       outro: outro({ ending: 'wobble' }),  duration: 200 },
     { id: 'bad-start',      bars,       outro: outro({ startMs: -1 }),       duration: 200 },
+    { id: 'text-start',     bars,       outro: outro({ startMs: 'abc' }),    duration: 200 },
+    { id: 'null-start',     bars,       outro: outro({ startMs: null }),     duration: 200 },
     { id: 'no-duration',    bars,       outro: outro(),                      duration: 0 },
     { id: 'hot',            bars,       outro: outro(),                      duration: 200 },
     { id: 'stale',          bars,       outro: outro(),                      duration: 200 },
@@ -203,6 +205,8 @@ async function main() {
     assert.equal(sides('malformed'), 0, 'a malformed column must not throw the scan');
     assert.equal(sides('bad-ending'), 1, 'parseOutroJson rejects the outro, so head only');
     assert.equal(sides('bad-start'), 1, 'same — a negative startMs is not an outro');
+    assert.equal(sides('text-start'), 1, 'text is not an outro timestamp');
+    assert.equal(sides('null-start'), 1, 'null is not an outro timestamp');
     assert.equal(sides('no-duration'), 1, 'stem-blend needs out.durationSec for the tail side');
   });
 

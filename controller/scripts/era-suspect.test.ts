@@ -111,6 +111,11 @@ test('FOUR leads is below the floor, five clears it', () => {
   assert.equal(albumEraSuspect({ year: 2012, trackArtists: manyLeads(5).concat(manyLeads(5)) }).suspect, true);
 });
 
+test('missing artist tags do not invent a fifth lead or dilute the dominant artist', () => {
+  assert.equal(albumEraSuspect({ trackArtists: ['A', 'A', 'B', 'B', 'C', 'C', 'D', 'D', '', null] }).suspect, false);
+  assert.equal(albumEraSuspect({ trackArtists: ['A', 'A', 'A', 'B', 'C', 'D', 'E', 'F', '', ''] }).suspect, false);
+});
+
 test('a title that SAYS it is a collection fires on its own', () => {
   // Catches the single-artist "Best of", which no artist-count signal can see.
   for (const t of ['The Collection', 'Kaun Nachdi (The Ultimate Collection)',

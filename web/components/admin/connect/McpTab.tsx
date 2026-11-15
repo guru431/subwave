@@ -26,12 +26,6 @@ interface Props {
 export default function McpTab({ catalog }: Props) {
   const mcpUrl = `${catalog.apiBase}${catalog.mcpHttpPath}`;
 
-  const httpCmd = [
-    'claude mcp add --transport http subwave \\',
-    `  ${mcpUrl} \\`,
-    '  --header "Authorization: Basic $(printf \'%s\' "$ADMIN_USER:$ADMIN_PASS" | base64)"',
-  ].join('\n');
-
   const httpJson = JSON.stringify(
     {
       mcpServers: {
@@ -46,13 +40,19 @@ export default function McpTab({ catalog }: Props) {
     2,
   );
 
-  const stdioCmd = [
-    'claude mcp add subwave \\',
-    '  --env SUBWAVE_API_URL=http://localhost:7701 \\',
-    '  --env SUBWAVE_ADMIN_USER=$ADMIN_USER \\',
-    '  --env SUBWAVE_ADMIN_PASS=$ADMIN_PASS \\',
-    '  -- npx tsx /absolute/path/to/subwave/mcp-subwave/src/index.ts',
-  ].join('\n');
+  const stdioJson = JSON.stringify({
+    mcpServers: {
+      subwave: {
+        command: 'npx',
+        args: ['tsx', '/absolute/path/to/subwave/mcp-subwave/src/index.ts'],
+        env: {
+          SUBWAVE_API_URL: 'http://localhost:7701',
+          SUBWAVE_ADMIN_USER: '<admin user>',
+          SUBWAVE_ADMIN_PASS: '<admin password>',
+        },
+      },
+    },
+  }, null, 2);
 
   return (
     <div className="grid gap-4">
@@ -77,19 +77,20 @@ export default function McpTab({ catalog }: Props) {
         </Snippet>
       </Card>
 
-      <Card title="Claude Code (HTTP)" sub="Recommended — connect with a URL">
-        <CommandBlock code={httpCmd} language="bash" />
-      </Card>
-
-      <Card title="Claude Desktop (HTTP)" sub="Add to claude_desktop_config.json">
+      <Card title="Claude Code / Claude Desktop (HTTP)" sub="Recommended — add to your client's private user configuration">
+        <p className="mb-2 text-[11px] leading-[1.6] text-muted">
+          Enter the authorization value in the configuration file. Keep it out of
+          version control and restrict access to your user account.
+        </p>
         <CommandBlock code={httpJson} language="json" />
       </Card>
 
       <Card title="Local stdio server" sub="Alternative — runs from a repo clone, no HTTP port exposed">
         <div className="mb-2 text-[11px] leading-[1.6] text-muted">
           Runs the standalone server via <code>tsx</code> straight from the clone (no build step).
+          {' '}Add this entry to the same private user configuration and enter credentials there.
         </div>
-        <CommandBlock code={stdioCmd} language="bash" />
+        <CommandBlock code={stdioJson} language="json" />
       </Card>
 
       <Card title={`Tools (${catalog.mcpTools.length})`}>

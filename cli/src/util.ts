@@ -36,14 +36,20 @@ export function have(bin: string): boolean {
   return spawnSync('which', [bin], { stdio: 'ignore' }).status === 0;
 }
 
-// Best-effort — false if the platform opener can't be spawned.
+// Best effort: validate the URL and tolerate unavailable desktop openers.
 export function openUrl(url: string): boolean {
+  try {
+    if (!['http:', 'https:'].includes(new URL(url).protocol)) return false;
+  } catch {
+    return false;
+  }
   const [cmd, args]: [string, string[]] =
     process.platform === 'darwin' ? ['open', [url]]
-    : process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
+    : process.platform === 'win32' ? ['rundll32.exe', ['url.dll,FileProtocolHandler', url]]
     : ['xdg-open', [url]];
   try {
     const child = spawn(cmd, args, { stdio: 'ignore', detached: true });
+    child.on('error', () => {}); // Best effort: a missing desktop opener is harmless.
     child.unref();
     return true;
   } catch {

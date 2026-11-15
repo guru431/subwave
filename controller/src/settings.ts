@@ -1717,7 +1717,10 @@ export async function update(patch) {
       next.tts.enabled = t.enabled;
     }
     if (t.fallback !== undefined) {
-      const fb = t.fallback || {};
+      if (t.fallback === null || typeof t.fallback !== 'object' || Array.isArray(t.fallback)) {
+        throw new Error('tts.fallback must be an object');
+      }
+      const fb = t.fallback;
       if (fb.enabled !== undefined && typeof fb.enabled !== 'boolean') {
         throw new Error('tts.fallback.enabled must be a boolean');
       }
@@ -2025,7 +2028,9 @@ export async function update(patch) {
       next.llm.requestTimeoutMs = clampRequestTimeout(numeric, next.llm.requestTimeoutMs);
     }
     if (l.agentTimeoutMs !== undefined) {
-      next.llm.agentTimeoutMs = clampAgentTimeout(Number(l.agentTimeoutMs), next.llm.agentTimeoutMs);
+      const raw: unknown = l.agentTimeoutMs;
+      const numeric = typeof raw === 'number' || (typeof raw === 'string' && raw.trim() !== '') ? Number(raw) : NaN;
+      next.llm.agentTimeoutMs = clampAgentTimeout(numeric, next.llm.agentTimeoutMs);
     }
     if (l.pauseWhenEmpty !== undefined) {
       next.llm.pauseWhenEmpty = !!l.pauseWhenEmpty;

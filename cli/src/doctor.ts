@@ -392,6 +392,14 @@ function checkState(): Finding[] {
 
 function checkContent(): Finding[] {
   const out: Finding[] = [];
+  const readPlaylist = (path: string, label: string): string[] | null => {
+    try {
+      return readFileSync(path, 'utf8').split('\n').filter((l) => l.trim() && !l.startsWith('#'));
+    } catch (e) {
+      out.push({ label, status: 'warn', detail: `unreadable — ${(e as Error).message}` });
+      return null;
+    }
+  };
 
   const autoPath = resolve(getStateDir(), 'auto.m3u');
   if (!existsSync(autoPath)) {
@@ -401,15 +409,15 @@ function checkContent(): Finding[] {
       detail: 'missing — controller writes this on first auto-refresh',
     });
   } else {
-    const lines = readFileSync(autoPath, 'utf8').split('\n').filter((l) => l.trim() && !l.startsWith('#'));
-    if (lines.length === 0) {
+    const lines = readPlaylist(autoPath, 'auto.m3u');
+    if (lines?.length === 0) {
       out.push({
         label: 'auto.m3u',
         status: 'warn',
         detail: 'empty — autonomous fallback has nothing to play',
         hint: 'Trigger a refresh from /admin/settings or `POST /dj/refresh-playlist`.',
       });
-    } else {
+    } else if (lines) {
       out.push({ label: 'auto.m3u', status: 'ok', detail: `${lines.length} entries` });
     }
   }
@@ -423,10 +431,10 @@ function checkContent(): Finding[] {
       detail: 'missing — run `scripts/generate-jingles.sh` once the stack is up',
     });
   } else {
-    const lines = readFileSync(jinglesM3u, 'utf8').split('\n').filter((l) => l.trim() && !l.startsWith('#'));
-    if (lines.length === 0) {
+    const lines = readPlaylist(jinglesM3u, 'jingles.m3u');
+    if (lines?.length === 0) {
       out.push({ label: 'jingles.m3u', status: 'warn', detail: 'empty — no station idents' });
-    } else {
+    } else if (lines) {
       // The M3U holds container paths (/var/sub-wave/jingles/…); map back to the
       // host's state/jingles to check the files exist.
       const missing: string[] = [];

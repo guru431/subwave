@@ -298,6 +298,12 @@ def test_phrase_with_known_reading_bypasses_ruaccent(ruaccent, tmp_path):
     assert not any("руки" in s.lower() for s in ruaccent.seen)
 
 
+def test_phrase_slots_preserve_private_use_characters_in_input(ruaccent, tmp_path):
+    acc = f5_accent.Accentizer(tmp_path)
+    assert acc.apply("\ue000 Руки Вверх \ue001 ни облака") == \
+        "\ue000 Р+уки Вв+ерх \ue001 ни +облака"
+
+
 def test_dictionary_is_read_from_sqlite_not_memory(ruaccent, tmp_path):
     """Словарь RUAccent — 3.2 млн словоформ, в dict Python это 661 МБ из 0.9 ГБ всей
     RUAccent (замер 23.09). Без них в лимит контейнера 3 ГБ помещается turbo3.1:

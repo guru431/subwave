@@ -1392,8 +1392,19 @@ class PreviewRemoteTtsHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        size = int(self.headers.get("Content-Length", "0"))
-        body = json.loads(self.rfile.read(size) or b"{}")
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+            if size < 0:
+                raise ValueError("negative content length")
+            body = json.loads(self.rfile.read(size) or b"{}")
+        except (ValueError, UnicodeDecodeError):
+            payload = b'{"error":"invalid JSON request"}'
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
         type(self).speak_bodies.append(body)
         self.send_response(200 if self.path == "/speak" else 404)
         self.send_header("Content-Type", "audio/wav")
@@ -1589,7 +1600,8 @@ def gemini_persona_style(page):
     import copy
     before = json.loads(api("/settings"))["values"]
     personas = copy.deepcopy(before["personas"])
-    speaker = next(p for p in personas if p["name"] == "Wren")
+    speaker = next((p for p in personas if p["name"] == "Wren"), None)
+    assert speaker is not None, "no Wren persona on the verify stack"
     speaker["tts"].update({"engine": "gemini", "voice": "Puck"})
     speaker["voiceStyle"] = "Warm and unhurried."
     previews = []

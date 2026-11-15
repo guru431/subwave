@@ -105,7 +105,7 @@ export async function checkLlm(s: StationSettings | null): Promise<Finding[]> {
   // call fails Zod validation and the feature degrades or falls back unnoticed.
   // We catch it deterministically here precisely because a model this broken ALSO
   // breaks the AI review that would otherwise explain it to the operator.
-  const schemaFails = recentCalls.filter(isSchemaFailure);
+  const schemaFails = recent.filter(isSchemaFailure);
   if (schemaFails.length) {
     const kinds = [...new Set(schemaFails.map((c) => c.kind).filter(Boolean))];
     out.push({
@@ -365,5 +365,4 @@ export async function checkTts(s: StationSettings | null): Promise<Finding[]> {
 
   return out;
 }
-
 

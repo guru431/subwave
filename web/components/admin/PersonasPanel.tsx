@@ -835,10 +835,10 @@ export default function PersonasPanel() {
         onConfirm={() => {
           if (confirmDeleteIdx !== null) {
             removePersona(confirmDeleteIdx);
-            setFocusIdx(i => Math.max(0, i - 1));
+            setFocusIdx(i => confirmDeleteIdx <= i ? Math.max(0, i - 1) : i);
+            if (confirmDeleteIdx === safeIdx) setEditorOpen(false);
           }
           setConfirmDeleteIdx(null);
-          setEditorOpen(false);
         }}
       />
     </div>

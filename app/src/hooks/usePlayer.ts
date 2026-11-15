@@ -263,6 +263,7 @@ export function usePlayer(
   const stop = useCallback(() => {
     clearWatchdog();
     bufferFlapsRef.current = [];
+    tunedInRef.current = false;
     setTunedIn(false);
     setStatus('idle');
     teardown().catch(() => {});

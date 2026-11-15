@@ -182,7 +182,7 @@ router.get('/library/liked', requireAdmin, async (req, res) => {
       if (sort === 'artist') return byName(a).localeCompare(byName(b));
       // Equal counts tie-break on recency so the order is stable.
       if (sort === 'count' && b.likeCount !== a.likeCount) return b.likeCount - a.likeCount;
-      return b.lastLikedAt.localeCompare(a.lastLikedAt);
+      return (b.lastLikedAt ?? '').localeCompare(a.lastLikedAt ?? '');
     });
 
     res.json({ total: matched.length, rows: matched.slice(offset, offset + limit) });

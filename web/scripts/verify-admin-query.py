@@ -7,6 +7,7 @@ import base64
 import copy
 import json
 import os
+from pathlib import Path
 import subprocess
 import sys
 import tempfile
@@ -466,7 +467,7 @@ def onboarding_credential_change_isolates_discovery_cache(page):
           for (const release of window.__onboardingDelayed.splice(0)) release();
         }};
         window.fetch = async (input, init = {{}}) => {{
-          const url = typeof input === 'string' ? input : input.url;
+          const url = typeof input === 'string' ? input : (input.url ?? String(input));
           const authorization = new Headers(init.headers).get('authorization');
           const response = await nativeFetch(input, init);
           if (url.includes('stale-401.test') && delayStaleOnce) {{
@@ -600,7 +601,7 @@ def discovery_stale_response_isolated(page):
       const nativeFetch = window.fetch;
       window.fetch = async (...args) => {
         const response = await nativeFetch(...args);
-        const url = typeof args[0] === 'string' ? args[0] : args[0].url;
+        const url = typeof args[0] === 'string' ? args[0] : (args[0].url ?? String(args[0]));
         if (url.includes('old.test')) await new Promise(resolve => setTimeout(resolve, 900));
         return response;
       };
@@ -835,7 +836,7 @@ def credential_change_remounts_cache_and_ignores_stale_401(page):
         window.__delayNextStateTree = false;
         window.__delayedAdminCount = 0;
         window.fetch = (input, init = {}) => {
-          const url = typeof input === 'string' ? input : input.url;
+          const url = typeof input === 'string' ? input : (input.url ?? String(input));
           if (url.includes('/debug/state-tree') && window.__delayNextStateTree) {
             window.__delayNextStateTree = false;
             window.__delayedAdminCount += 1;
@@ -2713,7 +2714,7 @@ def settings_save_serializes_after_inflight_get(page):
         window.__subwaveReleaseSettingsGet = () => race.release?.();
         window.fetch = async (input, init = {}) => {
           const response = await nativeFetch(input, init);
-          const url = typeof input === 'string' ? input : input.url;
+          const url = typeof input === 'string' ? input : (input.url ?? String(input));
           const method = (init.method || (typeof input === 'string' ? 'GET' : input.method) || 'GET').toUpperCase();
           if (!race.holdNext || method !== 'GET' || new URL(url, location.href).pathname !== '/settings') {
             return response;
@@ -3024,13 +3025,14 @@ def imaging_mutations_refresh(page):
     bed_name = "task4-cache-bed"
     api_write("DELETE", f"/sfx/{sfx_name}", ok_statuses=(200, 400, 404))
     api_write("DELETE", f"/beds/{bed_name}", ok_statuses=(200, 400, 404))
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as handle:
-        sfx_wav_path = handle.name
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as handle:
-        bed_wav_path = handle.name
-    write_silent_wav(sfx_wav_path, seconds=0.3)
-    write_silent_wav(bed_wav_path, seconds=31)
+    temp_root = Path(__file__).resolve().parents[2] / ".tmp"
+    temp_root.mkdir(exist_ok=True)
+    scratch = tempfile.TemporaryDirectory(prefix="verify-imaging-", dir=temp_root)
+    sfx_wav_path = str(Path(scratch.name) / "sfx.wav")
+    bed_wav_path = str(Path(scratch.name) / "bed.wav")
     try:
+        write_silent_wav(sfx_wav_path, seconds=0.3)
+        write_silent_wav(bed_wav_path, seconds=31)
         page.clock.install()
         page.goto(f"{WEB}/admin/imaging?tab=sfx", wait_until="domcontentloaded")
         page.get_by_text("Sound effects", exact=True).wait_for(state="visible")
@@ -3077,10 +3079,11 @@ def imaging_mutations_refresh(page):
         page.get_by_role("alertdialog").get_by_role("button", name="Delete").click()
         page.get_by_text(bed_name, exact=True).wait_for(state="detached")
     finally:
-        api_write("DELETE", f"/sfx/{sfx_name}", ok_statuses=(200, 400, 404))
-        api_write("DELETE", f"/beds/{bed_name}", ok_statuses=(200, 400, 404))
-        os.unlink(sfx_wav_path)
-        os.unlink(bed_wav_path)
+        try:
+            api_write("DELETE", f"/sfx/{sfx_name}", ok_statuses=(200, 400, 404))
+            api_write("DELETE", f"/beds/{bed_name}", ok_statuses=(200, 400, 404))
+        finally:
+            scratch.cleanup()
 
 
 @check
@@ -4167,7 +4170,7 @@ def skill_file_save_close_reopen_is_authoritative(page):
         window.__subwaveReleaseSkillFileGet = () => race.release?.();
         window.fetch = async (input, init = {}) => {
           const response = await nativeFetch(input, init);
-          const url = typeof input === 'string' ? input : input.url;
+          const url = typeof input === 'string' ? input : (input.url ?? String(input));
           const method = (init.method || (typeof input === 'string' ? 'GET' : input.method) || 'GET').toUpperCase();
           if (!race.holdNext || method !== 'GET' || new URL(url, location.href).pathname !== '/dj/skills/task-6-saved-file/file') {
             return response;

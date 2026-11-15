@@ -45,6 +45,11 @@ assert.equal(
 
 // Bar snap to the track's own tempo: 100 BPM → 2.4s bars → 4s snaps to 4.8s.
 assert.equal(
+  endingCrossSecondsFor({ bpm: 20, key: null, ending: 'cold' }, null),
+  4,
+  'a twelve-second bar cannot stretch a tight cold cut',
+);
+assert.equal(
   endingCrossSecondsFor({ bpm: 100, key: null, ending: 'cold' }, null),
   4.8,
   'cold canvas bar-snaps to the tempo',

@@ -9,13 +9,14 @@
 // Run: npm test -- request-position
 
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { after } from 'node:test';
 
-process.env.STATE_DIR = mkdtempSync(join(tmpdir(), 'subwave-request-position-'));
+const stateDir = mkdtempSync(join(tmpdir(), 'subwave-request-position-'));
+process.env.STATE_DIR = stateDir;
 process.env.NAVIDROME_URL = 'http://127.0.0.1:9';
 process.env.NAVIDROME_USER = 'fixture';
 process.env.NAVIDROME_PASS = 'fixture';
@@ -116,6 +117,7 @@ const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
   server.close();
   globalThis.fetch = realFetch;
+  rmSync(stateDir, { recursive: true, force: true });
 });
 
 let listener = 0;

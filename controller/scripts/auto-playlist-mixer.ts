@@ -11,16 +11,20 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, readFile, writeFile, access } from 'node:fs/promises';
-import { createWriteStream } from 'node:fs';
+import { createWriteStream, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { resolve, join } from 'node:path';
+import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const rootfs = resolve(process.env.SUBWAVE_MIXER_ROOTFS || '');
 assert.ok(process.env.SUBWAVE_MIXER_ROOTFS, 'Set SUBWAVE_MIXER_ROOTFS to a disposable shipped-image rootfs');
+const rootfs = realpathSync(resolve(process.env.SUBWAVE_MIXER_ROOTFS));
 await access(join(rootfs, '.subwave-1729-disposable'));
+const sandboxDir = dirname(rootfs);
+assert.equal(basename(rootfs), 'rootfs', 'Use the rootfs prepared by prepare-playlist-mixer.sh');
+await access(join(sandboxDir, '.subwave-1729-disposable'));
 const controllerRoot = resolve(process.env.SUBWAVE_CONTROLLER_ROOT || fileURLToPath(new URL('..', import.meta.url)));
 const stateDir = join(rootfs, 'var/sub-wave');
+assert.ok(realpathSync(join(rootfs, 'var')).startsWith(`${rootfs}/`), 'Disposable state parent must stay inside rootfs');
 const evidenceDir = await mkdtemp(join(tmpdir(), 'subwave-1729-'));
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 async function until(fn: () => boolean | Promise<boolean>, message: string, timeout = 30_000) {
@@ -29,9 +33,17 @@ async function until(fn: () => boolean | Promise<boolean>, message: string, time
   throw new Error(message);
 }
 
+// The entrypoint restores shared state permissions for its multiple UIDs.
+// Keep its enclosing sandbox private; / itself must remain traversable by
+// Icecast's unprivileged UID after chroot has hidden that enclosing directory.
+execFileSync('sudo', ['-n', 'chown', `${process.getuid!()}:${process.getgid!()}`, sandboxDir]);
+execFileSync('sudo', ['-n', 'chmod', '700', sandboxDir]);
+execFileSync('sudo', ['-n', 'chmod', '755', rootfs]);
 execFileSync('sudo', ['-n', 'rm', '-rf', stateDir]);
 execFileSync('sudo', ['-n', 'mkdir', '-p', stateDir]);
-execFileSync('sudo', ['-n', 'chmod', '777', stateDir]);
+// The controller runs as the invoking user; the disposable mixer runs as root.
+execFileSync('sudo', ['-n', 'chown', `${process.getuid!()}:${process.getgid!()}`, stateDir]);
+execFileSync('sudo', ['-n', 'chmod', '755', stateDir]);
 const audioPath = join(evidenceDir, 'valid.flac');
 execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=180', '-c:a', 'flac', audioPath]);
 const audio = await readFile(audioPath);

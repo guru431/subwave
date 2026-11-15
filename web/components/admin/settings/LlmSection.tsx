@@ -393,7 +393,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
       // config. It rides in the same PATCH because it is edited on this card.
       picker: {
         albumHours: Math.max(0, parseFloat(form.picker.albumHours) || 0),
-        minTrackLengthSeconds: Math.max(0, parseInt(form.picker.minTrackLengthSeconds, 10) || 0),
+        minTrackLengthSeconds: form.picker.minTrackLengthSeconds,
       },
     });
     // Save API keys if typed — these go to secrets.env, not settings.json

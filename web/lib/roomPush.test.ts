@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import {
-  disablePush, enablePush, keyBytes, pushLost, renewPush, sameKey, watchPushLost,
+  disablePush, enablePush, keyBytes, pushLost, renewPush, sameKey, watchPushLost, watchRequestPush,
 } from './roomPush';
 
 let failures = 0;
@@ -100,7 +100,7 @@ function fakeBrowser(): void {
     configurable: true,
     writable: true,
   });
-  g.Notification = { permission: 'granted' };
+  g.Notification = { permission: 'granted', requestPermission: async () => 'granted' };
   g.fetch = async (url: string) => {
     env.fetches.push(url);
     if (env.offline) throw new TypeError('Failed to fetch');
@@ -134,6 +134,20 @@ async function testAsync(name: string, fn: () => Promise<void>) {
 async function lostCases() {
   console.log('pushLost');
   fakeBrowser();
+
+  await testAsync('квитанция после ротации VAPID переподписывается на новый ключ', async () => {
+    let removed = false;
+    env.sub = {
+      endpoint: 'https://push.test/old',
+      options: { applicationServerKey: keyBytes('AQID').buffer },
+      unsubscribe: async () => { removed = true; env.sub = null; return true; },
+      toJSON: () => ({ endpoint: 'https://push.test/old' }),
+    } as typeof env.sub;
+    env.subscribes = 0;
+    assert.equal(await watchRequestPush('00000000-0000-0000-0000-000000000001'), true);
+    assert.equal(removed, true, 'старая подписка снята');
+    assert.equal(env.subscribes, 1, 'оформлена подписка на текущий ключ');
+  });
 
   await testAsync('подписки нет, браузер отказал (WebKit без жеста) — потеря', async () => {
     let calls = 0;

@@ -384,8 +384,6 @@ export function ThemeSection({ data, busy, saveSettings, adminFetch }: ThemeSect
         notify.err(`Themes reloaded, but refresh failed: ${errorMessage(reconciled.error)}`);
         return;
       }
-      // A file dropped in can make a show's previously-dead themeId resolve.
-      await themeCtx?.refreshThemes();
       const next = reconciled.data.themes;
       notify.ok(`reloaded, ${next.length} theme${next.length === 1 ? '' : 's'}`);
     } catch (e) {
@@ -415,9 +413,6 @@ export function ThemeSection({ data, busy, saveSettings, adminFetch }: ThemeSect
       notify.err(`Theme saved, but refresh failed: ${errorMessage(reconciled.error)}`);
       return;
     }
-    // Re-read provenance now rather than up to 30s from now: a show pinning its
-    // own theme means this save won't be visible until the show ends.
-    await themeCtx?.refreshThemes();
   };
 
   // Re-apply when the edited theme is on air, so the admin page updates now.

@@ -127,6 +127,10 @@ segment_rms() { # segment_rms <wav> <start-seconds> <duration-seconds>
 
 render() {
   local a_in="$1" b_in="$2" mode="${3:-all}"
+  case "$mode" in
+    dry|sweep|washout|both|blend|dissolve|chop|loop|all|loopcheck) ;;
+    *) echo "Unknown render mode: $mode" >&2; return 2 ;;
+  esac
   # Normalise inputs to WAV so the container needs no codecs beyond PCM.
   # A: a mid-song slice ending where the transition fires (its "outro" here);
   # B: the track's real opening (what rises under the effect).

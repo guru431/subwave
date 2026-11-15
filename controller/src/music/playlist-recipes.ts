@@ -7,7 +7,8 @@
 // A missing file is an empty store; a corrupt file degrades to empty (never
 // throws into a caller — a bad side-file must not break playlist saves).
 
-import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
+import { writeFileAtomicSync } from '../util/atomic-file.js';
 import { config } from '../config.js';
 import { normalizeRecipeRow } from '../schemas/playlist.js';
 import type { Knobs, Sources } from './playlist-gen.js';
@@ -70,10 +71,8 @@ function read(): RecipeStore {
 }
 
 function persist(store: RecipeStore): void {
+  writeFileAtomicSync(FILE, JSON.stringify(store, null, 2));
   cache = store;
-  const tmp = `${FILE}.tmp`;
-  writeFileSync(tmp, JSON.stringify(store, null, 2));
-  renameSync(tmp, FILE);
 }
 
 export function list(): PlaylistRecipeEntry[] {
@@ -96,7 +95,7 @@ export function upsert(input: {
   recipe: StoredRecipe;
   perSyncCap?: number;
 }): PlaylistRecipeEntry {
-  const store = read();
+  const store = structuredClone(read());
   const now = new Date().toISOString();
   const existing = store.recipes.find((r) => r.playlistId === input.playlistId);
   const entry: PlaylistRecipeEntry = {
@@ -115,7 +114,7 @@ export function upsert(input: {
 
 // Persist a sync result onto an entry (called by the sync engine).
 export function recordSync(playlistId: string, added: number): void {
-  const store = read();
+  const store = structuredClone(read());
   const entry = store.recipes.find((r) => r.playlistId === playlistId);
   if (!entry) return;
   const now = new Date().toISOString();
@@ -133,7 +132,7 @@ export function remapIds(
   trackMap: ReadonlyMap<string, string>,
   mapPlaylistId: (id: string) => string,
 ): number {
-  const store = read();
+  const store = structuredClone(read());
   let changed = 0;
   for (const entry of store.recipes) {
     const nextId = mapPlaylistId(entry.playlistId);
@@ -152,7 +151,7 @@ export function remapIds(
       }
     }
   }
-  // A failed persist leaves the cache changed; replay must still flush it.
+  // Replay still persists an unchanged snapshot before acknowledging the map.
   persist(store);
   return changed;
 }

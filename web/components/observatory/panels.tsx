@@ -371,9 +371,10 @@ function Meter({ value, label, cells = 20, display }: { value: number; label: st
 
 // STATS VIEW — library overview, recomputed from the filtered list.
 export function StatsView({ stats, list, filtered }: { stats: ObservatoryStats; list: ObsTrack[]; filtered: boolean }) {
-  const moods = useMemo(() => tally(list, (t) => t.moods).slice(0, 8), [list]);
+  const allMoods = useMemo(() => tally(list, (t) => t.moods), [list]);
+  const moods = allMoods.slice(0, 8);
   const genres = useMemo(() => tally(list, (t) => trackGenres(t)), [list]);
-  const moodTagCount = useMemo(() => tally(list, (t) => t.moods).length, [list]);
+  const moodTagCount = allMoods.length;
   const energy = useMemo(() => {
     const o = { low: 0, medium: 0, high: 0 };
     list.forEach((t) => {

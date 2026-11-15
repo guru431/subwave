@@ -441,6 +441,17 @@ def test_missing_config_names_every_key(tmp_path):
     assert "GPU_SSH" in str(e.value) and "LOUDNESS_LIBRARY_DB" in str(e.value)
 
 
+def test_station_owner_must_be_explicit_before_remote_commands(tmp_path):
+    with pytest.raises(SystemExit, match="STATION_SSH.*user@host"):
+        run_mod.load_config(environ={**CFG, "STATION_SSH": "station.example"},
+                            env_file=tmp_path / "absent.env")
+
+
+def test_truncated_remote_summary_reports_the_received_tail():
+    with pytest.raises(SystemExit, match="(?s)итог не разобрать:.*partial"):
+        run_mod._last_json('progress\n{"partial":')
+
+
 def test_ssh_works_where_openssh_is_not_on_path(monkeypatch):
     # session 0 ночной задачи: PATH без OpenSSH, голое «ssh» не нашлось бы.
     # Свежая загрузка под другим именем: importlib.reload не находит модуль,

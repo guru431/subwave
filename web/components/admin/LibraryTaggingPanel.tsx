@@ -447,7 +447,7 @@ export default function TaggingPanel(p: TaggingPanelProps) {
     ? Math.min(100, Math.round(((progress.done ?? 0) / progress.total) * 100))
     : null;
   const runIndeterminate = !!progress && progress.total == null && progress.phase !== 'done';
-  const legEntries = progress?.llm ? Object.entries(progress.llm.legs) : [];
+  const legEntries = Object.entries(progress?.llm?.legs ?? {});
 
   // Each stage is done/active/pending by its position relative to the live phase.
   const stepList = progress

@@ -70,7 +70,7 @@ export function parseVoiceMarker(raw: string): VoiceMarker | null {
   };
 }
 
-type Waiter = { resolve: (airedAt: number | null) => void; timer: ReturnType<typeof setTimeout> };
+type Waiter = { resolve: (airedAt: number | null) => void; timer: ReturnType<typeof setTimeout>; promise: Promise<number | null> };
 
 const _waiters = new Map<string, Waiter>();
 // voiceId → {airedAt, seenAt}. Aged on seenAt, NOT on the marker's own stamp:
@@ -105,14 +105,13 @@ export function pollVoiceMarker(): VoiceMarker | null {
   // every tick re-reads the last clip's marker and only a NEW id is an edge.
   if (!marker || marker.voiceId === _lastVoiceId) return null;
   _lastVoiceId = marker.voiceId;
+  rememberRecent(marker.voiceId, marker.airedAt);
 
   const waiter = _waiters.get(marker.voiceId);
   if (waiter) {
     _waiters.delete(marker.voiceId);
     clearTimeout(waiter.timer);
     waiter.resolve(marker.airedAt);
-  } else {
-    rememberRecent(marker.voiceId, marker.airedAt);
   }
   return marker;
 }
@@ -154,18 +153,24 @@ export function awaitVoiceAir(
   timeoutMs: number = VOICE_AIR_TIMEOUT_MS,
 ): Promise<number | null> {
   const seen = _recent.get(voiceId);
-  if (seen) {
-    _recent.delete(voiceId);
+  if (seen && Date.now() - seen.seenAt <= RECENT_TTL_MS) {
     return Promise.resolve(seen.airedAt);
   }
+  _recent.delete(voiceId);
   if (!markerFilePresent()) return Promise.resolve(null);
+  const pending = _waiters.get(voiceId);
+  if (pending) return pending.promise;
   startPoller();
-  return new Promise<number | null>(resolve => {
+  let waiter: Waiter;
+  const promise = new Promise<number | null>(resolve => {
     const timer = setTimeout(() => {
       _waiters.delete(voiceId);
       resolve(null);
     }, timeoutMs);
     timer.unref?.();
-    _waiters.set(voiceId, { resolve, timer });
+    waiter = { resolve, timer, promise: null! };
   });
+  waiter!.promise = promise;
+  _waiters.set(voiceId, waiter!);
+  return promise;
 }

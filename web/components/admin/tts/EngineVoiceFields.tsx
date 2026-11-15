@@ -43,6 +43,12 @@ export interface VoiceSlot {
 // Shared first half of the red notice; each call site appends its own
 // consequence. JSX, so it can't live in the React-free engineMeta.ts.
 export const ENGINE_UNAVAILABLE: Record<string, ReactNode> = {
+  gemini: (
+    <>
+      Gemini TTS isn’t currently available. Add a Google API key in
+      Connect &rarr; Secrets, then restart the controller.
+    </>
+  ),
   chatterbox: (
     <>
       Chatterbox isn’t currently available. It lives in the optional{' '}

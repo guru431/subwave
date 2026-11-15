@@ -17,12 +17,13 @@ import {
   startProbeLoop,
 } from './ttsHeavyClient.js';
 import { resolveTtsOutPath } from './tts-out.js';
+import { envInt } from '../util/env.js';
 
 // The first call still imports torch and warms the Hugging Face cache.
 const READY_TIMEOUT_MS = 60_000;
 // ~6x real-time on a modern CPU, so a DJ line finishes well under 10s. The 120s
 // ceiling is the first-call-after-cold-boot, slow-disk budget.
-const REQUEST_TIMEOUT_MS = parseInt(process.env.POCKET_TTS_REQUEST_TIMEOUT_MS || '120000', 10);
+const REQUEST_TIMEOUT_MS = envInt('POCKET_TTS_REQUEST_TIMEOUT_MS', 120000);
 
 type PendingRequest = {
   resolve: (msg: any) => void;
@@ -36,7 +37,7 @@ let bootingPromise: Promise<PocketTtsWorker> | null = null;
 // reports it in its ready message. The sidecar path uses `remoteCloning`. #238.
 let localCloning: boolean | null = null;
 
-class PocketTtsWorker {
+export class PocketTtsWorker {
   proc: ChildProcessWithoutNullStreams | null = null;
   ready = false;
   readyResolve: (() => void) | null = null;
@@ -81,6 +82,13 @@ class PocketTtsWorker {
     });
 
     this.proc.stdout.on('data', (chunk: Buffer) => this.onStdout(chunk));
+    this.proc.stdin.on('error', (err: Error) => {
+      for (const { reject, timer } of this.requests.values()) {
+        clearTimeout(timer);
+        reject(err);
+      }
+      this.requests.clear();
+    });
     this.proc.stderr.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf8').trimEnd();
       if (text) console.error(`[pocket-tts] ${text}`);
@@ -146,17 +154,33 @@ class PocketTtsWorker {
     }
     this.requests.clear();
     this.failReady(err);
+    this.ready = false;
+    this.proc = null;
     if (worker === this) worker = null;
   }
 
   send(id: string, payload: Record<string, unknown>): Promise<any> {
+    const input = this.proc?.stdin;
+    if (!input?.writable || this.proc?.exitCode != null || this.proc?.signalCode != null) {
+      return Promise.reject(new Error('pocket-tts worker not running'));
+    }
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.requests.delete(id);
         reject(new Error(`pocket-tts request ${id} timed out`));
       }, REQUEST_TIMEOUT_MS);
       this.requests.set(id, { resolve, reject, timer });
-      this.proc?.stdin.write(JSON.stringify({ id, ...payload }) + '\n');
+      const failWrite = (err: Error | null | undefined) => {
+        if (!err || !this.requests.has(id)) return;
+        clearTimeout(timer);
+        this.requests.delete(id);
+        reject(err);
+      };
+      try {
+        input.write(JSON.stringify({ id, ...payload }) + '\n', failWrite);
+      } catch (err) {
+        failWrite(err as Error);
+      }
     });
   }
 }

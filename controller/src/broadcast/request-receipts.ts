@@ -1,5 +1,6 @@
 // Private capability receipts. IDs never appear in the public queue projection.
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { config } from '../config.js';
 import { writeFileAtomicSync } from '../util/atomic-file.js';
@@ -22,8 +23,25 @@ const terminal = new Set<ReceiptPhase>(['aired', 'declined', 'failed', 'removed'
 function load(): string {
   const file = path.join(config.stateDir, 'request-receipts.json');
   if (loadedPath !== file) {
-    const stored = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
-    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) throw new Error('Invalid request receipts');
+    let stored: Record<string, Receipt> = {};
+    if (existsSync(file)) {
+      // A read failure is not corruption: leave it to the caller to retry.
+      const raw = readFileSync(file, 'utf8');
+      try {
+        stored = JSON.parse(raw);
+        if (!stored || typeof stored !== 'object' || Array.isArray(stored)
+            || Object.values(stored).some(row => !row || typeof row !== 'object'
+              || !Number.isFinite(row.createdAt) || typeof row.phase !== 'string')) {
+          throw new Error('Invalid request receipts');
+        }
+      } catch (err) {
+        const corrupt = `${file}.corrupt-${randomBytes(8).toString('hex')}`;
+        // Preserve the only copy before allowing a later save to replace it.
+        renameSync(file, corrupt);
+        console.warn(`[request-receipts] invalid store preserved at ${corrupt}: ${(err as Error).message}`);
+        stored = {};
+      }
+    }
     rows = stored;
     loadedPath = file;
   }

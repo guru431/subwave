@@ -153,6 +153,7 @@ async function collectAnswers(): Promise<InitAnswers> {
     message: 'Admin username (gates /admin and /onboarding)',
     initialValue: 'admin',
     placeholder: 'admin',
+    validate: (v) => (!v.trim() ? 'Required — the controller exits without it.' : undefined),
   }), { backOnCancel: false });
 
   const adminPass = exitIfCancelled(await p.password({

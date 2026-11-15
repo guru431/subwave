@@ -8,6 +8,37 @@
 
 set -eu
 
+# Values are data, never sed expressions or command arguments. Read passwords
+# from the exported environment, and escape them for XML text/attributes.
+xml_escape() {
+    printf '%s' "$1" | sed 's/\&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g; s/'"'"'/\&apos;/g'
+}
+
+render_icecast_template() {
+    ICECAST_MAX_CLIENTS="$ICECAST_MAX_CLIENTS" ICECAST_BURST_SIZE="$ICECAST_BURST_SIZE" \
+    ICECAST_QUEUE_SIZE="$ICECAST_QUEUE_SIZE" awk -v mounts="$2" -v proxies="$3" '
+        function xml(value,    i,c,out) {
+            out=""
+            for (i=1; i<=length(value); i++) {
+                c=substr(value,i,1)
+                out=out (c=="&" ? "&amp;" : c=="<" ? "&lt;" : c==">" ? "&gt;" : c=="\"" ? "&quot;" : c)
+            }
+            return out
+        }
+        /<!--@STREAM_MOUNTS@-->/ { while ((getline block < mounts)>0) print block; close(mounts); next }
+        /<!--@TRUSTED_PROXIES@-->/ { while ((getline block < proxies)>0) print block; close(proxies); next }
+        {
+            line=$0; out=""
+            while (match(line,/\$\{ICECAST_[A-Z_]+\}/)) {
+                key=substr(line,RSTART+2,RLENGTH-3)
+                out=out substr(line,1,RSTART-1) xml(ENVIRON[key])
+                line=substr(line,RSTART+RLENGTH)
+            }
+            print out line
+        }
+    ' "$1"
+}
+
 # Shared state bootstrap. Mode 777 because the controller, analyzer and
 # liquidsoap write here as OTHER uids; without it an operator must chown every
 # bind-mount source by hand.
@@ -281,8 +312,14 @@ ENV_ADM="${ICECAST_ADMIN_PASSWORD:-}"
 ENV_REL="${ICECAST_RELAY_PASSWORD:-}"
 
 if [ -f "$SECRETS" ]; then
-    # shellcheck disable=SC1090
-    . "$SECRETS"
+    # This is the generated raw KEY=value file, never executable shell code.
+    while IFS='=' read -r key value; do
+        case "$key" in
+            ICECAST_SOURCE_PASSWORD) ICECAST_SOURCE_PASSWORD=$value ;;
+            ICECAST_ADMIN_PASSWORD) ICECAST_ADMIN_PASSWORD=$value ;;
+            ICECAST_RELAY_PASSWORD) ICECAST_RELAY_PASSWORD=$value ;;
+        esac
+    done < "$SECRETS"
 fi
 
 [ -n "$ENV_SRC" ] && ICECAST_SOURCE_PASSWORD="$ENV_SRC"
@@ -295,11 +332,14 @@ fi
 
 # Written back for operator visibility + the documented "delete + restart to
 # rotate" path.
-cat > "$SECRETS" <<EOF
-ICECAST_SOURCE_PASSWORD=$ICECAST_SOURCE_PASSWORD
-ICECAST_ADMIN_PASSWORD=$ICECAST_ADMIN_PASSWORD
-ICECAST_RELAY_PASSWORD=$ICECAST_RELAY_PASSWORD
-EOF
+for password in "$ICECAST_SOURCE_PASSWORD" "$ICECAST_ADMIN_PASSWORD" "$ICECAST_RELAY_PASSWORD"; do
+    case "$password" in *$'\n'*|*$'\r'*) echo 'broadcast: Icecast passwords cannot contain CR/LF' >&2; exit 1 ;; esac
+done
+(
+    umask 077
+    printf 'ICECAST_SOURCE_PASSWORD=%s\nICECAST_ADMIN_PASSWORD=%s\nICECAST_RELAY_PASSWORD=%s\n' \
+        "$ICECAST_SOURCE_PASSWORD" "$ICECAST_ADMIN_PASSWORD" "$ICECAST_RELAY_PASSWORD" > "$SECRETS"
+)
 # 0600 — only root reads it (this entrypoint, and the controller container off
 # the shared mount in broadcast/listeners.ts).
 chmod 600 "$SECRETS"
@@ -309,8 +349,7 @@ export ICECAST_SOURCE_PASSWORD ICECAST_ADMIN_PASSWORD ICECAST_RELAY_PASSWORD
 # ICECAST_HOST (default "icecast").
 export ICECAST_HOST=localhost
 
-# Render icecast.xml. Substitution is plain sed with `|` delimiters: the secrets
-# are hex and every other value numeric, so there is no escaping risk.
+# Render icecast.xml without exposing passwords in process arguments.
 MAX_CLIENTS_LINE="$(resolve_max_clients)"
 ICECAST_MAX_CLIENTS="${MAX_CLIENTS_LINE%% *}"
 echo "broadcast: max listeners $ICECAST_MAX_CLIENTS (from ${MAX_CLIENTS_LINE#* })" >&2
@@ -377,7 +416,7 @@ emit_mount() {
         echo "        <queue-size>$_queue</queue-size>"
         if [ "$LISTENER_AUTH" = true ]; then
             echo '        <authentication type="url">'
-            echo "            <option name=\"listener_add\" value=\"$LISTENER_AUTH_URL\"/>"
+            echo "            <option name=\"listener_add\" value=\"$(xml_escape "$LISTENER_AUTH_URL")\"/>"
             echo '            <option name="auth_header" value="icecast-auth-user: 1"/>'
             echo '        </authentication>'
         fi
@@ -417,20 +456,8 @@ fi
 # shellcheck disable=SC2086
 render_trusted_proxies "$TRUSTED_XML" "$TRUSTED_SOURCE" $TRUSTED_LIST
 
-# `r` splices the generated blocks (empty file = nothing) where each marker
-# sits, then the marker line itself is deleted.
-sed \
-    -e "s|\${ICECAST_SOURCE_PASSWORD}|$ICECAST_SOURCE_PASSWORD|g" \
-    -e "s|\${ICECAST_ADMIN_PASSWORD}|$ICECAST_ADMIN_PASSWORD|g" \
-    -e "s|\${ICECAST_RELAY_PASSWORD}|$ICECAST_RELAY_PASSWORD|g" \
-    -e "s|\${ICECAST_MAX_CLIENTS}|$ICECAST_MAX_CLIENTS|g" \
-    -e "s|\${ICECAST_BURST_SIZE}|$ICECAST_BURST_SIZE|g" \
-    -e "s|\${ICECAST_QUEUE_SIZE}|$ICECAST_QUEUE_SIZE|g" \
-    -e "/<!--@STREAM_MOUNTS@-->/r $MOUNTS_XML" \
-    -e "/<!--@STREAM_MOUNTS@-->/d" \
-    -e "/<!--@TRUSTED_PROXIES@-->/r $TRUSTED_XML" \
-    -e "/<!--@TRUSTED_PROXIES@-->/d" \
-    "$TEMPLATE" > "$RENDERED"
+# Splice the generated blocks (empty file = nothing) at their markers.
+render_icecast_template "$TEMPLATE" "$MOUNTS_XML" "$TRUSTED_XML" > "$RENDERED"
 chown icecast2 "$RENDERED" 2>/dev/null || true
 
 # Launch the pair, then wait for either to die.

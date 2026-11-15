@@ -131,8 +131,7 @@ export function personaToneDirectives(persona: unknown): string {
   const lines: string[] = [];
   const p = persona as Record<string, unknown>;
   for (const key of TONE_DIALS) {
-    const v = Number(p[key]);
-    if (!Number.isFinite(v)) continue;
+    const v = normalizeDial(p[key]);
     if (v <= 3) lines.push(TONE_DIAL_PHRASES[key].low);
     else if (v >= 7) lines.push(TONE_DIAL_PHRASES[key].high);
   }

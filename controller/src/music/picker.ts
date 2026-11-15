@@ -363,7 +363,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
       // Tighten the envelope to the exact union, never-starve.
       const exact = hasEraBound(showFilter!.eras) ? inYearRange(collected, showFilter!.eras) : collected;
       const leaned = lean(preferEnergy(exact.length ? exact : collected, showFilter!.energies));
-      add('show-genre', sampleShowSource(shuffle(leaned), recentIds, strict ? CAP_SHOW_GENRE_STRICT : CAP_SHOW_GENRE));
+      add('show-genre', sampleShowSource(shuffle(leaned), recentIds, strict ? CAP_SHOW_GENRE_STRICT : CAP_SHOW_GENRE, exhaustiveRotation ? { ids: hardRecentIds, keys: hardRecentKeys } : null));
     } catch {}
   }
 
@@ -830,6 +830,7 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
     return {
       song: candidates[0],
       reason: 'fallback (LLM returned invalid id)',
+      source: candidates[0]._source,
     };
   }
 

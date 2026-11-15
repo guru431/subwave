@@ -422,8 +422,8 @@ export async function runOutro(queue: QueueApi, ctx: SessionContext, now = new D
 // plan the episode, then air the intro if still pending. Returns true when a
 // standalone intro aired. `now` follows ensurePlan's contextDate rule.
 //
-// `opportunity` passes through to maybeRunIntro (#1576) and has no default
-// here on purpose: a new call site must state whether it is a handover moment.
+// Legacy callers still state `opportunity`; boundary-handoff ownership now
+// controls placement, so neither this function nor maybeRunIntro gates on it.
 export async function onSessionSettled(
   queue: QueueApi,
   ctx: SessionContext,

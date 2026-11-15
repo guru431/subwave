@@ -83,9 +83,8 @@ async function archiveMoodsJson(): Promise<void> {
     console.log(`[library-db] archived legacy moods.json → ${archived}`);
   } catch (err) {
     if (err.code !== 'ENOENT') {
-      console.error(`[library-db] could not archive moods.json: ${err.message}`);
+      console.warn(`[library-db] could not archive moods.json: ${err.message}; migration will retry on next open (existing tracks are preserved)`);
     }
   }
 }
-
 

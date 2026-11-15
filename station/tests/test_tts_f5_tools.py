@@ -10,6 +10,16 @@ import pytest
 TOOLS = Path(__file__).resolve().parent.parent / "tts-f5" / "tools"
 
 
+def test_speech_check_rejects_short_audio_before_loading_whisper(monkeypatch):
+    spec = importlib.util.spec_from_file_location("check_speech_short", TOOLS / "check_speech.py")
+    check = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(check)
+    monkeypatch.setattr(check, "load", lambda _: (check.np.zeros(20), 24000))
+    monkeypatch.setattr(check.sys.stdout, "reconfigure", lambda **kw: None)
+    with pytest.raises(SystemExit, match="файл слишком короткий"):
+        check.main(["short.wav"])
+
+
 @pytest.mark.parametrize("heard,code,share", [("да", 1, "33%"), ("да да да", 0, "100%")])
 def test_speech_check_counts_word_occurrences(monkeypatch, capsys, heard, code, share):
     spec = importlib.util.spec_from_file_location("check_speech", TOOLS / "check_speech.py")

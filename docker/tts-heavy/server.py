@@ -400,8 +400,12 @@ class TtsWorker:
                 raise RuntimeError(f"[{self.name}] worker not ready")
             assert self.proc.stdin
             req = json.dumps(payload, ensure_ascii=False)
-            self.proc.stdin.write((req + "\n").encode())
-            await self.proc.stdin.drain()
+            try:
+                self.proc.stdin.write((req + "\n").encode())
+                await self.proc.stdin.drain()
+            except OSError as exc:
+                self.ready = False
+                raise RuntimeError(f"[{self.name}] worker died mid-request") from exc
             # _await_message skips post-ready print() noise too — without
             # that, any stray stdout would crash the next /speak call.
             return await self._await_message()

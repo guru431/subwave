@@ -9,6 +9,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { PERSONA_DIAL_NEUTRAL, clampPersonaDial, personaSchema } from '../src/schemas/persona.js';
+import { personaToneDirectives } from '../src/settings/vocab.js';
+
+test('prompt tone uses the same absent-value repair as the stored dial', () => {
+  for (const humour of [null, '', '  ', undefined, 'nonsense']) {
+    assert.equal(personaToneDirectives({ humour }), '');
+  }
+  assert.match(personaToneDirectives({ humour: 0 }), /Tone:/);
+});
 
 test('null and empty read as the neutral dial, not as 0', () => {
   assert.equal(clampPersonaDial(null), PERSONA_DIAL_NEUTRAL);

@@ -242,8 +242,9 @@ async function streamResponseToFile(res: Response, outPath: string): Promise<voi
   let bytes = 0;
   const probeChunks: Buffer[] = [];
   let probeBytes = 0;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   try {
-    const reader = res.body.getReader();
+    reader = res.body.getReader();
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -262,9 +263,12 @@ async function streamResponseToFile(res: Response, outPath: string): Promise<voi
     assertPlayableMp3Prefix(Buffer.concat(probeChunks, probeBytes), bytes);
     await rename(tempPath, outPath);
   } catch (err) {
+    await reader?.cancel().catch(() => {});
     await file.close().catch(() => {});
     await unlink(tempPath).catch(() => {});
     throw err;
+  } finally {
+    reader?.releaseLock();
   }
 }
 
@@ -353,7 +357,16 @@ export async function listFishVoices(apiKey: string, transport: Pick<FishTranspo
       const detail = await errorDetail(res, key);
       throw new Error(`Fish Audio voice discovery failed (${res.status}): ${detail}`);
     }
-    const payload = await res.json() as { total?: number; has_more?: boolean | null };
+    let payload: { total?: number; has_more?: boolean | null };
+    try {
+      payload = await res.json() as { total?: number; has_more?: boolean | null };
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        throw new Error('expected an object');
+      }
+    } catch (cause) {
+      if (transport.signal?.aborted) throw cause;
+      throw new Error('Fish Audio voice discovery failed: unparseable response', { cause });
+    }
     const pageVoices = normalizeFishVoices(payload);
     for (const voice of pageVoices) {
       if (!collected.some(v => v.id === voice.id)) collected.push(voice);

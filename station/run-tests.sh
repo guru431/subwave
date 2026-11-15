@@ -27,11 +27,13 @@ set -a; . "$HERE/.env"; set +a
 # поверх неё. Меняется вместе с переходом на новую версию апстрима.
 UPSTREAM_BASE=v1.17.0
 IMAGE=subwave-controller:1.17.0-ru
+FAST=0
 SRC=-
 FILTERS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --patch)
+      FAST=1
       mapfile -t patch_tests < <(git -C "$REPO" diff --name-only "$UPSTREAM_BASE"...HEAD \
         -- 'controller/scripts/*.test.ts' | sed 's#.*/##' | sort -u)
       if [ ${#patch_tests[@]} -eq 0 ]; then
@@ -124,6 +126,11 @@ KNOWN=(
 # Не запускаются вовсе: нагрузочный тест сеет 200 тыс. треков в базу на 820 МБ
 # и идёт дольше двух минут — хосту станции такой прогон не по карману.
 SKIP_FILES="observatory-scale.test.ts"
+# CLI rejection and local-worker lifecycle spawn real controller/worker child
+# processes. Keep these end-to-end integration checks at the full level; the
+# fast level retains the pure analysis policies and runtime-state regressions.
+INTEGRATION_FILES="analyze-cli.test.ts analyzer-local-start.test.ts"
+if [ "$FAST" -eq 1 ]; then SKIP_FILES="$SKIP_FILES $INTEGRATION_FILES"; fi
 
 # Удалённая часть: docker run со сторожем памяти и потолком времени.
 # $1 — образ, $2 — клон или «-», $3 — SKIP_FILES, дальше — подстроки имён файлов.
@@ -136,14 +143,18 @@ if ! sudo docker image inspect "$IMAGE" >/dev/null 2>&1; then
   echo "TESTS_ENV на хосте станции нет образа $IMAGE"; exit 2
 fi
 if [ "$SRC" = "-" ]; then
-  MOUNT=(); ENV=(); WD=/app
+  MOUNT=(--tmpfs /app/.tmp:rw,exec,mode=1777)
+  ENV=(-e STATE_DIR=/app/.tmp/state -e TMPDIR=/app/.tmp); WD=/app
 else
   if [ ! -d "$SRC/controller/scripts" ]; then echo "TESTS_ENV на хосте станции нет клона $SRC"; exit 2; fi
   # Зависимости клона — из образа: ссылка висит на хосте и оживает в контейнере.
   [ -e "$SRC/controller/node_modules" ] || [ -L "$SRC/controller/node_modules" ] \
     || ln -s /app/node_modules "$SRC/controller/node_modules"
-  # Клон — только для чтения, а состояние по умолчанию ложится в <репо>/state.
-  MOUNT=(-v "$SRC:/sw:ro"); ENV=(-e STATE_DIR=/tmp/state); WD=/sw/controller
+  # Исходники только для чтения; отдельный tmpfs внутри корня проекта держит
+  # тестовое состояние и временные файлы, включая тесты с явным <репо>/.tmp.
+  mkdir -p "$SRC/.tmp"
+  MOUNT=(-v "$SRC:/sw:ro" --tmpfs /sw/.tmp:rw,exec,mode=1777)
+  ENV=(-e STATE_DIR=/sw/.tmp/state -e TMPDIR=/sw/.tmp); WD=/sw/controller
 fi
 name=ctl-tests-$$
 # client-ip запускает `tsx` из PATH, как это делает `npm test`.

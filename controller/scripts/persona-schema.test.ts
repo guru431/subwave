@@ -340,6 +340,16 @@ test('repairTtsVoiceSlot always produces something the strict slot accepts', () 
   }
 });
 
+test('a missing provider-specific cloud voice repairs to the local floor rather than an OpenAI id', () => {
+  for (const cloudProvider of ['elevenlabs', 'fish-audio']) {
+    const repaired = repairTtsVoiceSlot({ engine: 'cloud', cloudProvider, voice: '' });
+    assert.equal(repaired.engine, 'piper');
+    assert.equal(repaired.voice, '');
+    assert.equal(ttsVoiceSlotSchema('tts').safeParse(repaired).success, true);
+  }
+  assert.equal(repairTtsVoiceSlot({ engine: 'cloud', cloudProvider: 'openai', voice: '' }).voice, 'alloy');
+});
+
 test('a kokoro-shaped voice under piper SURVIVES the repair (#454)', () => {
   // The seed roster carries one per persona so switching to Kokoro yields
   // distinct voices with no re-editing. Wiping it here broke that on the first

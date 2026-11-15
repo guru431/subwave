@@ -7,6 +7,8 @@ import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import fsPromises from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { buildFishTtsRequest, listFishVoices, normalizeFishVoices, probeFishKey, shouldRetryFishStatus, synthesizeFish } from '../src/llm/internal/speech/fish-audio.js';
 
 function validMp3Audio(): Buffer {
@@ -69,6 +71,45 @@ test('Fish retry policy is limited to 429 and 5xx', () => {
   assert.equal(shouldRetryFishStatus(599), true);
   for (const status of [400, 401, 403, 404, 422, 600]) {
     assert.equal(shouldRetryFishStatus(status), false, String(status));
+  }
+});
+
+test('voice discovery classifies malformed provider JSON without exposing the key', async () => {
+  await withServer((_req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.end('{"interrupted":');
+  }, async origin => {
+    await assert.rejects(listFishVoices('test-only-key', { origin }), (err: Error) => {
+      assert.match(err.message, /Fish Audio voice discovery failed: unparseable response/);
+      assert.ok(err.cause instanceof SyntaxError);
+      assert.ok(!err.message.includes('test-only-key'));
+      return true;
+    });
+  });
+});
+
+test('a failed audio file write cancels the provider body and closes the file', async t => {
+  const work = await mkdtemp(path.join(tmpdir(), 'subwave-fish-write-'));
+  let cancelled = false;
+  let closed = false;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(validMp3Audio()); },
+    cancel() { cancelled = true; },
+  });
+  t.mock.method(globalThis, 'fetch', async () => new Response(body, { headers: { 'Content-Type': 'audio/mpeg' } }));
+  const openMock = t.mock.method(fsPromises, 'open', async () => ({
+    write: async () => { throw new Error('disk write fixture'); },
+    close: async () => { closed = true; },
+  }));
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(synthesizeFish({ apiKey: 'fixture', text: 'Fixture', referenceId: 'fixture', outPath: path.join(work, 'sample.mp3') }), /disk write fixture/);
+    assert.equal(cancelled, true);
+    assert.equal(closed, true);
+  } finally {
+    openMock.mock.restore();
+    syncBuiltinESMExports();
+    await rm(work, { recursive: true, force: true });
   }
 });
 

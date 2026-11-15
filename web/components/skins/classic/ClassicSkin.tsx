@@ -114,7 +114,8 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
     if (params.get('request') === '1') {
       setDrawer('request');
       params.delete('request');
-      window.history.replaceState(null, '', window.location.pathname + (params.size ? `?${params}` : '') + window.location.hash);
+      const rest = params.toString();
+      window.history.replaceState(null, '', window.location.pathname + (rest ? `?${rest}` : '') + window.location.hash);
     }
     if (params.get('chat') === '1') {
       openChat();

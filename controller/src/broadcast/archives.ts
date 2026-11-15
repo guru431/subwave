@@ -4,7 +4,7 @@
 
 import { readdir, stat, rm } from 'node:fs/promises';
 import { createReadStream, existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, relative, isAbsolute, sep } from 'node:path';
 import { config } from '../config.js';
 
 const ARCHIVE_ROOT = join(config.stateDir, 'archive');
@@ -71,7 +71,8 @@ export function resolveEntry(rel: string): string | null {
   const m = rel.match(/^(\d{4}-\d{2}-\d{2})\/(\d{2}-00\.mp3)$/);
   if (!m) return null;
   const abs = resolve(ARCHIVE_ROOT, rel);
-  if (!abs.startsWith(ARCHIVE_ROOT + '/')) return null;
+  const within = relative(ARCHIVE_ROOT, abs);
+  if (!within || within === '..' || within.startsWith(`..${sep}`) || isAbsolute(within)) return null;
   if (!existsSync(abs)) return null;
   return abs;
 }

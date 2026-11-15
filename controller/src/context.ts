@@ -46,7 +46,8 @@ export function getFestivalContext(date = new Date()) {
   for (const f of getSettings().festivals ?? []) {
     const window = f.windowDays || 0;
     // Compare real dates so the window spans month and year boundaries
-    // (New Year's Day with windowDays 3 is active from Dec 29). Adjacent
+    // symmetrically before AND after the festival (New Year's Day with
+    // windowDays 3 is active Dec 29 through Jan 4, inclusive). Adjacent
     // years cover a window reaching across Dec 31 / Jan 1.
     for (const yy of [y - 1, y, y + 1]) {
       if (Math.abs(Date.UTC(yy, f.month - 1, f.day) - today) <= window * DAY_MS) {

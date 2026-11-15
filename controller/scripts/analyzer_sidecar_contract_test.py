@@ -319,8 +319,98 @@ def test_concurrency_env_validation():
             os.environ["SUBWAVE_TEST_CONCURRENCY"] = old
 
 
+async def test_boot_ready_deadline():
+    worker = server.StdioWorker("boot", "python", "worker.py")
+    worker.READY_TIMEOUT_S = 0
+
+    class Proc:
+        returncode = None
+        terminated = False
+
+        def terminate(self):
+            self.terminated = True
+            self.returncode = -15
+
+        async def wait(self):
+            assert self.terminated
+            return self.returncode
+
+    proc = Proc()
+    original_spawn = asyncio.create_subprocess_exec
+
+    async def spawn(*_args, **_kwargs):
+        return proc
+
+    async def no_stderr():
+        pass
+
+    async def stuck_ready():
+        await asyncio.Event().wait()
+
+    worker._pump_stderr = no_stderr
+    worker._await_message = stuck_ready
+    asyncio.create_subprocess_exec = spawn
+    try:
+        try:
+            await worker.start()
+        except asyncio.TimeoutError:
+            pass
+        else:
+            raise AssertionError("live worker without ready escaped the boot deadline")
+        assert proc.terminated and not worker.ready
+    finally:
+        asyncio.create_subprocess_exec = original_spawn
+
+
+def test_cache_write_failure_cleans_partial_files():
+    path = Path(__file__).parent / "analyze_worker.py"
+    spec = importlib.util.spec_from_file_location("analyzer_cache_cleanup", path)
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    original_sf = sys.modules.get("soundfile")
+    original_dump = worker.json.dump
+
+    def fail_stem(path, *_args, **_kwargs):
+        Path(path).write_bytes(b"partial")
+        raise OSError("fixture stem write")
+
+    def fail_meta(_value, file):
+        file.write("partial")
+        raise OSError("fixture metadata write")
+
+    sys.modules["soundfile"] = types.SimpleNamespace(write=fail_stem)
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            stem = Path(directory) / "head-drums.flac"
+            stem.write_bytes(b"original")
+            try:
+                worker.write_stems({"drums": types.SimpleNamespace(T=())}, "head", directory)
+            except OSError as error:
+                assert str(error) == "fixture stem write"
+            else:
+                raise AssertionError("stem write should fail")
+            assert stem.read_bytes() == b"original"
+            assert not Path(str(stem) + ".tmp").exists()
+            worker.json.dump = fail_meta
+            try:
+                worker.write_tail_meta(directory, 1, 2)
+            except OSError as error:
+                assert str(error) == "fixture metadata write"
+            else:
+                raise AssertionError("metadata write should fail")
+            assert not (Path(directory) / "tail-meta.json.tmp").exists()
+    finally:
+        worker.json.dump = original_dump
+        if original_sf is None:
+            sys.modules.pop("soundfile", None)
+        else:
+            sys.modules["soundfile"] = original_sf
+
+
 async def main():
     test_concurrency_env_validation()
+    test_cache_write_failure_cleans_partial_files()
+    await test_boot_ready_deadline()
     await test_pool_concurrency()
     await test_waiter_uses_worker_that_becomes_ready()
     await test_unavailable_selection_retries_another_ready_worker()

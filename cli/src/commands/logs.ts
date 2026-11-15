@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { detectCompose, listDeclaredServices, type ComposeFile, type ComposeEnv } from '../compose.ts';
 import { composeLogs } from '../docker.ts';
-import { exitIfCancelled, err, info, muted, p, pauseForEnter, header } from '../ui.ts';
+import { exitIfCancelled, err, info, muted, p, pauseForEnter, header, warn } from '../ui.ts';
 import { getWebDevLog } from '../web-dev.ts';
 
 const WEB_DEV_SERVICE = 'web (dev)';
@@ -82,6 +82,10 @@ async function tailWebDev(): Promise<void> {
   }
   await new Promise<void>((resolveP) => {
     const child = spawn('tail', ['-n', '200', '-f', getWebDevLog()], { stdio: 'inherit' });
+    child.on('error', (e) => {
+      warn(`Could not start tail: ${e.message}. Read ${getWebDevLog()} with your log viewer.`);
+      resolveP();
+    });
     child.on('exit', () => resolveP());
   });
 }

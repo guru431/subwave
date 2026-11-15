@@ -38,6 +38,10 @@ export function useSpectrum(bins = 120, active = true, speed = 50, visible = tru
   }, [active]);
 
   useEffect(() => {
+    if (valuesRef.current.length !== bins) {
+      valuesRef.current = Array.from({ length: bins }, (_, i) => valuesRef.current[i] ?? 0.06);
+      setArr(valuesRef.current.slice());
+    }
     if (!running) return;
     const dt = active ? speed : Math.max(speed, IDLE_TICK_MS);
     const id = setInterval(() => {

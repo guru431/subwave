@@ -35,8 +35,12 @@ process.on('exit', () => {
 function parseIntFlag(args: string[], name: string): number | undefined {
   const idx = args.indexOf(name);
   if (idx < 0) return undefined;
-  const n = parseInt(args[idx + 1], 10);
-  return Number.isFinite(n) ? n : undefined;
+  const raw = args[idx + 1];
+  const n = Number(raw);
+  if (!raw || !/^\d+$/.test(raw) || !Number.isSafeInteger(n) || n <= 0) {
+    throw new Error(`${name} requires a positive integer`);
+  }
+  return n;
 }
 
 // Mirror of tag-library.ts applyWizardOverlay — env wins, setup-config fills gaps.

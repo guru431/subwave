@@ -74,6 +74,19 @@ def test_failed_rotation_rolls_back_votes_and_decisions(store):
 ROOT_ROTATIONS = STORE.parent / "rotations.py"
 
 
+@pytest.mark.parametrize("payload", [[], "text", 12, None])
+def test_rotation_rejects_non_objects_without_consuming_them(store, tmp_path, payload):
+    import json
+    spec = importlib.util.spec_from_file_location("room_rotations_invalid", ROOT_ROTATIONS)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    path = tmp_path / "batch.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="неверная карта"):
+        mod.sync(store, str(tmp_path))
+    assert path.exists()
+
+
 def test_added_message_comes_back(store):
     rec = store.add("l1", "Аня", "привет", now=T0)
     assert rec["id"] == 1 and rec["name"] == "Аня" and rec["text"] == "привет"

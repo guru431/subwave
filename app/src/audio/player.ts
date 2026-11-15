@@ -43,7 +43,6 @@ export function setupPlayer(): Promise<void> {
       // "player already initialized" throws on fast refresh; benign.
       const msg = e instanceof Error ? e.message : String(e);
       if (!/already been initialized|already initialized/i.test(msg)) {
-        setupPromise = null;
         throw e;
       }
     }
@@ -59,7 +58,12 @@ export function setupPlayer(): Promise<void> {
           AppKilledPlaybackBehavior.StopPlaybackAndRemoveNotification,
       },
     });
-  })();
+  })().catch(e => {
+    // setupPlayer may have succeeded before updateOptions fails. A retry must
+    // still apply those options to the already-initialized native player.
+    setupPromise = null;
+    throw e;
+  });
   return setupPromise;
 }
 

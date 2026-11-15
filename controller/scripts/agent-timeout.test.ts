@@ -39,3 +39,11 @@ test('a hand-edited deadline is capped at five minutes on cold load', async () =
   assert.equal(await coldLoad(300_000), 300_000, 'the documented ceiling is accepted');
   assert.equal(await coldLoad(600_000), 300_000, 'values above the ceiling are contained');
 });
+
+test('blank or malformed deadline patches preserve the current budget', async () => {
+  await coldLoad(90_000);
+  for (const agentTimeoutMs of ['', '  ', null, false]) {
+    await settings.update({ llm: { agentTimeoutMs } } as never);
+    assert.equal(settings.get().llm.agentTimeoutMs, 90_000);
+  }
+});

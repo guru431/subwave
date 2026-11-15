@@ -188,9 +188,16 @@ export async function watchRequestPush(requestId: string): Promise<boolean> {
     const keyReply = await fetch(`${ROOM}/push/key`);
     if (!keyReply.ok) return false;
     const { key } = await keyReply.json();
-    const sub = await reg.pushManager.getSubscription() || await reg.pushManager.subscribe({
-      userVisibleOnly: true, applicationServerKey: keyBytes(key),
-    });
+    let sub = await reg.pushManager.getSubscription();
+    if (sub && !sameKey(sub.options?.applicationServerKey, key)) {
+      await sub.unsubscribe();
+      sub = null;
+    }
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true, applicationServerKey: keyBytes(key),
+      });
+    }
     const response = await fetch(`${ROOM}/push/request`, {
       method: 'POST', headers: headers(), body: JSON.stringify({ requestId, subscription: sub.toJSON() }),
     });

@@ -234,6 +234,9 @@ router.post('/settings/secrets/test', requireAdmin, async (req, res) => {
 // wizard can auto-fill the model field. `?baseUrl=` overrides the locca
 // default. Always 200s with { reachable, models, baseUrl }.
 router.get('/settings/llm/discover', requireAdmin, async (req, res) => {
+  if (req.query.baseUrl !== undefined && typeof req.query.baseUrl !== 'string') {
+    return res.status(400).json({ error: 'baseUrl must be a string' });
+  }
   const baseUrl =
     String(req.query.baseUrl || '').trim().replace(/\/+$/, '') ||
     llmProvider.DEFAULT_LOCCA_BASE_URL;
@@ -340,6 +343,11 @@ function looksLikeEmbeddingModel(id: string): boolean {
 // Discover available models for any provider. Query: provider (required),
 // baseUrl, ollamaUrl, scope. Always 200s with { ok, models, provider, error? }.
 router.get('/settings/llm/models', requireAdmin, async (req, res) => {
+  for (const name of ['provider', 'baseUrl', 'ollamaUrl', 'scope']) {
+    if (req.query[name] !== undefined && typeof req.query[name] !== 'string') {
+      return res.status(400).json({ error: `${name} must be a string` });
+    }
+  }
   const provider = String(req.query.provider || '').trim();
   if (!provider) {
     return res.json({ ok: false, models: [], provider: '', error: 'provider is required' });
@@ -554,5 +562,4 @@ router.post('/settings/embedding/probe', requireAdmin, async (req, res) => {
     res.json({ ok: false, dim: null, code: 'unknown', message: (err as { message?: string })?.message || 'probe failed' });
   }
 });
-
 

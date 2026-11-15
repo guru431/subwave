@@ -502,6 +502,7 @@ async function runBashSetup(env: NodeJS.ProcessEnv): Promise<void> {
       env,
       stdio: 'inherit',
     });
+    child.on('error', reject);
     child.on('exit', (code) => {
       if (code === 0) resolveP();
       else reject(new Error(`scripts/setup.sh exited ${code}`));
@@ -527,6 +528,10 @@ async function renderJingles(composeFile: string, env: NodeJS.ProcessEnv): Promi
       cwd: getSubwaveHome(),
       env: { ...env, COMPOSE_FILE: composeFile },
       stdio: 'inherit',
+    });
+    child.on('error', (e) => {
+      warn(`Could not start jingle rendering: ${e.message}. Re-run scripts/generate-jingles.sh later.`);
+      resolveP();
     });
     child.on('exit', (code) => {
       if (code === 0) ok('jingles rendered.');
@@ -608,4 +613,3 @@ async function reportProbe(label: string, run: () => Promise<ProbeResult>): Prom
     }
   }
 }
-

@@ -1024,7 +1024,7 @@ export function repairTtsVoiceSlot(raw: unknown, opts?: { allowInherit?: boolean
   const engines: readonly string[] = opts?.allowInherit === true ? PERSONA_TTS_ENGINES : TTS_ENGINES;
   // 'piper' and not PERSONA_TTS_INHERIT: an unreadable engine must land on the
   // piper floor, never on a value that re-points the persona at the station.
-  const engine = engines.includes(r.engine as string)
+  let engine = engines.includes(r.engine as string)
     ? (r.engine as string)
     : 'piper';
   const cloudProvider = (TTS_CLOUD_PROVIDERS as readonly string[]).includes(
@@ -1056,7 +1056,12 @@ export function repairTtsVoiceSlot(raw: unknown, opts?: { allowInherit?: boolean
   ) {
     voice = '';
   }
-  if (!voice && engine === 'cloud' && cloudProvider !== 'openai-compatible') voice = 'alloy';
+  if (!voice && engine === 'cloud' && cloudProvider !== 'openai-compatible') {
+    if (cloudProvider === 'openai') voice = 'alloy';
+    // ElevenLabs and Fish require a real provider-specific id. There is no
+    // universal voice to invent; a malformed saved slot uses the local floor.
+    else engine = 'piper';
+  }
   // The kokoro floor. PERSONA_TTS_INHERIT is excluded alongside the engines that
   // read empty as "your own default": an inherit slot has no engine yet, so
   // there is no id-space to pick a floor from.

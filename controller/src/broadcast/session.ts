@@ -2,7 +2,7 @@
 // which broadcast/dj-agent.js reads a bounded window of. Persisted to
 // state/session.json; archived to state/sessions/<id>.json on roll.
 
-import { readFile, mkdir } from 'node:fs/promises';
+import { readFile, mkdir, copyFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { config } from '../config.js';
@@ -792,7 +792,18 @@ export async function recover(ctx: SessionContext): Promise<Session> {
         stored.endedAt = stored.endedAt || new Date().toISOString();
         await archive(stored);
       }
-    } catch {}
+    } catch (err) {
+      const recoveryFile = `${config.session.currentFile}.corrupt-${randomBytes(8).toString('hex')}`;
+      try {
+        // Copy rather than move: a recovery failure may follow a scheduled
+        // persist, and that writer must not race a rename of the live file.
+        await copyFile(config.session.currentFile, recoveryFile);
+      } catch (backupError) {
+        console.warn(`[session] failed to preserve recovery state: ${(backupError as Error).message}`);
+      }
+      console.warn(`[session] recovery failed; starting a fresh session: ${(err as Error).message}`);
+      logEvent('session.recovery-failed', { error: (err as Error).message, recoveryFile });
+    }
   }
   return start(ctx);
 }

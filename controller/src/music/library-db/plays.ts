@@ -84,6 +84,8 @@ export function lastAiredIndex(): LastAiredIndex {
 // Two steps on purpose: sampling ids first avoids materialising every fat row on
 // the synchronous handle that also serves listener polls (#723). NOT EXISTS lets
 // idx_plays_track_played answer per track without grouping the whole table.
+// The synchronous sampling API returns at most 500 rows per call, even when
+// asked for more, to keep listener polls responsive.
 export function deepCutTracks(cutoffIso: string, limit: number): TrackRecord[] {
   const d = requireDb();
   const ids = (d.prepare(`

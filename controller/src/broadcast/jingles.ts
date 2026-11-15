@@ -47,6 +47,23 @@ async function rewritePlaylist(filenames: string[]) {
   await writeFileAtomic(PLAYLIST, lines.join('\n') + (lines.length ? '\n' : ''));
 }
 
+// Until the sidecar commits, a newly rendered/uploaded clip has no API handle.
+// After it commits, retain the clip even if playlist publication fails: it is
+// visible/removable then, and deleting it would leave a dangling sidecar entry.
+async function publishNewClip(filename: string, info: Record<string, unknown>, existedBefore = false) {
+  let registered = false;
+  try {
+    const meta = await loadMeta();
+    meta.items[filename] = info;
+    await saveMeta(meta);
+    registered = true;
+    await rewritePlaylist(Object.keys(meta.items));
+  } catch (err) {
+    if (!registered && !existedBefore) await unlink(`${DIR}/${filename}`).catch(() => {});
+    throw err;
+  }
+}
+
 async function statOrNull(p: string) {
   try { return await stat(p); } catch { return null; }
 }
@@ -98,17 +115,15 @@ export async function create(text: string, { builtin = false }: { builtin?: bool
   const id = crypto.randomBytes(4).toString('hex');
   const filename = builtin ? DEFAULT_IDENT.filename : `jingle_${id}.wav`;
   const outPath = `${DIR}/${filename}`;
+  const existedBefore = existsSync(outPath);
 
   await speak(text, { kind: 'jingle', outPath });
 
-  const meta = await loadMeta();
-  meta.items[filename] = {
+  await publishNewClip(filename, {
     text: text.trim(),
     createdAt: new Date().toISOString(),
     builtin,
-  };
-  await saveMeta(meta);
-  await rewritePlaylist(Object.keys(meta.items));
+  }, existedBefore);
   return { filename, text: text.trim(), outPath };
 }
 
@@ -135,15 +150,12 @@ export async function importAudio(
   }
 
   const text = (label || '').trim() || baseName(originalName) || 'Imported jingle';
-  const meta = await loadMeta();
-  meta.items[filename] = {
+  await publishNewClip(filename, {
     text,
     createdAt: new Date().toISOString(),
     builtin: false,
     source: 'upload',
-  };
-  await saveMeta(meta);
-  await rewritePlaylist(Object.keys(meta.items));
+  });
   return { filename, text };
 }
 

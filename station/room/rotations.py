@@ -14,6 +14,8 @@ def sync(store, directory: str) -> None:
         combined = {}
         for file in files:
             batch = json.loads(file.read_text(encoding="utf-8"))
+            if not isinstance(batch, dict):
+                raise ValueError("неверная карта ротации комнаты")
             mapping = batch.get("trackMap")
             if batch.get("version") != 1 or not isinstance(mapping, dict) or any(
                     not isinstance(k, str) or not k or not isinstance(v, str) or not v

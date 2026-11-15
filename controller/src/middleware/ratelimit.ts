@@ -47,7 +47,8 @@ export function clientIp(req) {
 }
 
 // The two budgets are spent at different times. `rec.last` (the cooldown) is
-// spent on EVERY attempt — it is the backpressure on rejected retries. The
+// spent once the cooldown and per-IP cap checks pass, including attempts
+// rejected by a later gate. Rejected retries do not extend this window. The
 // hourly caps (`rec.hits` / `globalHits`) are budgets of ACCEPTED requests and
 // must only be spent on acceptance, or rejected retries close the request line
 // station-wide. So check() spends the cooldown and only PEEKS at the caps;

@@ -349,7 +349,9 @@ async function resolveAdminPassword(): Promise<string | null> {
     const raw = await readFile(join(config.stateRoot, 'icecast-secrets.env'), 'utf8');
     const m = raw.match(/^ICECAST_ADMIN_PASSWORD=(.*)$/m);
     if (m) {
-      cachedAdminPassword = m[1].trim().replace(/^["']|["']$/g, '');
+      // The broadcast writer persists raw KEY=value, including literal
+      // quotes, backslashes and spaces in an env-supplied password.
+      cachedAdminPassword = m[1];
       return cachedAdminPassword;
     }
   } catch {

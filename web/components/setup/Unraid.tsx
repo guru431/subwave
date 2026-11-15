@@ -2,6 +2,10 @@ import Link from 'next/link';
 import SetupPage from './SetupPage';
 import CodeBlock from "@/components/CodeBlock";
 
+// Compressed linux/amd64 layers for the GHCR latest tags, checked 2026-11-15.
+const HEAVY_DOWNLOAD_SIZE = '~1.6 GB';
+const CUDA_DOWNLOAD_SIZE = '~5.3 GB';
+
 const UNRAID_ENV_TEMPLATE = `# Required — the three boot keys
 ADMIN_USER=admin
 ADMIN_PASS=replace-me-with-a-strong-string   # openssl rand -hex 16
@@ -303,7 +307,7 @@ export default function Unraid() {
           dimensions, <strong>&ldquo;sounds-like&rdquo; audio embeddings</strong>{' '}
           (CLAP) and <strong>vocal ranges</strong> (Demucs), need a CPU-torch
           stack that isn&apos;t in the lean image, so they&apos;re a separate{' '}
-          <code className="bs-code-inline">-heavy</code> build (~1.9 GB,{' '}
+          <code className="bs-code-inline">-heavy</code> build ({HEAVY_DOWNLOAD_SIZE} compressed,{' '}
           <strong>amd64-only</strong>). Only switch if you want them.
         </p>
         <div className="bs-callout">
@@ -383,9 +387,9 @@ export default function Unraid() {
             belong to the split stack. If the card ends up invisible the analyzer logs a
             warning and carries on using the CPU, so a half-finished setup
             degrades rather than taking the station down. Fair warning on size:
-            the CUDA image is <strong>~4 GB compressed</strong> against{' '}
-            <code className="bs-code-inline">-heavy</code>&apos;s ~1.3 GB, because
-            the CUDA runtime ships inside it. You still don&apos;t need a CUDA
+            the CUDA image is <strong>{CUDA_DOWNLOAD_SIZE} compressed</strong> against{' '}
+            <code className="bs-code-inline">-heavy</code>&apos;s {HEAVY_DOWNLOAD_SIZE}, because
+            the CUDA runtime ships inside it. Sizes vary by release. You still don&apos;t need a CUDA
             toolkit on the host, just the driver plugin.
           </p>
         </div>

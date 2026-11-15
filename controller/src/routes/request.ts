@@ -57,11 +57,12 @@ const lastByIp = new Map<string, any>();
 
 function pruneRequests() {
   const cutoff = Date.now() - REQUEST_TTL_MS;
+  const queuedIds = queue.queuedIds();
   for (const [id, entry] of requests) {
     if (entry.createdAt < cutoff) requests.delete(id);
   }
   for (const [ip, entry] of lastByIp) {
-    if (entry.createdAt < cutoff) lastByIp.delete(ip);
+    if (entry.createdAt < cutoff && !stillInFlight(entry, queuedIds)) lastByIp.delete(ip);
   }
 }
 

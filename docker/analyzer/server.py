@@ -108,6 +108,7 @@ class StdioWorker:
 
     START_BACKOFF_S = 5.0
     RUN_BACKOFF_S = 2.0
+    READY_TIMEOUT_S = 900.0
 
     def __init__(self, name: str, python: str, script: str, env_extra: dict[str, str] | None = None):
         self.name = name
@@ -241,17 +242,21 @@ class StdioWorker:
         # the container logs. Exits when the worker closes stderr on death.
         asyncio.create_task(self._pump_stderr())
 
-        # Read until {"ready": true}. A first-time CLAP/Demucs load (lazy
-        # weight download) can take a while, so no timeout — run()'s restart
-        # loop is the upstream safety net.
+        # Bound even a live process that never reaches ready. Allow slow
+        # first-time model downloads, then let run() retry a stuck boot.
         try:
-            msg = await self._await_message()
+            msg = await asyncio.wait_for(self._await_message(), timeout=self.READY_TIMEOUT_S)
             if msg.get("fatal"):
                 raise RuntimeError(f"[{self.name}] fatal: {msg.get('error')}")
             if not msg.get("ready"):
                 raise RuntimeError(f"[{self.name}] expected ready, got: {msg}")
-        except Exception:
+        except BaseException:
             self._terminate()
+            try:
+                await asyncio.wait_for(self.proc.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                self.proc.kill()
+                await self.proc.wait()
             raise
         self.ready_meta = {k: v for k, v in msg.items() if k != "ready"}
         # A pre-warm (env-enabled) model load fails BEFORE ready, so the ready
