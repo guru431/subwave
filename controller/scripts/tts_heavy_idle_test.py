@@ -240,6 +240,46 @@ def main():
 
 
 def _cases():
+    async def case_stderr_lifecycle():
+        procs = install_fake_spawn([])
+        worker = make_worker()
+        try:
+            await worker.start()
+            task = worker._stderr_task
+            assert task is not None and not task.done(), "stderr pump must be owned by its worker"
+            worker._terminate()
+            await asyncio.gather(task, return_exceptions=True)
+            assert task.cancelled(), "stopping the worker must also stop its stderr reader"
+            worker._reset()
+            assert worker._stderr_task is None
+        finally:
+            for proc in procs:
+                proc.terminate()
+
+    test("stderr reader is retained and stopped with its worker", lambda: run_async(case_stderr_lifecycle()))
+
+    async def case_speak_missing_path():
+        worker = server.WORKERS["chatterbox"]
+        original_speak = worker.speak
+
+        async def no_path(_payload):
+            return {"ok": True}
+
+        worker.speak = no_path
+        try:
+            try:
+                await server.speak(server.SpeakRequest(
+                    engine="chatterbox", text="hello", voice="", reference_wav="", out="unused.wav",
+                ))
+            except HTTPException as error:
+                assert error.status_code == 500 and "path" in error.detail
+            else:
+                raise AssertionError("missing worker output must be a structured HTTP error")
+        finally:
+            worker.speak = original_speak
+
+    test("/speak rejects success without an output path", lambda: run_async(case_speak_missing_path()))
+
     async def case_pipe_dies_mid_request():
         worker = make_worker()
         worker.ready = True
@@ -789,7 +829,7 @@ def _cases():
                 await server.speak(
                     server.SpeakRequest(
                         engine="chatterbox", text="hi", voice="", reference_wav="",
-                        out="/tmp/subwave-tts-test.wav",
+                        out="unused.wav",
                     )
                 )
                 raise AssertionError("expected an HTTPException")

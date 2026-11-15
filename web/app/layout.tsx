@@ -73,7 +73,7 @@ const sairaStencilOne = Saira_Stencil_One({
 const plusJakarta = Plus_Jakarta_Sans({
   subsets: ['latin'],
   display: 'swap',
-  variable: '--font-sans',
+  variable: '--sans-font',
 });
 
 // The default data face. Its next/font variable is --font-jetbrains, NOT

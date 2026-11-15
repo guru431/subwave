@@ -3,14 +3,22 @@ import path from 'node:path';
 import process from 'node:process';
 import ts from 'typescript';
 
-const rootArg = process.argv.indexOf('--root');
-const root = rootArg === -1
-  ? path.resolve(import.meta.dirname, '..', 'components', 'admin')
-  : path.resolve(process.argv[rootArg + 1]);
+function pathOption(flag) {
+  const index = process.argv.indexOf(flag);
+  if (index === -1) return null;
+  const value = process.argv[index + 1];
+  if (!value || value.startsWith('--')) {
+    console.error(`${flag} requires a path`);
+    process.exit(2);
+  }
+  return path.resolve(value);
+}
+
+const root = pathOption('--root') ?? path.resolve(import.meta.dirname, '..', 'components', 'admin');
 const imperativeMarker = '// admin-query-imperative: ';
 const ownedMarker = '// admin-query-owned: ';
 const incomplete = process.argv.includes('--allow-incomplete');
-const ownershipArg = process.argv.indexOf('--ownership-registry');
+const ownershipPath = pathOption('--ownership-registry');
 
 // A helper read is owned only when all four links are exact: source file,
 // containing exported function, request shape (including AbortSignal), and an
@@ -94,9 +102,9 @@ const defaultOwnershipRegistry = [
   },
 ];
 
-const ownershipRegistry = ownershipArg === -1
+const ownershipRegistry = ownershipPath === null
   ? defaultOwnershipRegistry
-  : JSON.parse(fs.readFileSync(path.resolve(process.argv[ownershipArg + 1]), 'utf8'));
+  : JSON.parse(fs.readFileSync(ownershipPath, 'utf8'));
 
 // Browser-only/one-shot reads that deliberately do not belong in Query. Every
 // entry validates the exact callee, HTTP method, and endpoint (or controlled
@@ -293,7 +301,10 @@ function pathFor(call, canonical, sourceFile) {
 
 function markerFor(sourceFile, call, prefix) {
   const line = sourceFile.getLineAndCharacterOfPosition(call.getStart(sourceFile)).line;
-  const previous = sourceFile.text.split(/\r?\n/)[line - 1]?.trim() ?? '';
+  if (line === 0) return null;
+  const start = sourceFile.getPositionOfLineAndCharacter(line - 1, 0);
+  const end = sourceFile.getPositionOfLineAndCharacter(line, 0);
+  const previous = sourceFile.text.slice(start, end).trim();
   return previous.startsWith(prefix) ? previous.slice(prefix.length) : null;
 }
 
@@ -366,15 +377,10 @@ function validateRegisteredRead(file, sourceFile, call, canonical, method, endpo
   return false;
 }
 
-for (const file of filesAt(root)) {
-  const text = fs.readFileSync(file, 'utf8');
-  const sourceFile = ts.createSourceFile(
-    file,
-    text,
-    ts.ScriptTarget.Latest,
-    true,
-    file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-  );
+const files = filesAt(root);
+const sourceCache = new Map();
+for (const file of files) {
+  const { sourceFile } = sourceFor(relativeFile(file));
   const { aliases, initializers } = buildBindings(sourceFile);
 
   function visit(node) {
@@ -413,9 +419,10 @@ for (const file of filesAt(root)) {
 
 function sourceFor(relative) {
   const file = path.resolve(root, relative);
+  if (sourceCache.has(file)) return sourceCache.get(file);
   if (!fs.existsSync(file)) return null;
   const source = fs.readFileSync(file, 'utf8');
-  return {
+  const parsed = {
     file,
     sourceFile: ts.createSourceFile(
       file,
@@ -425,6 +432,8 @@ function sourceFor(relative) {
       file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
     ),
   };
+  sourceCache.set(file, parsed);
+  return parsed;
 }
 
 function isExportedFunction(sourceFile, name) {
@@ -688,7 +697,7 @@ function isHelperDefinitionReference(node, names) {
 }
 
 function rejectOutsideHelperReferences(spec, allowedReferences) {
-  for (const file of filesAt(root)) {
+  for (const file of files) {
     const relative = relativeFile(file);
     const parsed = sourceFor(relative);
     if (!parsed) continue;

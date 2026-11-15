@@ -2337,28 +2337,28 @@ def stats_pause_and_poll(page):
     pause = page.get_by_role("button", name="Pause")
     pause.wait_for(state="visible")
     paths = ("/stats", "/listeners", "/audience", "/listeners/connections", "/system")
-    initial = {path: request_count(page, path) for path in paths}
+    initial = {path: request_count(page, path, authenticated=True) for path in paths}
     assert all(count > 0 for count in initial.values()), (initial, page.request_log)
     settle_clock(page, 5_000)
-    assert request_count(page, "/stats") == initial["/stats"] + 1, page.request_log
-    assert all(request_count(page, path) == initial[path] for path in paths[1:]), page.request_log
+    assert request_count(page, "/stats", authenticated=True) == initial["/stats"] + 1, page.request_log
+    assert all(request_count(page, path, authenticated=True) == initial[path] for path in paths[1:]), page.request_log
 
     pause.click()
-    paused = {path: request_count(page, path) for path in paths}
+    paused = {path: request_count(page, path, authenticated=True) for path in paths}
     page.get_by_text("7d", exact=True).click()
     settle_clock(page, 30_000)
     settle_clock(page)
-    assert {path: request_count(page, path) for path in paths} == paused, page.request_log
+    assert {path: request_count(page, path, authenticated=True) for path in paths} == paused, page.request_log
 
     page.get_by_role("button", name="Resume").click()
     settle_clock(page)
-    assert request_count(page, "/listeners", query="sinceMinutes=10080") == 1, page.request_log
-    assert request_count(page, "/audience", query="sinceMinutes=10080") == 1, page.request_log
+    assert request_count(page, "/listeners", query="sinceMinutes=10080", authenticated=True) == 1, page.request_log
+    assert request_count(page, "/audience", query="sinceMinutes=10080", authenticated=True) == 1, page.request_log
 
-    before_hidden = {path: request_count(page, path) for path in paths}
+    before_hidden = {path: request_count(page, path, authenticated=True) for path in paths}
     set_page_hidden(page, True)
     settle_clock(page, 30_000)
-    after_hidden = {path: request_count(page, path) for path in paths}
+    after_hidden = {path: request_count(page, path, authenticated=True) for path in paths}
     assert after_hidden == before_hidden, (before_hidden, after_hidden)
 
 
@@ -2440,28 +2440,28 @@ def debug_pause_and_poll(page):
     pause = page.get_by_role("button", name="Pause")
     pause.wait_for(state="visible")
     settle_clock(page)
-    initial_debug = request_count(page, "/debug")
+    initial_debug = request_count(page, "/debug", authenticated=True)
     assert initial_debug > 0, page.request_log
     settle_clock(page, 1_000)
-    assert request_count(page, "/debug") == initial_debug, page.request_log
+    assert request_count(page, "/debug", authenticated=True) == initial_debug, page.request_log
     settle_clock(page, 1_000)
-    assert request_count(page, "/debug") == initial_debug + 1, page.request_log
+    assert request_count(page, "/debug", authenticated=True) == initial_debug + 1, page.request_log
 
     pause.click()
-    paused = request_count(page, "/debug")
+    paused = request_count(page, "/debug", authenticated=True)
     settle_clock(page, 4_000)
-    assert request_count(page, "/debug") == paused, page.request_log
+    assert request_count(page, "/debug", authenticated=True) == paused, page.request_log
     page.get_by_role("button", name="Resume").click()
     settle_clock(page)
-    assert request_count(page, "/debug") == paused + 1, page.request_log
+    assert request_count(page, "/debug", authenticated=True) == paused + 1, page.request_log
 
     set_page_hidden(page, True)
-    hidden = request_count(page, "/debug")
+    hidden = request_count(page, "/debug", authenticated=True)
     settle_clock(page, 4_000)
-    assert request_count(page, "/debug") == hidden, page.request_log
+    assert request_count(page, "/debug", authenticated=True) == hidden, page.request_log
     set_page_hidden(page, False)
     settle_clock(page)
-    assert request_count(page, "/debug") == hidden + 1, page.request_log
+    assert request_count(page, "/debug", authenticated=True) == hidden + 1, page.request_log
 
 
 @check
@@ -2489,13 +2489,13 @@ def banner_poll_silence(page):
     page.get_by_role("link", name="Dash", exact=True).click()
     page.wait_for_url("**/admin/dash")
     page.get_by_text("queue empty, auto-playlist fallback", exact=True).wait_for(state="visible")
-    initial_schedule = request_count(page, "/schedule")
+    initial_schedule = request_count(page, "/schedule", authenticated=True)
     settle_clock(page, 30_000)
-    assert request_count(page, "/schedule") == initial_schedule + 1, page.request_log
+    assert request_count(page, "/schedule", authenticated=True) == initial_schedule + 1, page.request_log
     set_page_hidden(page, True)
-    hidden_schedule = request_count(page, "/schedule")
+    hidden_schedule = request_count(page, "/schedule", authenticated=True)
     settle_clock(page, 30_000)
-    assert request_count(page, "/schedule") == hidden_schedule, page.request_log
+    assert request_count(page, "/schedule", authenticated=True) == hidden_schedule, page.request_log
 
 
 @check

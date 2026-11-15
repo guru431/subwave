@@ -227,6 +227,7 @@ class TtsWorker:
         self.env_extra = env_extra or {}
         self.idle_unload_s = idle_unload_s
         self.proc: asyncio.subprocess.Process | None = None
+        self._stderr_task: asyncio.Task[None] | None = None
         self.lock = asyncio.Lock()
         self.ready = False
         # Ready message minus the `ready` flag — per-engine capability
@@ -304,6 +305,9 @@ class TtsWorker:
             raise
 
     def _reset(self, keep_meta: bool = False) -> None:
+        if self._stderr_task is not None:
+            self._stderr_task.cancel()
+            self._stderr_task = None
         self.ready = False
         self.proc = None
         self.loaded_at = None
@@ -318,6 +322,8 @@ class TtsWorker:
             self.ready_meta = {}
 
     def _terminate(self) -> None:
+        if self._stderr_task is not None:
+            self._stderr_task.cancel()
         if self.proc and self.proc.returncode is None:
             try:
                 self.proc.terminate()
@@ -338,7 +344,7 @@ class TtsWorker:
         )
         # Pump stderr to our log so model load progress / fatal errors land in
         # the container logs. Exits when the worker closes stderr on death.
-        asyncio.create_task(self._pump_stderr())
+        self._stderr_task = asyncio.create_task(self._pump_stderr())
 
         # Read until {"ready": true}, skipping non-JSON stdout noise (perth —
         # chatterbox's watermarker — bare-print()s a load message). Chatterbox
@@ -753,9 +759,12 @@ async def speak(req: SpeakRequest):
 
     if not msg.get("ok"):
         raise HTTPException(500, msg.get("error") or "worker failed")
+    path = msg.get("path")
+    if not isinstance(path, str) or not path.strip():
+        raise HTTPException(500, "worker returned no output path")
     return {
         "ok": True,
-        "path": msg["path"],
+        "path": path,
         "duration_s": msg.get("duration_s", 0),
         # PocketTTS' per-call voice substitution (#238) so the controller can
         # log when the requested voice/clone wasn't honoured. Absent for

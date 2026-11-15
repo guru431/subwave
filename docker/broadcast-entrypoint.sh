@@ -127,6 +127,16 @@ read_state_num() {
     esac
 }
 
+# Bitrates must be positive decimal values; strip leading zeroes before shell
+# arithmetic (which would otherwise interpret them as octal). A zero listener
+# buffer is valid and deliberately does not use this helper.
+stream_bitrate_or_default() {
+    local value=$1
+    case "$value" in ''|*[!0-9]*) echo "$2"; return ;; esac
+    while [ "${value#0}" != "$value" ]; do value=${value#0}; done
+    echo "${value:-$2}"
+}
+
 stream_buffer_seconds() {
     read_state_num liquidsoap_stream_buffer_seconds.txt 22
 }
@@ -361,7 +371,7 @@ echo "broadcast: max listeners $ICECAST_MAX_CLIENTS (from ${MAX_CLIENTS_LINE#* }
 # identical; a settings change applies on the next container bounce.
 STREAM_BITRATE="${ICECAST_STREAM_BITRATE:-$(read_state_num liquidsoap_stream_bitrate.txt 192)}"
 BUFFER_SECONDS="$(stream_buffer_seconds)"
-case "$STREAM_BITRATE" in *[!0-9]*|'') STREAM_BITRATE=192 ;; esac
+STREAM_BITRATE="$(stream_bitrate_or_default "$STREAM_BITRATE" 192)"
 case "$BUFFER_SECONDS" in *[!0-9]*|'') BUFFER_SECONDS=22 ;; esac
 [ "$BUFFER_SECONDS" -gt 60 ] && BUFFER_SECONDS=60
 
@@ -369,8 +379,8 @@ case "$BUFFER_SECONDS" in *[!0-9]*|'') BUFFER_SECONDS=22 ;; esac
 # 44.1/16 stereo, close enough for a buffer depth.
 OPUS_BITRATE="${ICECAST_OPUS_BITRATE:-$(read_state_num liquidsoap_opus_bitrate.txt 96)}"
 AAC_BITRATE="${ICECAST_AAC_BITRATE:-$(read_state_num liquidsoap_aac_bitrate.txt 192)}"
-case "$OPUS_BITRATE" in *[!0-9]*|'') OPUS_BITRATE=96 ;; esac
-case "$AAC_BITRATE" in *[!0-9]*|'') AAC_BITRATE=192 ;; esac
+OPUS_BITRATE="$(stream_bitrate_or_default "$OPUS_BITRATE" 96)"
+AAC_BITRATE="$(stream_bitrate_or_default "$AAC_BITRATE" 192)"
 FLAC_BITRATE_EST=900
 
 # kbps → bytes/sec is bitrate * 1000 / 8 = bitrate * 125.
@@ -476,6 +486,7 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
 done
 
 echo "broadcast: starting liquidsoap" >&2
+echo "broadcast: WARNING: liquidsoap runs as root for persisted-state UID compatibility; privilege drop is pending" >&2
 # TEMPORARY (re-harden later): run liquidsoap as root instead of dropping to the
 # `liquidsoap` user. The savonet bump 2.2.5 -> 2.4.4 changed that user's uid
 # (10000 -> 100), making persisted state files unwritable. Restore the privilege

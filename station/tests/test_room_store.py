@@ -74,6 +74,26 @@ def test_failed_rotation_rolls_back_votes_and_decisions(store):
 ROOT_ROTATIONS = STORE.parent / "rotations.py"
 
 
+def test_corrupt_rotation_is_quarantined_without_blocking_valid_batch(store, tmp_path, caplog):
+    import json
+    spec = importlib.util.spec_from_file_location("room_rotations_corrupt", ROOT_ROTATIONS)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    store.set_dislike(dis(target="old", song_id="old"), cap=20, now=T0)
+    bad = tmp_path / "a.json"
+    bad.write_bytes(b'{"version":')
+    good = tmp_path / "z.json"
+    good.write_text(json.dumps({"version": 1, "trackMap": {"old": "new"}}), encoding="utf-8")
+    mod.sync(store, str(tmp_path))
+    assert store.all_dislikes()[0]["target"] == "new"
+    assert not bad.exists() and not good.exists()
+    rejected = list(tmp_path.glob("a.json.*.invalid"))
+    assert len(rejected) == 1 and rejected[0].read_bytes() == b'{"version":'
+    assert "a.json" in caplog.text
+    mod.sync(store, str(tmp_path))
+    assert store.all_dislikes()[0]["target"] == "new"
+
+
 @pytest.mark.parametrize("payload", [[], "text", 12, None])
 def test_rotation_rejects_non_objects_without_consuming_them(store, tmp_path, payload):
     import json

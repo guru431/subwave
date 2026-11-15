@@ -443,8 +443,11 @@ def takeover(page):
         page.get_by_role("button", name="Cancel takeover").click()
     finally:
         # Runs whether the assertions above passed or raised — a failed run
-        # must not leave the fixture show behind to poison the NEXT run.
-        api_write("DELETE", f"/shows/{seeded['id']}", ok_statuses=(200, 404))
+        # must not leave its takeover or show behind to poison the NEXT run.
+        try:
+            api_write("DELETE", "/schedule/override", ok_statuses=(200, 204, 404))
+        finally:
+            api_write("DELETE", f"/shows/{seeded['id']}", ok_statuses=(200, 404))
 
 
 FESTIVAL_VERIFY_NAME = "Verify Festival"
@@ -1118,8 +1121,10 @@ def _wait_http(url, timeout=90):
                 ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", url],
                 capture_output=True, text=True, timeout=5,
             )
-            if r.stdout.strip() and r.stdout.strip() != "000":
+            status = r.stdout.strip()
+            if r.returncode == 0 and status.isdigit() and 200 <= int(status) < 400:
                 return
+            last_err = f"HTTP {status or 'unknown'} (curl exit {r.returncode})"
         except Exception as e:  # noqa: BLE001 — keep polling, report the last one on timeout
             last_err = e
         time.sleep(1)

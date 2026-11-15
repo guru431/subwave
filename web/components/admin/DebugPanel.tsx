@@ -79,7 +79,7 @@ export default function DebugPanel() {
         <div className="strip-mobile grid grid-cols-5">
           <HealthCell
             label="Icecast"
-            status={data?.icecast && !data.icecast.error ? 'ok' : err ? 'down' : 'idle'}
+            status={data?.icecast?.error || err ? 'down' : data?.icecast ? 'ok' : 'idle'}
             v={fmtListeners(data?.icecast)}
             sub={fmtListenerPeak(data?.icecast)}
           />

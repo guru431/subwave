@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from contextlib import asynccontextmanager
 from typing import Any, Awaitable, Callable
@@ -41,6 +42,8 @@ def _bounded_int_env(name: str, default: int, minimum: int, maximum: int) -> int
     if not raw:
         return default
     try:
+        if not re.fullmatch(r"[-+]?[0-9]+", raw):
+            raise ValueError("not a decimal integer")
         value = int(raw)
     except ValueError:
         logging.getLogger("analyzer").warning(
@@ -56,6 +59,9 @@ def _bounded_int_env(name: str, default: int, minimum: int, maximum: int) -> int
 
 
 ANALYZE_CONCURRENCY = _bounded_int_env("ANALYZE_CONCURRENCY", 1, 1, 8)
+ANALYZE_REQUEST_TIMEOUT_S = _bounded_int_env(
+    "ANALYZE_REQUEST_TIMEOUT_MS", 120_000, 1, 9_007_199_254_740_991,
+) / 1000
 
 # Idle worker recycle (#1204 follow-up). The worker's own idle release drops
 # the CLAP/Demucs singletons, but ~1GB of librosa/numba/torch scratch stays
@@ -109,6 +115,9 @@ class StdioWorker:
     START_BACKOFF_S = 5.0
     RUN_BACKOFF_S = 2.0
     READY_TIMEOUT_S = 900.0
+    # Bound the complete stdio exchange, including backpressure on stdin.
+    # A client timeout alone does not stop a worker holding its pool slot.
+    REQUEST_TIMEOUT_S = ANALYZE_REQUEST_TIMEOUT_S
 
     def __init__(self, name: str, python: str, script: str, env_extra: dict[str, str] | None = None):
         self.name = name
@@ -362,10 +371,28 @@ class StdioWorker:
                 await self._set_ready(False)
                 raise WorkerUnavailableError(f"[{self.name}] worker not ready")
             assert self.proc.stdin
+            proc = self.proc
             req = json.dumps(payload, ensure_ascii=False)
-            self.proc.stdin.write((req + "\n").encode())
-            await self.proc.stdin.drain()
-            msg = await self._await_message()
+
+            async def exchange() -> dict[str, Any]:
+                proc.stdin.write((req + "\n").encode())
+                await proc.stdin.drain()
+                return await self._await_message()
+
+            try:
+                msg = await asyncio.wait_for(exchange(), timeout=self.REQUEST_TIMEOUT_S)
+            except asyncio.TimeoutError as error:
+                await self._set_ready(False)
+                try:
+                    proc.terminate()
+                except ProcessLookupError:
+                    pass
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+                raise WorkerUnavailableError(f"[{self.name}] request timed out") from error
             self._note_capability_loss(msg)
             # Stamp heavy use from what actually came back, not what was
             # asked: an analyze whose CLAP load failed still answers ok=true

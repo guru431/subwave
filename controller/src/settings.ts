@@ -1749,7 +1749,10 @@ export async function update(patch) {
       next.tts.heavyEnabled = t.heavyEnabled;
     }
     if (t.kokoro !== undefined) {
-      const k = t.kokoro || {};
+      if (t.kokoro === null || typeof t.kokoro !== 'object' || Array.isArray(t.kokoro)) {
+        throw new Error('tts.kokoro must be an object');
+      }
+      const k = t.kokoro;
       if (k.voice !== undefined) {
         const v = String(k.voice).trim();
         if (!KOKORO_VOICE_RE.test(v)) {
@@ -1768,7 +1771,10 @@ export async function update(patch) {
       }
     }
     if (t.chatterbox !== undefined) {
-      const cb = t.chatterbox || {};
+      if (t.chatterbox === null || typeof t.chatterbox !== 'object' || Array.isArray(t.chatterbox)) {
+        throw new Error('tts.chatterbox must be an object');
+      }
+      const cb = t.chatterbox;
       if (cb.referenceVoice !== undefined) {
         const v = String(cb.referenceVoice).trim();
         if (v && !CHATTERBOX_VOICE_RE.test(v)) {

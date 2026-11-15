@@ -334,6 +334,13 @@ export function clampArtistVarietyWindow(raw: unknown, def: number): number {
   return Math.min(25, Math.max(0, Math.floor(raw)));
 }
 
+// HTTP header names are case-insensitive on both save and connection probes.
+export function storedLlmHeader(headers: Record<string, unknown>, name: string): unknown {
+  const wanted = name.trim().toLowerCase();
+  const key = Object.keys(headers).find(key => key.trim().toLowerCase() === wanted);
+  return key === undefined ? undefined : headers[key];
+}
+
 // Validate + apply the connection fields shared by the primary LLM leg and its
 // optional fallback. `label` prefixes error messages. The "openai-compatible
 // needs baseUrl" rule is left to the caller (the fallback enforces it only when
@@ -419,7 +426,8 @@ export function applyLlmLegPatch(target: Record<string, unknown>, patch: unknown
       if (raw === 'set') {
         // Redacted on the way out: a row the operator did not retype must
         // survive their save.
-        if (existing[name]) next[name] = existing[name];
+        const value = storedLlmHeader(existing, name);
+        if (typeof value === 'string' && value) next[name] = value;
         continue;
       }
       const v = String(raw ?? '').trim();
@@ -979,7 +987,7 @@ export function clamp01(n: number): number {
   return n;
 }
 
-export function mintId(prefix) {
+export function mintId(prefix: string): string {
   return prefix + randomBytes(3).toString('hex');
 }
 

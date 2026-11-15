@@ -292,7 +292,7 @@ export async function adopt(
   // A reservation is still a filename, and it is the one that reaches the
   // playlist — so it answers to the same rule the desired name did.
   if (!isAdoptableName(name)) throw new Error(`Unsupported audio filename: ${name}`);
-  await writeFile(`${DIR}/${name}`, buffer);
+  await writeFileAtomic(`${DIR}/${name}`, buffer);
   meta.items[name] = {
     text: String(text || '').trim() || baseName(wanted) || 'Imported jingle',
     createdAt: new Date().toISOString(),

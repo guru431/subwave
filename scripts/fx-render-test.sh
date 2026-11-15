@@ -541,7 +541,7 @@ LIQ
     echo "== render: $m =="
     liq render.liq -e MODE="$m" -e OUT="render-$m.wav" | grep -Ei "RENDER:|error|early computation" || true
     echo "--- RMS over time ($m) — transition region ---"
-    rms_table "$WORK/render-$m.wav" 2>/dev/null | sed -n '90,140p' || true
+    rms_table "$WORK/render-$m.wav" 2>/dev/null | sed -n '76,100p' || true
     echo "wav: $WORK/render-$m.wav"
   done
 

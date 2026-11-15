@@ -1668,8 +1668,12 @@ def render_transition(req):
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, os.path.basename(clip_name))
     tmp = out_path + ".tmp"
-    sf.write(tmp, mix_buf, sr, subtype="PCM_16", format="WAV")
-    os.replace(tmp, out_path)
+    try:
+        sf.write(tmp, mix_buf, sr, subtype="PCM_16", format="WAV")
+        os.replace(tmp, out_path)
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
     return {
         "ok": True,
         "path": out_path,

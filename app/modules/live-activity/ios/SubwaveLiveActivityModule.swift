@@ -52,12 +52,12 @@ public class SubwaveLiveActivityModule: Module {
   private var likeObserver: NSObjectProtocol?
   /// The state last pushed, kept so a cover that lands after the fact can be
   /// re-pushed without the hook having to re-send everything.
-  private var lastState: SubwaveLiveAttributes.ContentState?
+  @MainActor private var lastState: SubwaveLiveAttributes.ContentState?
   /// The artwork key `lastState` belongs to. A download that completes after
   /// the track has already changed is dropped rather than painting the
   /// previous song's cover over the current one.
-  private var lastArtworkKey: String?
-  private var inFlightArtworkKey: String?
+  @MainActor private var lastArtworkKey: String?
+  @MainActor private var inFlightArtworkKey: String?
 
   public func definition() -> ModuleDefinition {
     Name("SubwaveLiveActivity")
@@ -93,57 +93,66 @@ public class SubwaveLiveActivityModule: Module {
     }
 
     AsyncFunction("start") { (config: LiveActivityConfig, state: LiveActivityState) -> Bool in
-      guard #available(iOS 17.0, *) else { return false }
-      guard ActivityAuthorizationInfo().areActivitiesEnabled else { return false }
-      // Never stack. A station switch, a hot reload, or an activity left over
-      // from a previous run all land here, and two on-air cards claiming
-      // different songs is worse than a beat of no card at all.
-      await self.endAll()
-
-      let attributes = SubwaveLiveAttributes(station: config.station, accent: config.accent)
-      let content = self.contentState(from: state)
-      do {
-        _ = try Activity.request(
-          attributes: attributes,
-          content: ActivityContent(state: content, staleDate: self.staleDate(for: content)),
-          pushType: nil
-        )
-      } catch {
-        // Throws when the listener is at the system activity limit, or has
-        // revoked permission since `isSupported` was read. Not fatal, and not
-        // worth an alert: the lock screen still has the Now Playing card.
-        return false
-      }
-      self.remember(content, key: state.artworkKey)
-      self.ensureArtwork(state)
-      return true
+      await self.startActivity(config: config, state: state)
     }
 
     AsyncFunction("update") { (state: LiveActivityState) in
-      guard #available(iOS 17.0, *) else { return }
-      let content = self.contentState(from: state)
-      self.remember(content, key: state.artworkKey)
-      await self.push(content)
-      self.ensureArtwork(state)
+      await self.updateActivity(state)
     }
 
     AsyncFunction("stop") { () in
-      guard #available(iOS 17.0, *) else { return }
-      await self.endAll()
-      self.lastState = nil
-      self.lastArtworkKey = nil
-      self.inFlightArtworkKey = nil
+      await self.stopActivity()
     }
   }
 
   // MARK: - Internals
 
-  private func remember(_ content: SubwaveLiveAttributes.ContentState, key: String?) {
+  // Expo invokes AsyncFunction off the main actor. Keep every activity-state
+  // read/write on the same actor as the artwork completion below.
+  @MainActor private func startActivity(config: LiveActivityConfig, state: LiveActivityState) async -> Bool {
+    guard #available(iOS 17.0, *) else { return false }
+    guard ActivityAuthorizationInfo().areActivitiesEnabled else { return false }
+    // Never stack after a station switch, hot reload or an interrupted run.
+    await endAll()
+    let attributes = SubwaveLiveAttributes(station: config.station, accent: config.accent)
+    let content = contentState(from: state)
+    do {
+      _ = try Activity.request(
+        attributes: attributes,
+        content: ActivityContent(state: content, staleDate: staleDate(for: content)),
+        pushType: nil
+      )
+    } catch {
+      // The system activity limit or revoked permission is not fatal.
+      return false
+    }
+    remember(content, key: state.artworkKey)
+    ensureArtwork(state)
+    return true
+  }
+
+  @MainActor private func updateActivity(_ state: LiveActivityState) async {
+    guard #available(iOS 17.0, *) else { return }
+    let content = contentState(from: state)
+    remember(content, key: state.artworkKey)
+    await push(content)
+    ensureArtwork(state)
+  }
+
+  @MainActor private func stopActivity() async {
+    guard #available(iOS 17.0, *) else { return }
+    await endAll()
+    lastState = nil
+    lastArtworkKey = nil
+    inFlightArtworkKey = nil
+  }
+
+  @MainActor private func remember(_ content: SubwaveLiveAttributes.ContentState, key: String?) {
     lastState = content
     lastArtworkKey = key
   }
 
-  private func contentState(from state: LiveActivityState) -> SubwaveLiveAttributes.ContentState {
+  @MainActor private func contentState(from state: LiveActivityState) -> SubwaveLiveAttributes.ContentState {
     SubwaveLiveAttributes.ContentState(
       title: state.title,
       artist: state.artist,
@@ -169,7 +178,7 @@ public class SubwaveLiveActivityModule: Module {
     return Date().addingTimeInterval(15 * 60)
   }
 
-  private func push(_ content: SubwaveLiveAttributes.ContentState) async {
+  @MainActor private func push(_ content: SubwaveLiveAttributes.ContentState) async {
     guard #available(iOS 17.0, *) else { return }
     let update = ActivityContent(state: content, staleDate: staleDate(for: content))
     for activity in Activity<SubwaveLiveAttributes>.activities {
@@ -177,7 +186,7 @@ public class SubwaveLiveActivityModule: Module {
     }
   }
 
-  private func endAll() async {
+  @MainActor private func endAll() async {
     guard #available(iOS 17.0, *) else { return }
     for activity in Activity<SubwaveLiveAttributes>.activities {
       await activity.end(nil, dismissalPolicy: .immediate)
@@ -187,7 +196,7 @@ public class SubwaveLiveActivityModule: Module {
   /// Fetch the cover if this track's is not already on disk, then re-push so it
   /// appears. The activity goes out WITHOUT waiting on this — a card with a
   /// disc mark now beats a correct card after a round trip.
-  private func ensureArtwork(_ state: LiveActivityState) {
+  @MainActor private func ensureArtwork(_ state: LiveActivityState) {
     guard
       let key = state.artworkKey, !key.isEmpty,
       let url = state.artworkUrl, !url.isEmpty,
@@ -200,7 +209,7 @@ public class SubwaveLiveActivityModule: Module {
       [weak self] name in
       guard let self else { return }
       Task { @MainActor in
-        self.inFlightArtworkKey = nil
+        if self.inFlightArtworkKey == key { self.inFlightArtworkKey = nil }
         guard let name, self.lastArtworkKey == key, var content = self.lastState else { return }
         guard content.artwork != name else { return }
         content.artwork = name

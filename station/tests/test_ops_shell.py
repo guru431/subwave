@@ -83,3 +83,42 @@ bash "$1"
     result = shell(code, script, env=env)
     assert result.returncode == 0, result.stderr
     assert "pull --ff-only" in marker.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("relative,flag", [
+    ("docker/broadcast-entrypoint.sh", "SUBWAVE_BROADCAST_LIB"),
+    ("docker/aio/supervisor.sh", "SUBWAVE_SUPERVISOR_LIB"),
+])
+def test_icecast_bitrates_reject_zero_without_disabling_the_zero_buffer(tmp_path, relative, flag):
+    (tmp_path / "liquidsoap_stream_buffer_seconds.txt").write_text("0", encoding="utf-8")
+    result = shell('''
+set -eu
+source "$1"
+for raw in 0 000 00096 bad -1; do stream_bitrate_or_default "$raw" 192; done
+stream_buffer_seconds
+''', ROOT / relative, env={flag: "1", "STATE_DIR": str(tmp_path).replace("\\", "/"),
+                          "SUBWAVE_STATE_ROOT": str(tmp_path).replace("\\", "/")})
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["192", "192", "96", "192", "192", "0"]
+
+
+@pytest.mark.parametrize("contents", ["ADMIN_USER=fixture\n", "COMPOSE_FILE=\n"])
+def test_update_uses_default_compose_when_env_key_is_absent_or_empty(tmp_path, contents):
+    (tmp_path / "scripts").mkdir()
+    script = tmp_path / "scripts/update.sh"
+    script.write_bytes((ROOT / "scripts/update.sh").read_bytes())
+    (tmp_path / ".env").write_text(contents, encoding="utf-8")
+    (tmp_path / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+    marker = tmp_path / "docker-calls"
+    result = shell('''
+set -eu
+docker() { printf '%s\n' "$*" >> "$CALLS"; }
+git() { :; }
+export -f docker git
+bash "$1"
+''', script, env={"COMPOSE_FILE": "", "CALLS": str(marker)})
+    assert result.returncode == 0, result.stderr
+    commands = marker.read_text(encoding="utf-8").splitlines()
+    compose = [command for command in commands if command.startswith("compose ")]
+    assert len(compose) >= 4
+    assert all(command.startswith("compose -f docker-compose.yml ") for command in compose)

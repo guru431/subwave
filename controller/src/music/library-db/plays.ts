@@ -87,6 +87,8 @@ export function lastAiredIndex(): LastAiredIndex {
 // The synchronous sampling API returns at most 500 rows per call, even when
 // asked for more, to keep listener polls responsive.
 export function deepCutTracks(cutoffIso: string, limit: number): TrackRecord[] {
+  const count = Math.min(500, Math.floor(limit));
+  if (!Number.isFinite(count) || count <= 0) return [];
   const d = requireDb();
   const ids = (d.prepare(`
     SELECT t.id FROM tracks t
@@ -94,7 +96,7 @@ export function deepCutTracks(cutoffIso: string, limit: number): TrackRecord[] {
       SELECT 1 FROM plays p WHERE p.track_id = t.id AND p.played_at >= ?
     )
     ORDER BY RANDOM() LIMIT ?
-  `).all(cutoffIso, Math.min(500, Math.max(1, Math.floor(limit)))) as Array<{ id: string }>).map((r) => r.id);
+  `).all(cutoffIso, count) as Array<{ id: string }>).map((r) => r.id);
   if (!ids.length) return [];
   const rows = d.prepare(
     `SELECT * FROM tracks WHERE id IN (${ids.map(() => '?').join(',')})`,

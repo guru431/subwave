@@ -9,6 +9,7 @@ SCRIPT = Path(__file__).resolve().parent.parent / "tts-f5" / "tts-bridge-run.ps1
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows launcher")
+@pytest.mark.integration  # A real PowerShell launch takes over one second on Windows.
 def test_bridge_passes_token_through_environment_and_restores_parent(tmp_path):
     source = tmp_path / "bridge.py"
     source.write_text("# fixture\n", encoding="utf-8")

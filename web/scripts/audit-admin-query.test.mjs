@@ -7,6 +7,15 @@ import test from 'node:test';
 
 const audit = path.resolve(import.meta.dirname, 'audit-admin-query.mjs');
 
+test('path flags reject absent values with a usage error', () => {
+  for (const args of [['--root'], ['--root', '--allow-incomplete'], ['--ownership-registry']]) {
+    const result = spawnSync(process.execPath, [audit, ...args], { encoding: 'utf8', timeout: 10_000 });
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, new RegExp(`${args[0]} requires a path`));
+    assert.doesNotMatch(result.stderr, /TypeError|ERR_INVALID_ARG_TYPE/);
+  }
+});
+
 // The production audit deliberately fails stale imperative entries, so an
 // isolated ownership fixture supplies one exact call for every classification.
 const validImperativeFixtures = {
@@ -90,19 +99,19 @@ const registry = [{
 
 function runAudit(files = {}, ownership = []) {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'subwave-admin-audit-'));
-  const allFiles = { ...validImperativeFixtures, ...files };
-  for (const [relative, source] of Object.entries(allFiles)) {
-    const target = path.join(fixtureRoot, relative);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, source);
-  }
-  const registryPath = path.join(fixtureRoot, 'ownership.json');
-  fs.writeFileSync(registryPath, JSON.stringify(ownership));
   try {
+    const allFiles = { ...validImperativeFixtures, ...files };
+    for (const [relative, source] of Object.entries(allFiles)) {
+      const target = path.join(fixtureRoot, relative);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, source);
+    }
+    const registryPath = path.join(fixtureRoot, 'ownership.json');
+    fs.writeFileSync(registryPath, JSON.stringify(ownership));
     return spawnSync(
       process.execPath,
       [audit, '--root', fixtureRoot, '--ownership-registry', registryPath],
-      { encoding: 'utf8' },
+      { encoding: 'utf8', timeout: 10_000 },
     );
   } finally {
     fs.rmSync(fixtureRoot, { recursive: true, force: true });

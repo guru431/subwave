@@ -231,7 +231,7 @@ subhttp_min_bytes = 4096
 # Per-handoff completion outcomes consumed by the controller over telnet. The
 # probe token rides in a URL fragment (never sent to the origin), so a stale
 # result for the same song id cannot satisfy a later push. Entries are removed
-# when read.
+# when read; a bounded tail also covers a controller that never collects them.
 subhttp_probe_outcomes = ref([])
 
 def subhttp_probe_id(uri) =
@@ -243,7 +243,7 @@ def remember_subhttp_outcome(uri, outcome) =
   probe_id = subhttp_probe_id(uri)
   if probe_id != "" then
     kept = list.filter(fun(p) -> fst(p) != probe_id, subhttp_probe_outcomes())
-    subhttp_probe_outcomes.set([(probe_id, outcome), ...kept])
+    subhttp_probe_outcomes.set([(probe_id, outcome), ...list.slice(length=255, kept)])
   end
 end
 
@@ -324,25 +324,35 @@ dj_queue = request.queue(id="dj_queue")
 jingle_now_queue = request.queue(id="jingle_now_queue")
 
 def poll_queue() =
-  if file.exists("#{state_dir}/next.txt") then
-    contents = string.trim(file.contents("#{state_dir}/next.txt"))
-    file.remove("#{state_dir}/next.txt")
-    if contents != "" then
-      log("Queueing: #{redact_subhttp_uri(contents)}")
-      ignore(dj_queue.push(request.create(contents)))
+  try
+    if file.exists("#{state_dir}/next.txt") then
+      contents = string.trim(file.contents("#{state_dir}/next.txt"))
+      file.remove("#{state_dir}/next.txt")
+      if contents != "" then
+        log("Queueing: #{redact_subhttp_uri(contents)}")
+        ignore(dj_queue.push(request.create(contents)))
+      end
     end
+  catch err do
+    detail = redact_subhttp_uri("#{err}")
+    log(label="subwave", level=2, "Queue poll failed (#{detail})")
   end
 end
 thread.run(every=1.0, poll_queue)
 
 def poll_jingle_now() =
-  if file.exists("#{state_dir}/jingle-now.txt") then
-    contents = string.trim(file.contents("#{state_dir}/jingle-now.txt"))
-    file.remove("#{state_dir}/jingle-now.txt")
-    if contents != "" then
-      log("Queueing on-demand jingle: #{contents}")
-      ignore(jingle_now_queue.push(request.create(contents)))
+  try
+    if file.exists("#{state_dir}/jingle-now.txt") then
+      contents = string.trim(file.contents("#{state_dir}/jingle-now.txt"))
+      file.remove("#{state_dir}/jingle-now.txt")
+      if contents != "" then
+        log("Queueing on-demand jingle: #{contents}")
+        ignore(jingle_now_queue.push(request.create(contents)))
+      end
     end
+  catch err do
+    detail = redact_subhttp_uri("#{err}")
+    log(label="subwave", level=2, "Jingle poll failed (#{detail})")
   end
 end
 thread.run(every=0.5, poll_jingle_now)
@@ -1188,45 +1198,60 @@ else
 end
 
 def poll_voice() =
-  if file.exists("#{state_dir}/say.txt") then
-    contents = string.trim(file.contents("#{state_dir}/say.txt"))
-    file.remove("#{state_dir}/say.txt")
-    if contents != "" then
-      log("DJ says: #{contents}")
-      if has_leadin then
-        ignore(voice_queue.push(request.create(leadin_path)))
+  try
+    if file.exists("#{state_dir}/say.txt") then
+      contents = string.trim(file.contents("#{state_dir}/say.txt"))
+      file.remove("#{state_dir}/say.txt")
+      if contents != "" then
+        log("DJ says: #{contents}")
+        if has_leadin then
+          ignore(voice_queue.push(request.create(leadin_path)))
+        end
+        ignore(voice_queue.push(request.create(contents)))
+        write_pause_voice_accepted(contents)
       end
-      ignore(voice_queue.push(request.create(contents)))
-      write_pause_voice_accepted(contents)
     end
+  catch err do
+    detail = redact_subhttp_uri("#{err}")
+    log(label="subwave", level=2, "Voice poll failed (#{detail})")
   end
 end
 thread.run(every=0.5, poll_voice)
 
 def poll_intro() =
-  if file.exists("#{state_dir}/intro.txt") then
-    contents = string.trim(file.contents("#{state_dir}/intro.txt"))
-    file.remove("#{state_dir}/intro.txt")
-    if contents != "" then
-      log("DJ talk-over: #{contents}")
-      if has_leadin then
-        ignore(intro_queue.push(request.create(leadin_path)))
+  try
+    if file.exists("#{state_dir}/intro.txt") then
+      contents = string.trim(file.contents("#{state_dir}/intro.txt"))
+      file.remove("#{state_dir}/intro.txt")
+      if contents != "" then
+        log("DJ talk-over: #{contents}")
+        if has_leadin then
+          ignore(intro_queue.push(request.create(leadin_path)))
+        end
+        ignore(intro_queue.push(request.create(contents)))
       end
-      ignore(intro_queue.push(request.create(contents)))
     end
+  catch err do
+    detail = redact_subhttp_uri("#{err}")
+    log(label="subwave", level=2, "Intro poll failed (#{detail})")
   end
 end
 thread.run(every=0.5, poll_intro)
 
 def poll_sfx() =
-  if file.exists("#{state_dir}/sfx.txt") then
-    contents = string.trim(file.contents("#{state_dir}/sfx.txt"))
-    file.remove("#{state_dir}/sfx.txt")
-    if contents != "" then
-      log("DJ sound effect: #{contents}")
-      # No lead-in: a stinger must start promptly to land under the voice.
-      ignore(sfx_queue.push(request.create(contents)))
+  try
+    if file.exists("#{state_dir}/sfx.txt") then
+      contents = string.trim(file.contents("#{state_dir}/sfx.txt"))
+      file.remove("#{state_dir}/sfx.txt")
+      if contents != "" then
+        log("DJ sound effect: #{contents}")
+        # No lead-in: a stinger must start promptly to land under the voice.
+        ignore(sfx_queue.push(request.create(contents)))
+      end
     end
+  catch err do
+    detail = redact_subhttp_uri("#{err}")
+    log(label="subwave", level=2, "Sound-effect poll failed (#{detail})")
   end
 end
 thread.run(every=0.5, poll_sfx)

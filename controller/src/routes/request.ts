@@ -857,12 +857,6 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
     });
   }
 
-  // Spend the hourly budgets only after the queue-state gates: those reject
-  // without queueing, and charging them burned the station-wide cap to zero on
-  // rejections alone. The per-IP cooldown was already spent by checkRateLimit.
-  commitRateLimit(ip);
-  commitGlobalRateLimit();
-
   const id = randomUUID();
   const entry: any = {
     id, status: 'pending', requester, text,
@@ -878,6 +872,11 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
   catch {
     return res.status(503).json({ success: false, message: 'Не удалось сохранить заказ — попробуйте позже.' });
   }
+  // Only a durably accepted request spends the hourly budgets. Queue-state
+  // refusals and failed receipt writes must leave those slots available.
+  // The per-IP cooldown was already spent by checkRateLimit.
+  commitRateLimit(ip);
+  commitGlobalRateLimit();
   requests.set(id, entry);
   lastByIp.set(ip, entry);
   queue.log('request', `${requester}: "${text}" (id ${id.slice(0, 8)})${stripped.injection ? ` [${stripped.injection} stripped]` : ''}`);

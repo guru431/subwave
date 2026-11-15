@@ -484,7 +484,7 @@ export function EngineVoiceFields({
               <div className="field">
                 <Label>Cloud provider</Label>
                 <CloudProviderSelector
-                  value={value.cloudProvider}
+                  value={geminiSelected ? GEMINI_CLOUD_PROVIDER : value.cloudProvider}
                   providerIds={cloudProviders}
                   availability={{
                     cloudByProvider: resolveKeyPresence(

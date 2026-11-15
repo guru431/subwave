@@ -86,6 +86,7 @@ KNOWN=(
   # queue.ts).
   "aio-analyzer-heavy.test.ts"
   "aio-analyzer-replicas.test.ts"
+  "jamendo-pull.test.ts"
   "aio-log-link.test.ts"
   # CLI sources are outside /app in the controller-only image; --src runs it.
   "cli-operator.test.ts"
@@ -128,10 +129,10 @@ KNOWN=(
 # Не запускаются вовсе: нагрузочный тест сеет 200 тыс. треков в базу на 820 МБ
 # и идёт дольше двух минут — хосту станции такой прогон не по карману.
 SKIP_FILES="observatory-scale.test.ts"
-# CLI rejection and local-worker lifecycle spawn real controller/worker child
+# CLI rejection, local-worker lifecycle and crash recovery spawn real controller/worker child
 # processes. Keep these end-to-end integration checks at the full level; the
 # fast level retains the pure analysis policies and runtime-state regressions.
-INTEGRATION_FILES="analyze-cli.test.ts analyzer-local-start.test.ts"
+INTEGRATION_FILES="analyze-cli.test.ts analyzer-local-start.test.ts id-rotation-recovery.test.ts"
 if [ "$FAST" -eq 1 ]; then SKIP_FILES="$SKIP_FILES $INTEGRATION_FILES"; fi
 
 # Удалённая часть: docker run со сторожем памяти и потолком времени.

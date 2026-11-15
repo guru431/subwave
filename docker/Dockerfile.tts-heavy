@@ -121,7 +121,8 @@ COPY controller/scripts/pocket_tts_worker.py /app/workers/pocket_tts_worker.py
 
 # Shared state mount — WAVs land in /var/sub-wave/voice/* and the controller
 # hands the paths to Liquidsoap. mkdir'd here so the image runs standalone too.
-RUN mkdir -p /var/sub-wave/voice && chmod 777 /var/sub-wave
+RUN mkdir -p /var/sub-wave/voice && chmod 777 /var/sub-wave \
+    && chown 10001:10001 /var/sub-wave/voice
 
 # --- Drop root --------------------------------------------------------------
 # The server only writes the shared mount and the caches. HOME/XDG/TORCH point

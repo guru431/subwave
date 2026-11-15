@@ -23,8 +23,12 @@ private extension Color {
   /// still a working activity.
   init(subwaveHex hex: String) {
     var value: UInt64 = 0
-    let cleaned = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
-    guard Scanner(string: cleaned).scanHexInt64(&value), cleaned.count == 6 || cleaned.count == 8 else {
+    let cleaned = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+    guard
+      cleaned.count == 6 || cleaned.count == 8,
+      cleaned.allSatisfy({ $0.isASCII && $0.isHexDigit }),
+      Scanner(string: cleaned).scanHexInt64(&value)
+    else {
       self = Color(red: 0.851, green: 0.294, blue: 0.165)
       return
     }

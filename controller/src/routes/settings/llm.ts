@@ -4,6 +4,7 @@
 import express from 'express';
 import { config } from '../../config.js';
 import * as settings from '../../settings.js';
+import { storedLlmHeader } from '../../settings/vocab.js';
 import * as llmProvider from '../../llm/provider.js';
 import { probeEmbeddingConfig } from '../../music/embeddings.js';
 import { requireAdmin } from '../../middleware/auth.js';
@@ -268,7 +269,7 @@ function resolveProbeHeaders(raw: unknown, stored: unknown): Record<string, stri
   const onFile = (stored && typeof stored === 'object' ? stored : {}) as Record<string, unknown>;
   for (const name of Object.keys(raw as Record<string, unknown>)) {
     const v = (raw as Record<string, unknown>)[name];
-    const resolved = v === 'set' ? onFile[name.trim()] : v;
+    const resolved = v === 'set' ? storedLlmHeader(onFile, name) : v;
     if (typeof resolved === 'string' && resolved.trim()) out[name.trim()] = resolved.trim();
   }
   return out;
@@ -562,4 +563,3 @@ router.post('/settings/embedding/probe', requireAdmin, async (req, res) => {
     res.json({ ok: false, dim: null, code: 'unknown', message: (err as { message?: string })?.message || 'probe failed' });
   }
 });
-

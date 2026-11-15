@@ -77,56 +77,58 @@ console.log(`On air: ${track.artist ?? '?'} — ${track.title}`);
 mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
 
-for (const plate of PRESS_RUN_PLATES) {
-  if (ONLY && !plate.id.includes(ONLY)) continue;
-  console.log(`plate ${plate.no}: ${plate.id}`);
-  const context = await browser.newContext({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 1 });
-  await context.addInitScript(([skin, theme]) => {
-    localStorage.setItem('subwave-skin-override', skin);
-    localStorage.setItem('subwave-theme-override', theme);
-    // Drop caches that could pre-paint a stale palette or pin a mode.
-    localStorage.removeItem('subwave-theme-tokens');
-    localStorage.removeItem('subwave-mode-override');
-    localStorage.removeItem('subwave-skin-station');
-  }, [plate.skinId, plate.themeId]);
-  const page = await context.newPage();
-  await page.goto(`${BASE}/listen`, { waitUntil: 'domcontentloaded' });
+try {
+  for (const plate of PRESS_RUN_PLATES) {
+    if (ONLY && !plate.id.includes(ONLY)) continue;
+    console.log(`plate ${plate.no}: ${plate.id}`);
+    const context = await browser.newContext({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 1 });
+    await context.addInitScript(([skin, theme]) => {
+      localStorage.setItem('subwave-skin-override', skin);
+      localStorage.setItem('subwave-theme-override', theme);
+      // Drop caches that could pre-paint a stale palette or pin a mode.
+      localStorage.removeItem('subwave-theme-tokens');
+      localStorage.removeItem('subwave-mode-override');
+      localStorage.removeItem('subwave-skin-station');
+    }, [plate.skinId, plate.themeId]);
+    const page = await context.newPage();
+    await page.goto(`${BASE}/listen`, { waitUntil: 'domcontentloaded' });
 
-  // Theme override painted: every built-in theme is a registry palette, and
-  // ThemeProvider applies palettes as inline tokens on <html>.
-  await page.waitForFunction(
-    () => document.documentElement.style.getPropertyValue('--bg') !== '',
-    null, { timeout: 20000 },
-  );
-  // Skin chunk mounted (pre-paint pending marker cleared — lib/skin.ts).
-  await page.waitForFunction(
-    () => !document.documentElement.hasAttribute('data-skin-pending'),
-    null, { timeout: 20000 },
-  );
+    // Theme override painted: every built-in theme is a registry palette, and
+    // ThemeProvider applies palettes as inline tokens on <html>.
+    await page.waitForFunction(
+      () => document.documentElement.style.getPropertyValue('--bg') !== '',
+      null, { timeout: 20000 },
+    );
+    // Skin chunk mounted (pre-paint pending marker cleared — lib/skin.ts).
+    await page.waitForFunction(
+      () => !document.documentElement.hasAttribute('data-skin-pending'),
+      null, { timeout: 20000 },
+    );
 
-  // Dismiss the tune-in gate: click the skin's tune affordance if it exposes
-  // one by name, otherwise Space (the shell-level tune shortcut).
-  const tuneBtn = page.getByRole('button', { name: /tune in/i }).first();
-  if (await tuneBtn.isVisible().catch(() => false)) {
-    await tuneBtn.click().catch(() => {});
-  } else {
-    await page.keyboard.press('Space').catch(() => {});
+    // Dismiss the tune-in gate: click the skin's tune affordance if it exposes
+    // one by name, otherwise Space (the shell-level tune shortcut).
+    const tuneBtn = page.getByRole('button', { name: /tune in/i }).first();
+    if (await tuneBtn.isVisible().catch(() => false)) {
+      await tuneBtn.click().catch(() => {});
+    } else {
+      await page.keyboard.press('Space').catch(() => {});
+    }
+
+    // Cover art up — the strongest "this frame looks on-air" signal.
+    await page.waitForFunction(
+      () => Array.from(document.images).some(i => i.src.includes('/cover') && i.complete && i.naturalWidth > 0),
+      null, { timeout: 30000 },
+    ).catch(() => console.warn(`  [${plate.id}] cover art never settled — capturing anyway`));
+    // Let idle motion settle: needle drop, spectrum warm-up, CRT flicker-in.
+    await page.waitForTimeout(3000);
+
+    const png = await page.screenshot({ type: 'png' });
+    const file = join(OUT, `${plate.id}.webp`);
+    await sharp(png).webp({ quality: 82 }).toFile(file);
+    console.log(`  wrote ${file}`);
+    await context.close();
   }
-
-  // Cover art up — the strongest "this frame looks on-air" signal.
-  await page.waitForFunction(
-    () => Array.from(document.images).some(i => i.src.includes('/cover') && i.complete && i.naturalWidth > 0),
-    null, { timeout: 30000 },
-  ).catch(() => console.warn(`  [${plate.id}] cover art never settled — capturing anyway`));
-  // Let idle motion settle: needle drop, spectrum warm-up, CRT flicker-in.
-  await page.waitForTimeout(3000);
-
-  const png = await page.screenshot({ type: 'png' });
-  const file = join(OUT, `${plate.id}.webp`);
-  await sharp(png).webp({ quality: 82 }).toFile(file);
-  console.log(`  wrote ${file}`);
-  await context.close();
+} finally {
+  await browser.close();
 }
-
-await browser.close();
 console.log('done.');

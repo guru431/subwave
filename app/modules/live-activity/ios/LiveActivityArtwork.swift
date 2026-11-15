@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import UIKit
 
 // Cover art delivery for the Live Activity.
@@ -30,13 +31,11 @@ enum LiveActivityArtwork {
     return dir
   }
 
-  /// A subsonic id is opaque and may contain path separators on some servers,
-  /// so it is reduced to a filesystem-safe name rather than trusted.
+  /// A subsonic id is opaque. Hash the whole key so path separators and long
+  /// shared prefixes cannot alias another track's cached cover.
   private static func filename(for key: String) -> String {
-    let safe = key.unicodeScalars.map { scalar -> String in
-      CharacterSet.alphanumerics.contains(scalar) ? String(scalar) : "-"
-    }.joined()
-    return String(safe.prefix(64)) + ".img"
+    let digest = SHA256.hash(data: Data(key.utf8))
+    return digest.map { String(format: "%02x", $0) }.joined() + ".img"
   }
 
   /// The filename for `key` if it is already on disk, else nil. Called on the

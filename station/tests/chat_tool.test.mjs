@@ -68,3 +68,17 @@ test('уже прочитанное не возвращается', async () => 
   const out = await readChat({}, {}, services, {});
   assert.deepEqual(out.messages, []);
 });
+
+test('неверный ответ комнаты оставляет курсор и не прерывает навык', async () => {
+  for (const payload of [null, 'bad', { messages: {} }, { messages: [null] }]) {
+    const state = { chatSince: 6 };
+    let signal;
+    globalThis.fetch = async (_url, options) => {
+      signal = options?.signal;
+      return new Response(JSON.stringify(payload));
+    };
+    assert.deepEqual(await readChat({}, state, services, {}), { messages: [] });
+    assert.equal(state.chatSince, 6);
+    assert.ok(signal instanceof AbortSignal, 'сетевой вызов ограничен своим таймаутом');
+  }
+});

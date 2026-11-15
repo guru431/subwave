@@ -151,7 +151,7 @@ router.get('/library/liked', requireAdmin, async (req, res) => {
         isCompilation: rec?.isCompilation ?? null,
         eraUntrusted: rec?.eraUntrusted ?? null,
         genre: rec?.genre ?? snap.genre ?? null,
-        duration: snap.duration ?? rec?.durationSec ?? null,
+        duration: rec?.durationSec ?? snap.duration ?? null,
         moods: rec?.moods ?? [],
         energy: rec?.energy ?? null,
         source: rec?.source ?? null,

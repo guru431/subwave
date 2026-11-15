@@ -100,7 +100,7 @@
   /* Type families — so `font-sans` / `font-display` / `font-mono` resolve to the
      next/font variables set on <html>. `font-display` follows the themeable
      --display-font token, so an operator-picked headline face applies app-wide. */
-  --font-sans: var(--font-sans);
+  --font-sans: var(--sans-font);
   --font-display: var(--display-font);
   --font-mono: var(--mono-font);
 }
@@ -4599,7 +4599,7 @@ html:has(.admin-root.paper) {
     display: block;
     width: 100%;
     height: auto;
-    margin: 1.6em 0;
+    margin: 0 0 1.4em;
     border: 1px solid var(--ink);
     background: var(--bg);
 }
@@ -4722,12 +4722,6 @@ html:has(.admin-root.paper) {
     height: 1px;
     background: var(--ink);
     margin: 2em 0;
-}
-.bs-prose img {
-    max-width: 100%;
-    height: auto;
-    border: 1px solid var(--ink);
-    margin: 0 0 1.4em;
 }
 .bs-prose table {
     width: 100%;
@@ -5364,7 +5358,7 @@ html:has(.admin-root.paper) {
 .observatory-root .flt-chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .observatory-root .flt-chip { border: 1px solid var(--separator-strong); background: transparent; color: var(--ink); font-size: 10px; letter-spacing: 0.04em; text-transform: lowercase; font-weight: 500; padding: 5px 9px; cursor: pointer; transition: background 0.12s, border-color 0.12s, color 0.12s; }
 .observatory-root .flt-chip:hover { background: var(--ink-soft); border-color: var(--ink); }
-.observatory-root .flt-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.observatory-root .flt-chip.on { background: var(--accent); border-color: var(--accent); color: var(--bg); }
 .observatory-root .rail-foot { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--separator-strong); display: flex; flex-direction: column; gap: 10px; }
 .observatory-root .rail-count { font-size: 13px; font-weight: 700; letter-spacing: 0.02em; }
 .observatory-root .rail-count .ad-muted { font-size: 10px; letter-spacing: 0.16em; }
@@ -5553,7 +5547,7 @@ html:has(.admin-root.paper) {
    failed load must never masquerade as a fresh install */
 .observatory-root .obs-error { display: flex; align-items: center; gap: 14px; padding: 8px 22px; border-bottom: 1px solid var(--accent); background: color-mix(in oklab, var(--accent) 9%, var(--bg)); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700; flex: none; z-index: 4; }
 .observatory-root .obs-error button { margin-left: auto; flex: none; border: 1px solid var(--accent); background: transparent; color: var(--accent); font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 700; padding: 4px 10px; cursor: pointer; transition: background 0.12s, color 0.12s; }
-.observatory-root .obs-error button:hover:not(:disabled) { background: var(--accent); color: #fff; }
+.observatory-root .obs-error button:hover:not(:disabled) { background: var(--accent); color: var(--bg); }
 .observatory-root .obs-error button:disabled { cursor: default; opacity: 0.6; }
 
 /* search jump-to dropdown */
@@ -5572,9 +5566,9 @@ html:has(.admin-root.paper) {
 
 /* dossier queue-on-air */
 .observatory-root .dossier-queue { margin-top: 12px; width: 100%; border: 1px solid var(--accent); background: transparent; color: var(--accent); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; font-weight: 700; padding: 9px 0; cursor: pointer; transition: background 0.12s, color 0.12s; }
-.observatory-root .dossier-queue:hover:not(:disabled) { background: var(--accent); color: #fff; }
+.observatory-root .dossier-queue:hover:not(:disabled) { background: var(--accent); color: var(--bg); }
 .observatory-root .dossier-queue:disabled { cursor: default; }
-.observatory-root .dossier-queue.done { background: var(--accent); color: #fff; opacity: 0.85; }
+.observatory-root .dossier-queue.done { background: var(--accent); color: var(--bg); opacity: 0.85; }
 .observatory-root .dossier-queue-err { margin-top: 6px; color: var(--accent); text-transform: none; letter-spacing: 0.04em; }
 
 /* keyboard focus on the map (tabIndex=0 — arrows pan, +/- zoom) */

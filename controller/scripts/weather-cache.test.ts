@@ -35,6 +35,32 @@ test('snow showers are snow rather than a thunderstorm', async (t) => {
   }
 });
 
+test('HTTP failures name the provider status and reason once per failed-cache window', async t => {
+  t.after(restore);
+  invalidateWeatherCache();
+  const warnings = t.mock.method(console, 'warn', () => {});
+  const calls = stubFetch(() => new Response(JSON.stringify({ error: true, reason: 'Latitude must be in range' }), { status: 400 }));
+  assert.equal((await getWeather()).condition, 'unknown');
+  assert.equal((await getWeather()).condition, 'unknown');
+  assert.equal(calls(), 1);
+  assert.equal(warnings.mock.calls.length, 1);
+  assert.match(String(warnings.mock.calls[0].arguments[0]), /Open-Meteo.*400.*Latitude/);
+});
+
+test('malformed successful weather payloads never enter the success cache', async t => {
+  t.after(restore);
+  const warnings = t.mock.method(console, 'warn', () => {});
+  for (const payload of [{}, { current: { weather_code: 0, is_day: 1 } }]) {
+    invalidateWeatherCache();
+    stubFetch(() => new Response(JSON.stringify(payload)));
+    const weather = await getWeather();
+    assert.equal(weather.condition, 'unknown');
+    assert.equal(weather.temp, null);
+  }
+  assert.equal(warnings.mock.calls.length, 2);
+  assert.ok(warnings.mock.calls.every(call => /invalid current weather/.test(String(call.arguments[0]))));
+});
+
 test('неудача помнится: второй вызов не ждёт Open-Meteo', async (t) => {
   t.after(restore);
   invalidateWeatherCache();

@@ -26,9 +26,12 @@ export default async function readChat(ctx, state, services, config) {
   const since = Number.isFinite(state.chatSince) ? state.chatSince : 0;
   let payload;
   try {
-    const r = await fetch(`${base}/unread?since=${since}&limit=${LIMIT}`);
+    const r = await fetch(`${base}/unread?since=${since}&limit=${LIMIT}`, { signal: AbortSignal.timeout(5000) });
     if (!r.ok) throw new Error(`room answered ${r.status}`);
     payload = await r.json();
+    if (!Array.isArray(payload?.messages) || payload.messages.some(m => !m || typeof m !== 'object')) {
+      throw new Error('room returned invalid messages');
+    }
   } catch (err) {
     // Недоступная комната не должна быть слышна в эфире: молчим, как при
     // пустом чате, и оставляем след в логе будки.

@@ -145,20 +145,34 @@ async function fetchWeather() {
     const unitParam = imperial ? '&temperature_unit=fahrenheit' : '';
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${weather.lat}&longitude=${weather.lng}&current=temperature_2m,weather_code,is_day${unitParam}`;
     const res = await fetchWithTimeout(url, { timeoutMs: 10_000 });
-    const data = await res.json() as any;
-    const code = data.current.weather_code;
+    if (!res.ok) {
+      let reason = '';
+      try {
+        const data = await res.json() as { reason?: unknown };
+        if (typeof data?.reason === 'string') reason = `: ${data.reason.slice(0, 200)}`;
+      } catch { /* The HTTP status is still useful when the error body is not JSON. */ }
+      throw new Error(`Open-Meteo HTTP ${res.status}${reason}`);
+    }
+    const data = await res.json() as { current?: { weather_code?: number; temperature_2m?: number; is_day?: number } } | null;
+    const current = data?.current;
+    if (!current || !Number.isFinite(current.weather_code) || !Number.isFinite(current.temperature_2m)
+        || (current.is_day !== 0 && current.is_day !== 1)) {
+      throw new Error('Open-Meteo returned invalid current weather');
+    }
+    const code = current.weather_code!;
     const condition = mapWeatherCode(code);
     const result = {
       condition,
       mood: weatherToMood(condition),
-      temp: Math.round(data.current.temperature_2m),
+      temp: Math.round(current.temperature_2m!),
       tempUnit,
-      isDay: data.current.is_day === 1,
+      isDay: current.is_day === 1,
       location: attributedLocation(weather),
     };
     weatherCache = { data: result, fetchedAt: Date.now(), configKey };
     return result;
-  } catch {
+  } catch (err) {
+    console.warn(`[weather] ${err instanceof Error ? err.message : String(err)}`);
     weatherFailed = { at: Date.now(), configKey };
     return null;
   }

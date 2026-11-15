@@ -6,7 +6,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 if [[ -z "${COMPOSE_FILE:-}" && -f .env ]]; then
-  COMPOSE_FILE=$(grep -E "^COMPOSE_FILE=" .env | cut -d= -f2- | tail -n1)
+  # A missing optional key is ordinary, not a pipefail error.
+  COMPOSE_FILE=$(sed -n 's/^COMPOSE_FILE=//p' .env | tail -n1)
 fi
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
 IFS=: read -r -a COMPOSE_FILES <<< "$COMPOSE_FILE"

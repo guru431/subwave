@@ -319,6 +319,31 @@ def test_concurrency_env_validation():
             os.environ["SUBWAVE_TEST_CONCURRENCY"] = old
 
 
+def test_request_timeout_env_and_compose_contract():
+    old = os.environ.get("ANALYZE_REQUEST_TIMEOUT_MS")
+    try:
+        for raw, expected in ((None, 120_000), ("", 120_000), ("600000", 600_000),
+                              ("0", 120_000), ("-1", 120_000), ("1_000", 120_000),
+                              ("1.5", 120_000), ("many", 120_000)):
+            if raw is None:
+                os.environ.pop("ANALYZE_REQUEST_TIMEOUT_MS", None)
+            else:
+                os.environ["ANALYZE_REQUEST_TIMEOUT_MS"] = raw
+            spec = importlib.util.spec_from_file_location("analyzer_timeout_fixture", server_path)
+            fixture = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(fixture)
+            assert fixture.StdioWorker.REQUEST_TIMEOUT_S == expected / 1000
+    finally:
+        if old is None:
+            os.environ.pop("ANALYZE_REQUEST_TIMEOUT_MS", None)
+        else:
+            os.environ["ANALYZE_REQUEST_TIMEOUT_MS"] = old
+    for name in ("docker-compose.yml", "docker-compose.byo.yml", "docker-compose.dev.yml"):
+        compose = (server_path.parents[2] / name).read_text(encoding="utf-8")
+        analyzer = compose.split("\n  analyzer:", 1)[1]
+        assert "ANALYZE_REQUEST_TIMEOUT_MS=${ANALYZE_REQUEST_TIMEOUT_MS:-}" in analyzer
+
+
 async def test_boot_ready_deadline():
     worker = server.StdioWorker("boot", "python", "worker.py")
     worker.READY_TIMEOUT_S = 0
@@ -407,10 +432,57 @@ def test_cache_write_failure_cleans_partial_files():
             sys.modules["soundfile"] = original_sf
 
 
+async def test_request_deadline_releases_the_pool_and_stops_a_stuck_worker(stuck_in):
+    worker = server.StdioWorker("hung", "python", "worker.py")
+    worker.REQUEST_TIMEOUT_S = 0.01
+
+    class Stdin:
+        def write(self, _data):
+            pass
+
+        async def drain(self):
+            if stuck_in == "stdin":
+                await asyncio.Event().wait()
+
+    class Proc:
+        returncode = None
+        stdin = Stdin()
+        terminated = False
+
+        def terminate(self):
+            self.terminated = True
+            self.returncode = -15
+
+        async def wait(self):
+            assert self.terminated
+            return self.returncode
+
+    proc = Proc()
+
+    async def stuck_response():
+        await asyncio.Event().wait()
+
+    worker.proc = proc
+    worker.ready = True
+    worker._await_message = stuck_response
+    pool = server.AnalyzerWorkerPool([worker])
+    try:
+        await asyncio.wait_for(pool.request({"path": "fixture"}), timeout=0.2)
+    except server.WorkerUnavailableError as error:
+        assert "no worker ready" in str(error)
+    else:
+        raise AssertionError("a worker stuck writing/reading must release its pool reservation")
+    assert proc.terminated and not worker.ready
+    assert not pool._busy and not worker._reserved
+
+
 async def main():
     test_concurrency_env_validation()
+    test_request_timeout_env_and_compose_contract()
     test_cache_write_failure_cleans_partial_files()
     await test_boot_ready_deadline()
+    for stuck_in in ("stdin", "stdout"):
+        await test_request_deadline_releases_the_pool_and_stops_a_stuck_worker(stuck_in)
     await test_pool_concurrency()
     await test_waiter_uses_worker_that_becomes_ready()
     await test_unavailable_selection_retries_another_ready_worker()

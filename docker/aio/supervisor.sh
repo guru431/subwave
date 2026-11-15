@@ -417,6 +417,14 @@ read_state_num() {
 	esac
 }
 
+# Bitrates must be positive decimal values. Listener buffer zero remains valid.
+stream_bitrate_or_default() {
+	local value=$1
+	case "$value" in ''|*[!0-9]*) echo "$2"; return ;; esac
+	while [ "${value#0}" != "$value" ]; do value=${value#0}; done
+	echo "${value:-$2}"
+}
+
 # Keep the listener-time offset under controller ownership. Accepting an env
 # override here would make the Icecast burst disagree with /now-playing and
 # voice-event timing even though all four processes share this container.
@@ -612,13 +620,13 @@ render_icecast() {
 	local STREAM_BITRATE BUFFER_SECONDS OPUS_BITRATE AAC_BITRATE FLAC_BITRATE_EST
 	STREAM_BITRATE="${ICECAST_STREAM_BITRATE:-$(read_state_num liquidsoap_stream_bitrate.txt 192)}"
 	BUFFER_SECONDS="$(stream_buffer_seconds)"
-	case "$STREAM_BITRATE" in *[!0-9]*|'') STREAM_BITRATE=192 ;; esac
+	STREAM_BITRATE="$(stream_bitrate_or_default "$STREAM_BITRATE" 192)"
 	case "$BUFFER_SECONDS" in *[!0-9]*|'') BUFFER_SECONDS=22 ;; esac
 	[ "$BUFFER_SECONDS" -gt 60 ] && BUFFER_SECONDS=60
 	OPUS_BITRATE="${ICECAST_OPUS_BITRATE:-$(read_state_num liquidsoap_opus_bitrate.txt 96)}"
 	AAC_BITRATE="${ICECAST_AAC_BITRATE:-$(read_state_num liquidsoap_aac_bitrate.txt 192)}"
-	case "$OPUS_BITRATE" in *[!0-9]*|'') OPUS_BITRATE=96 ;; esac
-	case "$AAC_BITRATE" in *[!0-9]*|'') AAC_BITRATE=192 ;; esac
+	OPUS_BITRATE="$(stream_bitrate_or_default "$OPUS_BITRATE" 96)"
+	AAC_BITRATE="$(stream_bitrate_or_default "$AAC_BITRATE" 192)"
 	# FLAC is VBR — ~900 kbps is a typical average for 44.1/16 stereo.
 	FLAC_BITRATE_EST=900
 
@@ -724,6 +732,7 @@ run_broadcast() {
 	done
 
 	log "starting liquidsoap"
+	log "WARNING: liquidsoap runs as root for persisted-state UID compatibility; privilege drop is pending"
 	# TEMPORARY (re-harden later): run liquidsoap as root — same reason as
 	# docker/broadcast-entrypoint.sh (the savonet base bump changed the
 	# liquidsoap uid, making persisted state files unwritable).

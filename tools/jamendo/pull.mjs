@@ -4,7 +4,7 @@
 // attribution file (CC-BY requires credit). Resumable via _manifest.json.
 // Standalone — imports nothing from the controller. See README.md.
 
-import { mkdir, writeFile, readFile, rename, access } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, rename, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import NodeID3 from 'node-id3';
@@ -64,9 +64,18 @@ if (!clientId) {
   process.exit(1);
 }
 
+function positiveIntegerArg(name, fallback) {
+  const raw = args[name];
+  const value = raw === undefined ? fallback : Number(raw);
+  if (typeof raw === 'boolean' || !Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`--${name} must be a positive integer`);
+  }
+  return value;
+}
+
 const config = {
   out: args.out || './jamendo-music',
-  limit: Number(args.limit || 2000),
+  limit: positiveIntegerArg('limit', 2000),
   // Accepted CC licenses (aliases). NC / ND are fine for a non-commercial demo
   // that rebroadcasts the music unmodified.
   licenses: String(args.licenses || 'ccby,ccbysa,ccbync,ccbyncnd')
@@ -76,7 +85,7 @@ const config = {
   tags: args.tags ? String(args.tags) : null,
   fuzzytags: args.fuzzytags ? String(args.fuzzytags) : null,
   order: args.order || 'popularity_total',
-  concurrency: Math.max(1, Number(args.concurrency || 4)),
+  concurrency: positiveIntegerArg('concurrency', 4),
 };
 
 // Resolve requested aliases -> the set of CC slugs we'll accept.
@@ -112,7 +121,8 @@ function decodeEntities(s) {
   return String(s).replace(/&(#x?[0-9a-f]+|[a-z][a-z0-9]*);/gi, (m, e) => {
     if (e[0] === '#') {
       const code = e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : m;
+      return Number.isInteger(code) && code >= 0 && code <= 0x10ffff
+        && !(code >= 0xd800 && code <= 0xdfff) ? String.fromCodePoint(code) : m;
     }
     const code = NAMED_ENTITIES[e]; // named refs are case-sensitive (Aacute ≠ aacute)
     return code != null ? String.fromCodePoint(code) : m;
@@ -131,18 +141,20 @@ async function fetchWithRetry(url, { binary = false, tries = 5 } = {}) {
     try {
       const res = await fetch(url);
       if (res.status === 429 || res.status >= 500) {
+        lastErr = new Error('HTTP ' + res.status);
         const retryAfter = Number(res.headers.get('retry-after'));
         const wait = Number.isFinite(retryAfter) && retryAfter > 0
           ? retryAfter * 1000
           : Math.min(30000, 1000 * 2 ** attempt);
-        await sleep(wait);
+        if (attempt + 1 < tries) await sleep(wait);
         continue;
       }
-      if (!res.ok) throw new Error('HTTP ' + res.status);
+      if (!res.ok) throw Object.assign(new Error('HTTP ' + res.status), { permanent: true });
       return binary ? Buffer.from(await res.arrayBuffer()) : await res.json();
     } catch (err) {
+      if (err.permanent) throw err;
       lastErr = err;
-      await sleep(Math.min(30000, 1000 * 2 ** attempt));
+      if (attempt + 1 < tries) await sleep(Math.min(30000, 1000 * 2 ** attempt));
     }
   }
   throw lastErr || new Error('fetch failed: ' + url);
@@ -159,8 +171,18 @@ async function loadManifest() {
   }
 }
 
+async function writeAtomic(file, content) {
+  const part = file + '.part';
+  try {
+    await writeFile(part, content);
+    await rename(part, file);
+  } finally {
+    await rm(part, { force: true });
+  }
+}
+
 async function writeManifestAndCredits(manifest) {
-  await writeFile(MANIFEST, JSON.stringify(manifest, null, 2));
+  await writeAtomic(MANIFEST, JSON.stringify(manifest, null, 2));
 
   // CREDITS.md — drop-in for a public attribution page.
   const lines = [
@@ -178,14 +200,14 @@ async function writeManifestAndCredits(manifest) {
       `| ${mdCell(e.name)} | ${mdCell(e.artist)} | ${mdCell(e.album)} | [${slug}](${e.license_ccurl}) |`
     );
   }
-  await writeFile(join(config.out, 'CREDITS.md'), lines.join('\n') + '\n');
+  await writeAtomic(join(config.out, 'CREDITS.md'), lines.join('\n') + '\n');
 
   // credits.csv — same data, machine-readable.
   const csv = ['id,track,artist,album,license_url'];
   for (const e of manifest) {
     csv.push([e.id, e.name, e.artist, e.album, e.license_ccurl].map(csvCell).join(','));
   }
-  await writeFile(join(config.out, 'credits.csv'), csv.join('\n') + '\n');
+  await writeAtomic(join(config.out, 'credits.csv'), csv.join('\n') + '\n');
 }
 
 function mdCell(v) {
@@ -242,8 +264,6 @@ async function downloadTrack(track) {
 
   const audio = await fetchWithRetry(track.audiodownload, { binary: true });
   const part = file + '.part';
-  await writeFile(part, audio);
-  await rename(part, file);
 
   // musicinfo.tags holds genres / instruments / vibes (include=musicinfo).
   // Flatten into a TXXX frame so the tagger has signal before its own pass.
@@ -271,8 +291,17 @@ async function downloadTrack(track) {
     ...(cover ? { image: { mime: 'image/jpeg', type: { id: 3 }, description: 'Cover', imageBuffer: cover } } : {}),
   };
 
-  NodeID3.write(tags, file); // synchronous, returns true/Error
-  return { file, skipped: false };
+  // Publish only after the identity tag is written, so a failed write cannot
+  // turn the next resume into a collision or an untagged-file skip.
+  try {
+    await writeFile(part, audio);
+    const result = NodeID3.write(tags, part); // synchronous, returns true/Error
+    if (result !== true) throw result instanceof Error ? result : new Error('ID3 write failed');
+    await rename(part, file);
+    return { file, skipped: false };
+  } finally {
+    await rm(part, { force: true });
+  }
 }
 
 async function runPool(items, worker, concurrency) {
