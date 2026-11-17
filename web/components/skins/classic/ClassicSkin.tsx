@@ -339,6 +339,7 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
         djName={typeof dj?.name === 'string' ? dj.name : undefined}
         activeShow={activeShow}
         onOpenSchedule={openSchedule}
+        onOpenLibrary={() => setDrawer('request')}
       />
 
       <CenterStage

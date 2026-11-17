@@ -15,6 +15,7 @@ import urllib.request
 from datetime import datetime, timezone
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -87,6 +88,46 @@ def call(base, path, body=None, headers=None):
 def test_health_is_ok(room):
     base, _, _ = room
     assert call(base, "/health") == (200, {"ok": True})
+
+
+def test_library_summary_is_public_and_shared_until_cache_expires(room, monkeypatch):
+    base, _, _ = room
+    now, calls = [100.0], []
+    monkeypatch.setattr(server_mod, "time", SimpleNamespace(monotonic=lambda: now[0]))
+
+    def summary(*args):
+        calls.append(args)
+        return {"total": 0 if len(calls) > 1 else 4631, "scanning": False}
+
+    monkeypatch.setattr(server_mod.navidrome, "library_summary", summary)
+    assert call(base, "/library") == (200, {"total": 4631, "scanning": False})
+    now[0] += 59
+    assert call(base, "/library")[1]["total"] == 4631
+    assert len(calls) == 1 and calls[0] == ("http://navidrome", "u", "p")
+    now[0] += 2
+    assert call(base, "/library") == (200, {"total": 0, "scanning": False})
+    assert len(calls) == 2
+
+
+def test_library_failure_is_sanitized_cached_and_retried(room, monkeypatch):
+    base, _, _ = room
+    now, calls = [100.0], []
+    monkeypatch.setattr(server_mod, "time", SimpleNamespace(monotonic=lambda: now[0]))
+
+    def summary(*args):
+        calls.append(args)
+        if len(calls) == 1:
+            raise RuntimeError("DUMMY_SECRET upstream URL")
+        return {"total": 4631, "scanning": False}
+
+    monkeypatch.setattr(server_mod.navidrome, "library_summary", summary)
+    status, body = call(base, "/library")
+    assert status == 503 and "DUMMY_SECRET" not in json.dumps(body)
+    assert call(base, "/library") == (status, body)
+    assert len(calls) == 1
+    now[0] += 6
+    assert call(base, "/library")[1]["total"] == 4631
+    assert len(calls) == 2
 
 
 def test_posted_message_comes_back_in_the_feed(room):

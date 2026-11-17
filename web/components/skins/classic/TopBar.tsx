@@ -5,6 +5,7 @@ import { buildTagline } from '@/lib/tagline';
 import { ruStationName } from '@/lib/ru';
 import InstallButton from '@/components/InstallButton';
 import ThemeSwitcher from '@/components/ThemeSwitcher';
+import LibrarySummary from './LibrarySummary';
 import type { ActiveShow, StationContext } from '@/lib/types';
 
 export interface TopBarProps {
@@ -16,6 +17,7 @@ export interface TopBarProps {
   /** Optional — when provided, the show + host line becomes a button that
    *  opens the Schedule drawer. Omitted on Landing where there's no player. */
   onOpenSchedule?: () => void;
+  onOpenLibrary?: () => void;
 }
 
 export default memo(function TopBar({
@@ -25,6 +27,7 @@ export default memo(function TopBar({
   djName,
   activeShow,
   onOpenSchedule,
+  onOpenLibrary,
 }: TopBarProps) {
   const tagline = buildTagline(context);
   const showName = activeShow?.name || null;
@@ -105,6 +108,7 @@ export default memo(function TopBar({
           {tagline}
         </span>
       )}
+      {onOpenLibrary && <LibrarySummary onOpen={onOpenLibrary} />}
     </div>
   );
 });

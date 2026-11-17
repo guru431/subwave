@@ -7,6 +7,7 @@
     GET  /messages?since=&limit=      → {"messages": [...], "last": N}
     GET  /unread?since=&limit=        → то же, для навыка ведущего
     GET  /resolve?q=                  → {"exact": …|null, "alternatives": [...]}
+    GET  /library                     → {"total": N, "scanning": false}
     GET  /download?id=                → файл прозвучавшего трека (отказ — .txt с честным кодом)
     GET  /push/key                    → {"key": "<открытый ключ VAPID>"}
     POST /push/subscribe              → {"ok": true}   (201; тело — {subscription})
@@ -159,6 +160,10 @@ def build_handler(store: Store, config: Config):
     # несколько серверов в одном процессе, и общий счётчик протёк бы между ними.
     slots = threading.BoundedSemaphore(config.download_slots)
     resolves = Window(config.rate_seconds, config.resolve_max)
+    # Один запрос к Navidrome на минуту для всех слушателей. Отказы тоже
+    # кешируются (5 с), чтобы сбой не вызвал лавину повторных запросов.
+    library_lock = threading.Lock()
+    library_cache = {"until": 0.0, "status": 503, "body": {}}
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -363,6 +368,20 @@ def build_handler(store: Store, config: Config):
                                     now=datetime.now(timezone.utc))
                 self._send(200, {"messages": items,
                                  "last": items[-1]["id"] if items else since})
+            elif path == "/library":
+                with library_lock:
+                    if time.monotonic() >= library_cache["until"]:
+                        try:
+                            library_cache["body"] = navidrome.library_summary(*config.navidrome)
+                            library_cache["status"] = 200
+                        except Exception as e:               # noqa: BLE001
+                            print(f"room: /library: {type(e).__name__}", file=sys.stderr, flush=True)
+                            library_cache["body"] = {"error": "количество песен недоступно"}
+                            library_cache["status"] = 503
+                        ttl = 60 if library_cache["status"] == 200 else 5
+                        library_cache["until"] = time.monotonic() + ttl
+                    status, body = library_cache["status"], library_cache["body"]
+                self._send(status, body, headers={"Cache-Control": "no-store"})
             elif path == "/resolve":
                 q = (query.get("q", [""])[0] or "").strip()
                 if not q:

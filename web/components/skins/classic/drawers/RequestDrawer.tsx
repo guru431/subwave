@@ -105,6 +105,9 @@ interface ResolveResult {
   alternatives: ResolveCandidate[];
 }
 
+type Resolution = { query: string; status: 'loading' | 'error' }
+  | { query: string; status: 'ready'; body: ResolveResult };
+
 // Пауза после последнего нажатия клавиши: без неё каждая буква — запрос в
 // Navidrome, а набирают тут с телефона.
 const RESOLVE_DEBOUNCE_MS = 400;
@@ -136,8 +139,9 @@ export default function RequestDrawer({
   // Null while idle. On accept it holds a `pending` success card with the
   // templated ack; polling fills in the real track + on-air ack.
   const [result, setResult] = useState<RequestResult | null>(null);
-  const [resolution, setResolution] = useState<{ query: string; body: ResolveResult } | null>(null);
-  const resolved = resolution?.query === requestText.trim() ? resolution.body : null;
+  const [resolution, setResolution] = useState<Resolution | null>(null);
+  const currentResolution = resolution?.query === requestText.trim() ? resolution : null;
+  const resolved = currentResolution?.status === 'ready' ? currentResolution.body : null;
   // songId привязан к тексту, при котором выбран (lib/requestPick.ts): правка
   // человеком его отвязывает, подстановка альтернативы в поле — нет.
   const [pick, setPick] = useState<RequestPick | null>(null);
@@ -154,23 +158,24 @@ export default function RequestDrawer({
     }
     let cancelled = false;
     const abort = new AbortController();
-    setResolution(null);
+    setResolution({ query, status: 'loading' });
     const timer = setTimeout(async () => {
       try {
         const r = await fetch(`/room/resolve?q=${encodeURIComponent(query)}`, { signal: abort.signal });
-        if (!r.ok || cancelled) return;
+        if (cancelled) return;
+        if (!r.ok) throw new Error('resolve unavailable');
         let body = (await r.json()) as ResolveResult;
         if (cancelled) return;
         if (expectedSongId && body.exact && body.exact.id !== expectedSongId) {
           body = { exact: null, alternatives: [body.exact, ...body.alternatives] };
         }
-        setResolution({ query, body });
+        setResolution({ query, status: 'ready', body });
         const exact = body.exact;
         if (exact) setPick((prev) => bindExact(prev, exact.id, query));
       } catch {
         // Комната недоступна — заказ всё равно уйдёт текстом, и каскад станции
         // его разберёт. Подсказка не обязательна для отправки.
-        if (!cancelled) setResolution(null);
+        if (!cancelled) setResolution({ query, status: 'error' });
       }
     }, RESOLVE_DEBOUNCE_MS);
     return () => { cancelled = true; abort.abort(); clearTimeout(timer); };
@@ -300,17 +305,18 @@ export default function RequestDrawer({
 
               <div className="px-3.5 pt-3 pb-3.5">
                 <label className="mb-2 block text-[9px] tracking-[0.3em] text-muted uppercase">
-                  Дорогой ведущий —
+                  Найдите песню для заказа
                 </label>
                 {/* The textarea is borderless and transparent so only the
                     ruled paper below shows through. */}
                 <div className={cn('relative border-l-2 border-l-vermilion pl-3', RULED_PAPER)}>
                   <textarea
                     ref={taRef}
+                    aria-label="Название песни или исполнитель"
                     value={requestText}
                     onChange={e => { setRequestText(e.target.value); if (result) setResult(null); }}
                     onKeyDown={onKeyDown}
-                    placeholder={'поставьте что-нибудь для\nночной дороги…'}
+                    placeholder={'исполнитель или название песни…'}
                     rows={3}
                     /* 16px avoids iOS zoom-on-focus. 30px line-height matches the
                        ruled-paper stripe so text sits on the lines. */
@@ -337,6 +343,8 @@ export default function RequestDrawer({
             {/* Результат сверки скринридер объявляет сам: обёртка в DOM всегда,
                 иначе живую область, появившуюся вместе с текстом, не озвучат. */}
             <div aria-live="polite">
+              {currentResolution?.status === 'loading' && <p className="mt-3 text-[11px] text-muted">Ищем в коллекции…</p>}
+              {currentResolution?.status === 'error' && <p className="mt-3 text-[11px] text-muted">Проверить наличие сейчас не удалось. Попробуйте позже или отправьте пожелание ведущему.</p>}
               {expectedSongId && resolved && !resolved.exact && <p className="mt-3 text-[11px] text-muted">Запись из закладки не подтверждена. Выберите нужную версию заново или отправьте запрос текстом.</p>}
               {resolved?.exact && (
                 <p className="mt-3 text-[11px] leading-relaxed text-muted">
@@ -347,7 +355,7 @@ export default function RequestDrawer({
               {resolved && !resolved.exact && resolved.alternatives.length > 0 && (
                 <div className="mt-3 flex flex-col gap-1">
                   <p className="text-[11px] leading-relaxed text-muted">
-                    Точного совпадения нет. Может быть, это:
+                    Найдено в коллекции — выберите нужную песню:
                   </p>
                   {resolved.alternatives.map(c => (
                     <button
@@ -380,8 +388,8 @@ export default function RequestDrawer({
             </div>
 
             <p className="mt-3 text-[11px] leading-relaxed text-muted">
-              Опишите настроение, воспоминание, артиста. Ведущий прочтёт записку,
-              поищет в коллекции и ответит вам в эфире.
+              Введите хотя бы 3 символа названия или имени исполнителя, чтобы проверить
+              наличие. Можно также описать настроение или передать пожелание ведущему.
             </p>
 
             <SuggestionChips

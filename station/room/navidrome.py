@@ -16,6 +16,25 @@ import urllib.request
 DOWNLOAD_TIMEOUT = 30
 
 
+def library_summary(base: str, user: str, password: str) -> dict:
+    """Размер коллекции Navidrome, без тегов, путей и учётных данных."""
+    if not base:
+        raise ValueError("Navidrome не настроен")
+    params = urllib.parse.urlencode(_auth_params(user, password))
+    with urllib.request.urlopen(
+        f"{base.rstrip('/')}/rest/getScanStatus?{params}", timeout=5
+    ) as response:
+        payload = json.load(response)
+    body = payload.get("subsonic-response") if isinstance(payload, dict) else None
+    if not isinstance(body, dict) or body.get("status") != "ok" or body.get("error"):
+        raise ValueError("Subsonic: отказ или неверный конверт ответа")
+    scan = body.get("scanStatus")
+    total = scan.get("count") if isinstance(scan, dict) else None
+    if type(total) is not int or total < 0:
+        raise ValueError("Subsonic: нет количества песен")
+    return {"total": total, "scanning": scan.get("scanning") is True}
+
+
 def _auth_params(user: str, password: str) -> dict:
     """Общий для всех вызовов рецепт Subsonic: соль и `md5(pass + salt)`.
 

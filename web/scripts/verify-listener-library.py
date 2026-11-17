@@ -1,4 +1,4 @@
-"""Manual browser regressions for local metadata, receipts and request hints.
+"""Manual browser regressions for library count/search, bookmarks and receipts.
 
 Run against the isolated web dev server on 127.0.0.1:7793. All listener API
 responses are synthetic. Each check has a 10-second timeout; no live writes.
@@ -44,12 +44,18 @@ def check(browser_type, width, artifacts):
             body = {"success": True, "status": "resolved", "phase": phase[0], "track": {"title": "Новая песня", "artist": "Группа"}, "queuePosition": 2, "estimatedWaitSec": 180}
         elif path.endswith("/resolve"):
             query = parse_qs(urlsplit(route.request.url).query).get("q", [""])[0]
-            if query.startswith("Beta"):
+            if query == "Нет такой песни":
+                body = {"exact": None, "alternatives": []}
+            elif query == "Кино":
+                body = {"exact": None, "alternatives": [{"id": "selected", "artist": "Кино", "title": "Песня А", "album": "Альбом", "year": 2000}]}
+            elif query.startswith("Beta"):
                 body, status = {"error": "rate limited"}, 429
             elif query.startswith("Gamma"):
                 body, status = {"error": "unavailable"}, 502
             else:
                 body = {"exact": {"id": "relocated", "artist": "Кино", "title": "Песня А", "album": "Другой альбом", "year": 2000}, "alternatives": []}
+        elif path.endswith("/library"):
+            body = {"total": 4631, "scanning": False}
         elif path.startswith("/room/"):
             body = {"messages": [], "last": 0, "marks": {}}
         elif path.endswith("/themes"):
@@ -60,9 +66,23 @@ def check(browser_type, width, artifacts):
     page.route("http://localhost:7791/**", api)
     page.route("**/room/**", api)
     try:
-        page.goto(WEB)
+        page.goto(WEB, wait_until="domcontentloaded")
+        library = page.get_by_role("button", name="В коллекции:", exact=False)
+        expect(library).to_contain_text("4\u00a0631 песня")
+        library.click()
+        search = page.get_by_role("textbox", name="Название песни или исполнитель")
+        expect(search).to_be_visible()
+        search.fill("Нет такой песни")
+        expect(page.get_by_text("В коллекции такого нет.", exact=False)).to_be_visible()
+        search.fill("Кино")
+        page.get_by_role("button", name="Кино — Песня А · Альбом (2000)", exact=True).click()
+        expect(search).to_have_value("Кино — Песня А")
+        assert not posted, "search must not submit an order"
+        page.keyboard.press("Escape")
+        expect(search).not_to_be_visible()
+        page.screenshot(path=str(artifacts / f"library-{browser_type.name}-{width}.png"), full_page=True)
         page.get_by_role("button", name="Сохранить себе", exact=True).click()
-        page.reload()
+        page.reload(wait_until="domcontentloaded")
         expect(page.get_by_role("button", name="Удалить из личных закладок", exact=True)).to_be_visible()
         page.keyboard.press("1")
         page.locator("summary").filter(has_text="Мои закладки").click()
@@ -81,6 +101,7 @@ def check(browser_type, width, artifacts):
         textarea.fill("Beta")
         expect(page.get_by_text("Нашёл в коллекции:", exact=False)).not_to_be_visible()
         page.wait_for_timeout(500)
+        expect(page.get_by_text("Проверить наличие сейчас не удалось.", exact=False)).to_be_visible()
         textarea.fill("Alpha again")
         expect(page.get_by_text("Нашёл в коллекции:", exact=False)).to_be_visible()
         textarea.fill("Gamma")
@@ -89,12 +110,12 @@ def check(browser_type, width, artifacts):
         page.get_by_role("button", name="Отправить в студию", exact=True).click()
         page.wait_for_function("JSON.parse(localStorage.getItem('subwave-receipts-v1') || '[]').length === 1")
         assert posted[-1]["text"] == "Gamma" and not posted[-1].get("songId")
-        page.reload()
+        page.reload(wait_until="domcontentloaded")
         expect(page.get_by_role("button", name="Удалить из личных закладок", exact=True)).to_be_visible()
         page.get_by_role("button", name="+ Заказ", exact=True).click()
         expect(page.get_by_text("В очереди", exact=True)).to_be_visible()
         phase[0] = "aired"
-        page.reload()
+        page.reload(wait_until="domcontentloaded")
         expect(page.get_by_role("button", name="Удалить из личных закладок", exact=True)).to_be_visible()
         page.get_by_role("button", name="+ Заказ", exact=True).click()
         expect(page.get_by_text("Прозвучало", exact=True)).to_be_visible()
@@ -107,11 +128,11 @@ def check(browser_type, width, artifacts):
         page.wait_for_function("JSON.parse(localStorage.getItem('subwave-bookmarks-v1')).length === 1")
         isolated = browser.new_context()
         fresh = isolated.new_page()
-        fresh.goto("http://127.0.0.1:7793")
+        fresh.goto("http://127.0.0.1:7793", wait_until="domcontentloaded")
         assert fresh.evaluate("localStorage.getItem('subwave-bookmarks-v1')") is None
         isolated.close()
         assert not errors, errors
-        print(f"PASS {browser_type.name} {width}px: bookmarks/export/isolation, stale ID, 429/502, receipt reload", flush=True)
+        print(f"PASS {browser_type.name} {width}px: library count/search, bookmarks/export/isolation, stale ID, 429/502, receipt reload", flush=True)
     finally:
         context.close()
         browser.close()

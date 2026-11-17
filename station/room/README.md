@@ -27,6 +27,7 @@
 | `GET /messages?since=&limit=` | лента для плеера (по умолчанию и не больше 50 последних) |
 | `GET /unread?since=&limit=` | то же для навыка ведущего (по умолчанию 20) |
 | `GET /resolve?q=` | сверка с коллекцией: `{"exact": …\|null, "alternatives": [...]}` |
+| `GET /library` | количество песен в Navidrome: `{"total": N, "scanning": false}`; общий кеш 60 с, отказ — 503 |
 | `GET /download?id=` | файл прозвучавшего трека; отказ — `.txt` с честным кодом |
 | `GET /push/key` | открытый ключ VAPID для `PushManager.subscribe()` |
 | `POST /push/subscribe` | `{subscription}` + заголовки личности → 201; повторная подписка обновляет имя |

@@ -4,6 +4,8 @@
 попросил, — поэтому функция возвращает открытый ответ, а не байты.
 """
 import importlib.util
+import io
+import json
 import sys
 import urllib.parse
 import urllib.request
@@ -25,6 +27,46 @@ def _load(name: str):
 
 
 navidrome = _load("navidrome")
+
+
+def test_library_summary_counts_all_songs_without_exposing_source_fields(monkeypatch):
+    seen = []
+
+    def reply(url, timeout):
+        seen.append(urllib.parse.urlparse(url))
+        return io.BytesIO(json.dumps({"subsonic-response": {
+            "status": "ok", "scanStatus": {"count": 4631, "scanning": False,
+                                           "folderCount": 248, "private": "hidden"}
+        }}).encode())
+
+    monkeypatch.setattr(navidrome.urllib.request, "urlopen", reply)
+    assert navidrome.library_summary("http://nav", "user", "DUMMY_SECRET") == {
+        "total": 4631, "scanning": False}
+    assert seen[0].path == "/rest/getScanStatus"
+    params = urllib.parse.parse_qs(seen[0].query)
+    assert params["u"] == ["user"] and "DUMMY_SECRET" not in seen[0].query
+
+
+@pytest.mark.parametrize("count", [0, 4631])
+def test_library_summary_accepts_empty_and_scanning_collections(monkeypatch, count):
+    monkeypatch.setattr(navidrome.urllib.request, "urlopen", lambda *a, **kw: io.BytesIO(
+        json.dumps({"subsonic-response": {"status": "ok", "scanStatus": {
+            "count": count, "scanning": True}}}).encode()))
+    assert navidrome.library_summary("http://nav", "u", "p") == {"total": count, "scanning": True}
+
+
+@pytest.mark.parametrize("body", [
+    {"status": "failed", "error": {"message": "DUMMY_SECRET"}},
+    {"status": "ok", "scanStatus": {}},
+    {"status": "ok", "scanStatus": {"count": -1}},
+    {"status": "ok", "scanStatus": {"count": True}},
+])
+def test_library_summary_refuses_invalid_counts_and_failed_envelopes(monkeypatch, body):
+    monkeypatch.setattr(navidrome.urllib.request, "urlopen", lambda *a, **kw: io.BytesIO(
+        json.dumps({"subsonic-response": body}).encode()))
+    with pytest.raises(ValueError) as exc:
+        navidrome.library_summary("http://nav", "u", "p")
+    assert "DUMMY_SECRET" not in str(exc.value)
 
 
 class FakeUpstream:
