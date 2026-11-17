@@ -256,7 +256,8 @@ def match(query: str, songs: list[dict]) -> dict:
 
 
 def resolve(query: str, base: str, user: str, password: str,
-            limit: int = SEARCH_COUNT) -> dict:
+            limit: int = SEARCH_COUNT, *, offset: int | None = None,
+            search_query: str | None = None) -> dict:
     """Спросить Navidrome и сверить ответ. Сетевые сбои наружу не прячутся.
 
     В Navidrome уходит запрос без командного начала, и сверяется ответ с ним
@@ -272,12 +273,17 @@ def resolve(query: str, base: str, user: str, password: str,
         # Без адреса urllib уронил бы ValueError «unknown url type» с полным
         # URL запроса в тексте — токеном и солью Subsonic внутри.
         raise ValueError("Navidrome не настроен")
+    paged = offset is not None
+    if paged and (offset < 0 or (offset > 0 and not search_query)):
+        raise ValueError("следующей странице нужен исходный поисковый запрос")
 
     def ask(text: str) -> list[dict]:
         salt = secrets.token_hex(8)
         token = hashlib.md5((password + salt).encode("utf-8")).hexdigest()
         params = urllib.parse.urlencode({
-            "query": text, "songCount": limit, "artistCount": 0, "albumCount": 0,
+            "query": text, "songCount": limit + 1 if paged else limit,
+            **({"songOffset": offset} if paged else {}),
+            "artistCount": 0, "albumCount": 0,
             "u": user, "t": token, "s": salt, "v": "1.16.1", "c": "subwave-room",
             "f": "json"})
         url = f"{base.rstrip('/')}/rest/search3?{params}"
@@ -285,11 +291,23 @@ def resolve(query: str, base: str, user: str, password: str,
             return candidates(json.loads(r.read().decode("utf-8", "replace")))
 
     asked, songs, exactable = strip_command(query), [], True
-    for attempt, may_be_exact in search_attempts(query):
-        asked, songs, exactable = attempt, ask(attempt), may_be_exact
-        if songs:
-            break
+    if paged and offset > 0:
+        # На следующих страницах нельзя заново выбирать запасной запрос:
+        # конец точной выдачи иначе превращается в начало другой коллекции.
+        asked, songs, exactable = search_query, ask(search_query), False
+    else:
+        for attempt, may_be_exact in search_attempts(query):
+            asked, songs, exactable = attempt, ask(attempt), may_be_exact
+            if songs:
+                break
     found = match(asked, songs)
+    if paged:
+        visible = songs[:limit]
+        exact = found["exact"] if exactable and found["exact"] in visible else None
+        return {"exact": exact,
+                "alternatives": [s for s in visible if not exact or s["id"] != exact["id"]],
+                "searchQuery": asked,
+                "nextOffset": offset + len(visible) if len(songs) > limit else None}
     if found["exact"] and not exactable:
         # Найдено по обрезанному запросу: это подсказка, а не ответ
         return {"exact": None, "alternatives": [found["exact"]]}

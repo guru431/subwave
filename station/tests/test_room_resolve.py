@@ -83,6 +83,63 @@ def test_alternatives_are_capped():
     assert len(sub.match("Кино", many)["alternatives"]) == 5
 
 
+def test_paged_search_reaches_every_match_without_duplicates(monkeypatch):
+    import io
+    import json
+    songs = [dict(SONGS[0], id=f"page-{i}", title=f"Песня {i}") for i in range(45)]
+    asked = []
+
+    def reply(url, **kwargs):
+        params = sub.urllib.parse.parse_qs(url.split("?", 1)[1])
+        offset, count = int(params["songOffset"][0]), int(params["songCount"][0])
+        asked.append((params["query"][0], offset, count))
+        return io.BytesIO(json.dumps({"subsonic-response": {"status": "ok", "searchResult3": {
+            "song": songs[offset:offset + count]}}}).encode())
+
+    monkeypatch.setattr(sub.urllib.request, "urlopen", reply)
+    pages = [sub.resolve("Кино", "http://nav", "u", "p", offset=0)]
+    while pages[-1]["nextOffset"] is not None:
+        pages.append(sub.resolve("Кино", "http://nav", "u", "p",
+                                 offset=pages[-1]["nextOffset"],
+                                 search_query=pages[-1]["searchQuery"]))
+    assert [len(p["alternatives"]) for p in pages] == [20, 20, 5]
+    assert [s["id"] for p in pages for s in p["alternatives"]] == [s["id"] for s in songs]
+    assert asked == [("Кино", 0, 21), ("Кино", 20, 21), ("Кино", 40, 21)]
+
+
+def test_last_page_does_not_auto_select_its_lone_song(monkeypatch):
+    import io
+    import json
+    monkeypatch.setattr(sub.urllib.request, "urlopen", lambda *a, **kw: io.BytesIO(json.dumps({
+        "subsonic-response": {"status": "ok", "searchResult3": {"song": [SONGS[0]]}}}).encode()))
+    page = sub.resolve("Кино", "http://nav", "u", "p", offset=20, search_query="Кино")
+    assert page["exact"] is None and page["alternatives"][0]["id"] == "a1"
+    assert page["nextOffset"] is None
+
+
+def test_paged_search_pins_fallback_query_and_stops_at_its_end(monkeypatch):
+    import io
+    import json
+    asked = []
+
+    def reply(url, **kwargs):
+        params = sub.urllib.parse.parse_qs(url.split("?", 1)[1])
+        text, offset = params["query"][0], int(params["songOffset"][0])
+        asked.append((text, offset))
+        songs = [dict(SONGS[0], id=f"x{i}") for i in range(21)] if text == "Кино" and offset == 0 else []
+        return io.BytesIO(json.dumps({"subsonic-response": {"status": "ok", "searchResult3": {
+            "song": songs}}}).encode())
+
+    monkeypatch.setattr(sub.urllib.request, "urlopen", reply)
+    first = sub.resolve("Кино привет", "http://nav", "u", "p", offset=0)
+    assert first["searchQuery"] == "Кино" and first["exact"] is None
+    before = len(asked)
+    last = sub.resolve("Кино привет", "http://nav", "u", "p", offset=20,
+                       search_query=first["searchQuery"])
+    assert asked[before:] == [("Кино", 20)]
+    assert last["alternatives"] == [] and last["nextOffset"] is None
+
+
 def test_nothing_found_is_an_honest_refusal():
     got = sub.match("Такого Нет", [])
     assert got == {"exact": None, "alternatives": []}

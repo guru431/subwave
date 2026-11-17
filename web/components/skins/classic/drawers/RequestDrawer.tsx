@@ -103,6 +103,8 @@ interface ResolveCandidate {
 interface ResolveResult {
   exact: ResolveCandidate | null;
   alternatives: ResolveCandidate[];
+  searchQuery?: string;
+  nextOffset?: number | null;
 }
 
 type Resolution = { query: string; status: 'loading' | 'error' }
@@ -142,6 +144,8 @@ export default function RequestDrawer({
   const [resolution, setResolution] = useState<Resolution | null>(null);
   const currentResolution = resolution?.query === requestText.trim() ? resolution : null;
   const resolved = currentResolution?.status === 'ready' ? currentResolution.body : null;
+  const [more, setMore] = useState<{ query: string; status: 'loading' | 'error' } | null>(null);
+  const pageAbortRef = useRef<AbortController | null>(null);
   // songId привязан к тексту, при котором выбран (lib/requestPick.ts): правка
   // человеком его отвязывает, подстановка альтернативы в поле — нет.
   const [pick, setPick] = useState<RequestPick | null>(null);
@@ -152,6 +156,9 @@ export default function RequestDrawer({
   // разбирать настроение и намёк, а не только «артист — название».
   useEffect(() => {
     const query = requestText.trim();
+    pageAbortRef.current?.abort();
+    pageAbortRef.current = null;
+    setMore(null);
     if (query.length < RESOLVE_MIN_CHARS) {
       setResolution(null);
       return;
@@ -161,13 +168,13 @@ export default function RequestDrawer({
     setResolution({ query, status: 'loading' });
     const timer = setTimeout(async () => {
       try {
-        const r = await fetch(`/room/resolve?q=${encodeURIComponent(query)}`, { signal: abort.signal });
+        const r = await fetch(`/room/resolve?q=${encodeURIComponent(query)}&offset=0`, { signal: abort.signal });
         if (cancelled) return;
         if (!r.ok) throw new Error('resolve unavailable');
         let body = (await r.json()) as ResolveResult;
         if (cancelled) return;
         if (expectedSongId && body.exact && body.exact.id !== expectedSongId) {
-          body = { exact: null, alternatives: [body.exact, ...body.alternatives] };
+          body = { ...body, exact: null, alternatives: [body.exact, ...body.alternatives] };
         }
         setResolution({ query, status: 'ready', body });
         const exact = body.exact;
@@ -178,8 +185,36 @@ export default function RequestDrawer({
         if (!cancelled) setResolution({ query, status: 'error' });
       }
     }, RESOLVE_DEBOUNCE_MS);
-    return () => { cancelled = true; abort.abort(); clearTimeout(timer); };
+    return () => { cancelled = true; abort.abort(); pageAbortRef.current?.abort(); clearTimeout(timer); };
   }, [requestText, expectedSongId]);
+
+  const loadMore = async () => {
+    if (resolved?.nextOffset == null || !resolved.searchQuery || pageAbortRef.current) return;
+    const query = requestText.trim();
+    const abort = new AbortController();
+    pageAbortRef.current = abort;
+    setMore({ query, status: 'loading' });
+    try {
+      const params = new URLSearchParams({ q: query, offset: String(resolved.nextOffset), searchQuery: resolved.searchQuery });
+      const response = await fetch(`/room/resolve?${params}`, { signal: abort.signal });
+      if (!response.ok) throw new Error('page unavailable');
+      const body = await response.json() as ResolveResult;
+      if (abort.signal.aborted) return;
+      setResolution(previous => {
+        if (previous?.query !== query || previous.status !== 'ready') return previous;
+        const rows = new Map(previous.body.alternatives.map(row => [row.id, row]));
+        for (const row of body.alternatives) {
+          if (row.id !== previous.body.exact?.id) rows.set(row.id, row);
+        }
+        return { ...previous, body: { ...previous.body, alternatives: [...rows.values()], nextOffset: body.nextOffset } };
+      });
+      setMore(null);
+    } catch {
+      if (!abort.signal.aborted) setMore({ query, status: 'error' });
+    } finally {
+      if (pageAbortRef.current === abort) pageAbortRef.current = null;
+    }
+  };
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollStopRef = useRef(false);
@@ -352,7 +387,7 @@ export default function RequestDrawer({
                   <span className="text-ink">{resolved.exact.artist} — {resolved.exact.title}</span>
                 </p>
               )}
-              {resolved && !resolved.exact && resolved.alternatives.length > 0 && (
+              {resolved && resolved.alternatives.length > 0 && (
                 <div className="mt-3 flex flex-col gap-1">
                   <p className="text-[11px] leading-relaxed text-muted">
                     Найдено в коллекции — выберите нужную песню:
@@ -378,6 +413,19 @@ export default function RequestDrawer({
                     </button>
                   ))}
                 </div>
+              )}
+              {resolved?.nextOffset != null && (
+                <button
+                  type="button"
+                  disabled={more?.query === requestText.trim() && more.status === 'loading'}
+                  onClick={() => void loadMore()}
+                  className="v3-focus mt-2 cursor-pointer rounded border border-soft-border px-3 py-2 text-[12px] text-ink disabled:opacity-50"
+                >
+                  {more?.query === requestText.trim() && more.status === 'loading' ? 'Загружаем…' : 'Показать ещё'}
+                </button>
+              )}
+              {more?.query === requestText.trim() && more.status === 'error' && (
+                <p className="mt-2 text-[11px] text-muted">Следующие песни загрузить не удалось. Нажмите «Показать ещё», чтобы повторить.</p>
               )}
               {resolved && !resolved.exact && resolved.alternatives.length === 0 && (
                 <p className="mt-3 text-[11px] leading-relaxed text-muted">

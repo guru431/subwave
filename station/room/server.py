@@ -387,6 +387,16 @@ def build_handler(store: Store, config: Config):
                 if not q:
                     self._send(400, {"error": "нужен параметр q"})
                     return
+                page = {}
+                if "offset" in query:
+                    raw_offset = query["offset"][0]
+                    search_query = (query.get("searchQuery", [""])[0] or "").strip()
+                    if (not re.fullmatch(r"[0-9]{1,10}", raw_offset)
+                            or int(raw_offset) > 2_147_483_647
+                            or (int(raw_offset) > 0 and not search_query)):
+                        self._send(400, {"error": "неверная страница поиска"})
+                        return
+                    page = {"offset": int(raw_offset), "search_query": search_query or None}
                 if not resolves.take(time.monotonic()):
                     # Плеер на отказ просто не показывает подсказку — заказ
                     # всё равно уходит текстом, и каскад станции его разберёт
@@ -395,7 +405,7 @@ def build_handler(store: Store, config: Config):
                     return
                 base, user, password = config.navidrome
                 try:
-                    self._send(200, subsonic.resolve(q, base, user, password))
+                    self._send(200, subsonic.resolve(q, base, user, password, **page))
                 except Exception as e:                       # noqa: BLE001
                     # Плееру важно отличить «в коллекции нет» от «сверка не
                     # состоялась»: первое — ответ, второе — повод не скрывать

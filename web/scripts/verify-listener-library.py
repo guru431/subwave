@@ -23,6 +23,8 @@ def check(browser_type, width, artifacts):
     page = context.new_page()
     page.set_default_timeout(10_000)
     phase, posted, errors = ["queued"], [], []
+    pages, page_failure = [], [True]
+    songs = [{"id": f"page-{i}", "artist": "Кино", "title": f"Песня {i + 1}", "album": "Альбом", "year": 2000} for i in range(45)]
     page.on("pageerror", lambda e: errors.append(str(e)))
 
     def api(route):
@@ -43,11 +45,21 @@ def check(browser_type, width, artifacts):
         elif "/request/" in path:
             body = {"success": True, "status": "resolved", "phase": phase[0], "track": {"title": "Новая песня", "artist": "Группа"}, "queuePosition": 2, "estimatedWaitSec": 180}
         elif path.endswith("/resolve"):
-            query = parse_qs(urlsplit(route.request.url).query).get("q", [""])[0]
+            params = parse_qs(urlsplit(route.request.url).query)
+            query = params.get("q", [""])[0]
             if query == "Нет такой песни":
                 body = {"exact": None, "alternatives": []}
             elif query == "Кино":
-                body = {"exact": None, "alternatives": [{"id": "selected", "artist": "Кино", "title": "Песня А", "album": "Альбом", "year": 2000}]}
+                offset = int(params.get("offset", [0])[0])
+                pages.append(offset)
+                if offset == 20 and page_failure[0]:
+                    page_failure[0] = False
+                    body, status = {"error": "unavailable"}, 502
+                else:
+                    body = {"exact": None, "alternatives": songs[offset:offset + 20],
+                            "searchQuery": "Кино", "nextOffset": offset + 20 if offset + 20 < len(songs) else None}
+            elif query == "Кино — Песня 45":
+                body = {"exact": songs[-1], "alternatives": [], "searchQuery": query, "nextOffset": None}
             elif query.startswith("Beta"):
                 body, status = {"error": "rate limited"}, 429
             elif query.startswith("Gamma"):
@@ -75,8 +87,22 @@ def check(browser_type, width, artifacts):
         search.fill("Нет такой песни")
         expect(page.get_by_text("В коллекции такого нет.", exact=False)).to_be_visible()
         search.fill("Кино")
-        page.get_by_role("button", name="Кино — Песня А · Альбом (2000)", exact=True).click()
-        expect(search).to_have_value("Кино — Песня А")
+        expect(page.get_by_role("button", name="Кино — Песня 20 · Альбом (2000)", exact=True)).to_be_visible()
+        more = page.get_by_role("button", name="Показать ещё", exact=True)
+        more.click()
+        expect(page.get_by_text("Следующие песни загрузить не удалось.", exact=False)).to_be_visible()
+        expect(page.get_by_role("button", name="Кино — Песня 20 · Альбом (2000)", exact=True)).to_be_visible()
+        more.click()
+        expect(page.get_by_role("button", name="Кино — Песня 40 · Альбом (2000)", exact=True)).to_be_visible()
+        more.click()
+        last_song = page.get_by_role("button", name="Кино — Песня 45 · Альбом (2000)", exact=True)
+        expect(last_song).to_be_visible()
+        expect(more).not_to_be_visible()
+        assert pages == [0, 20, 20, 40], pages
+        expect(page.get_by_role("button").filter(has_text="Кино — Песня")).to_have_count(45)
+        last_song.click()
+        expect(search).to_have_value("Кино — Песня 45")
+        expect(page.get_by_text("Нашёл в коллекции:", exact=False)).to_be_visible()
         assert not posted, "search must not submit an order"
         page.keyboard.press("Escape")
         expect(search).not_to_be_visible()
@@ -133,6 +159,10 @@ def check(browser_type, width, artifacts):
         isolated.close()
         assert not errors, errors
         print(f"PASS {browser_type.name} {width}px: library count/search, bookmarks/export/isolation, stale ID, 429/502, receipt reload", flush=True)
+    except Exception:
+        print(f"FAIL {browser_type.name} {width}px: page errors={errors}", flush=True)
+        page.screenshot(path=str(artifacts / f"failure-{browser_type.name}-{width}.png"))
+        raise
     finally:
         context.close()
         browser.close()

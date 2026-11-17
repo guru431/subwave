@@ -90,6 +90,29 @@ def test_health_is_ok(room):
     assert call(base, "/health") == (200, {"ok": True})
 
 
+def test_resolve_forwards_page_and_pinned_query(room, monkeypatch):
+    base, _, _ = room
+    seen = []
+
+    def resolve(*args, **kwargs):
+        seen.append((args, kwargs))
+        return {"exact": None, "alternatives": [], "nextOffset": None, "searchQuery": "Кино"}
+
+    monkeypatch.setattr(server_mod.subsonic, "resolve", resolve)
+    query = urllib.parse.urlencode({"q": "Кино привет", "offset": 20, "searchQuery": "Кино"})
+    code, body = call(base, "/resolve?" + query)
+    assert code == 200 and body["nextOffset"] is None
+    assert seen == [(("Кино привет", "http://navidrome", "u", "p"),
+                     {"offset": 20, "search_query": "Кино"})]
+
+
+@pytest.mark.parametrize("offset", ["-1", "abc", "20.5", "2147483648", "20"])
+def test_resolve_rejects_invalid_or_unpinned_pages(room, offset):
+    base, _, calls = room
+    assert call(base, "/resolve?q=Artist&offset=" + offset)[0] == 400
+    assert not calls
+
+
 def test_library_summary_is_public_and_shared_until_cache_expires(room, monkeypatch):
     base, _, _ = room
     now, calls = [100.0], []
