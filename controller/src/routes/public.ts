@@ -12,7 +12,7 @@ import * as settings from '../settings.js';
 import { getFullContext, geocodePlace } from '../context.js';
 import { queue } from '../broadcast/queue.js';
 import * as session from '../broadcast/session.js';
-import { getStreamStatus } from '../broadcast/listeners.js';
+import { getSourceOnline, getStreamStatus } from '../broadcast/listeners.js';
 import { isIdle } from '../broadcast/stream-idle.js';
 import { currentStarve } from '../broadcast/music-starve.js';
 import { getSetupStatusSync } from '../setup/firstRun.js';
@@ -679,4 +679,4 @@ router.get('/geocode', async (req, res) => {
   }
 });
 
-router.get('/health', (req, res) => res.json({ status: 'on-air' }));
+router.get('/health', (req, res) => res.json({ status: 'on-air', streamOnline: getSourceOnline() }));

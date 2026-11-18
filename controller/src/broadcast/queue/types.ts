@@ -65,6 +65,11 @@ export interface Track {
 export interface QueueItem {
   /** Private receipt capability for THIS occurrence, omitted from snapshot(). */
   requestId?: string | null;
+  /** Playback occurrence shared by the track URI and its optional stem clip. */
+  playId?: string;
+  /** Last mixer marker applied to this airing, persisted for controller recovery. */
+  playMarkerKey?: string;
+  playMarkerClip?: boolean;
   track: Track;
   requestedBy?: string | null;
   // This item was queued by the OPERATOR, not by a listener. It exists because
@@ -84,7 +89,7 @@ export interface QueueItem {
   //
   // ABSENT means "not known to be an operator push", which is what an item
   // recovered from a `queue.json` written before this field reads as — i.e.
-  // exactly the old behaviour, for the ≤2h such a snapshot survives.
+  // exactly the old behaviour for items from such a snapshot.
   operator?: boolean;
   // This item was queued as part of an operator BLOCK — a whole album, or a
   // run of tracks for an artist show (#1622 FR 4).
@@ -213,6 +218,10 @@ export interface NowPlaying {
   artist?: string | null;
   album?: string | null;
   subsonic_id?: string | null;
+  filename?: string | null;
+  timestamp?: number;
+  subwave_play_id?: string;
+  subwave_clip?: string;
   [k: string]: unknown;
 }
 

@@ -18,17 +18,17 @@ def sync(store, directory: str) -> None:
             try:
                 batch = json.loads(file.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, UnicodeDecodeError):
+                batch = None
+            version = batch.get("version") if isinstance(batch, dict) else None
+            if type(version) is int and version != 1:
+                raise ValueError(f"неподдерживаемая версия карты ротации: {version}")
+            mapping = batch.get("trackMap") if type(version) is int else None
+            if not isinstance(mapping, dict) or any(
+                    not k or not isinstance(v, str) or not v for k, v in mapping.items()):
                 rejected = file.with_name(f"{file.name}.{uuid4().hex}.invalid")
                 file.rename(rejected)
                 logging.getLogger(__name__).warning("Повреждённая карта ротации %s сохранена в %s", file, rejected)
                 continue
-            if not isinstance(batch, dict):
-                raise ValueError("неверная карта ротации комнаты")
-            mapping = batch.get("trackMap")
-            if batch.get("version") != 1 or not isinstance(mapping, dict) or any(
-                    not isinstance(k, str) or not k or not isinstance(v, str) or not v
-                    for k, v in mapping.items()):
-                raise ValueError("неверная карта ротации комнаты")
             for old, new in mapping.items():
                 if old in combined and combined[old] != new:
                     raise ValueError("конфликт карт ротации")

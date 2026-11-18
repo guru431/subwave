@@ -150,7 +150,7 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
           });
         }
         return client.submitRequest(parsed.data.text, parsed.data.name, parsed.data.songId).then(result => {
-          if (result.success && result.requestId) rememberReceipt(result.requestId);
+          if (result.success && result.requestId) rememberReceipt(client.origin.apiUrl, result.requestId);
           return result;
         });
       },

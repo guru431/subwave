@@ -365,6 +365,8 @@ class Store:
 
     def remap_song_ids(self, mapping: dict[str, str]) -> None:
         """Подтверждённая ротация id; последний голос/решение побеждает при слиянии."""
+        if not mapping:
+            return
         resolved = {}
         for old in mapping:
             target, seen = old, set()

@@ -13,6 +13,7 @@ from playwright.sync_api import expect, sync_playwright
 expect.set_options(timeout=10_000)
 
 WEB = "http://127.0.0.1:7793/listen"
+API = "http://localhost:7791"
 REQUEST_ID = "11111111-1111-4111-8111-111111111111"
 TRACK = {"subsonic_id": "current", "title": "Песня А", "artist": "Кино", "album": "Альбом", "duration": 240}
 
@@ -75,7 +76,7 @@ def check(browser_type, width, artifacts):
             return
         route.fulfill(status=status, content_type="application/json", body=json.dumps(body, ensure_ascii=False))
 
-    page.route("http://localhost:7791/**", api)
+    page.route(f"{API}/**", api)
     page.route("**/room/**", api)
     try:
         page.goto(WEB, wait_until="domcontentloaded")
@@ -134,7 +135,10 @@ def check(browser_type, width, artifacts):
         expect(page.get_by_text("Нашёл в коллекции:", exact=False)).not_to_be_visible()
         page.wait_for_timeout(500)
         page.get_by_role("button", name="Отправить в студию", exact=True).click()
-        page.wait_for_function("JSON.parse(localStorage.getItem('subwave-receipts-v1') || '[]').length === 1")
+        page.wait_for_function(
+            "([key, id]) => JSON.parse(localStorage.getItem(key) || '[]').includes(id)",
+            arg=[f"subwave-receipts-v2:{API}", REQUEST_ID],
+        )
         assert posted[-1]["text"] == "Gamma" and not posted[-1].get("songId")
         page.reload(wait_until="domcontentloaded")
         expect(page.get_by_role("button", name="Удалить из личных закладок", exact=True)).to_be_visible()

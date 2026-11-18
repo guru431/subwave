@@ -879,13 +879,14 @@ export function getPlayableUri(song, resolveProbeId: string | null = null) {
 export function escAnnotate(s) {
   return String(s ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
-export function getAnnotatedUri(song, opts: { maxDurationSec?: number | null; cueOutSec?: number | null; cueInSec?: number | null; resolveProbeId?: string | null } = {}) {
+export function getAnnotatedUri(song, opts: { maxDurationSec?: number | null; cueOutSec?: number | null; cueInSec?: number | null; resolveProbeId?: string | null; playId?: string } = {}) {
   const fields = [
     `title="${escAnnotate(song.title)}"`,
     `artist="${escAnnotate(song.artist)}"`,
     `album="${escAnnotate(song.album)}"`,
     `subsonic_id="${escAnnotate(song.id)}"`,
   ];
+  if (opts.playId) fields.push(`subwave_play_id="${escAnnotate(opts.playId)}"`);
   // Era year, never the raw `year` (#1418) — a reissue anthology carries the
   // reissue's date and every downstream surface inherits it. Unknown emits NO
   // year field rather than a wrong one.
@@ -941,15 +942,15 @@ export function getAnnotatedUri(song, opts: { maxDurationSec?: number | null; cu
 
 // Annotate URI for a pre-rendered stem-blend transition CLIP. It carries the
 // INCOMING track's identity, so now-playing flips the moment the blend begins
-// and the controller's lastSeenKey dedup swallows the identical second fire at
-// cue-in. `subwave_clip="1"` stops the telnet rid helpers
+// and both markers carry one occurrence ID through cue-in. `subwave_clip="1"` stops the telnet rid helpers
 // (liquidsoap-control.ts) mistaking the clip for the track itself.
-export function getClipUri(song, clipPath: string, crossSec: number) {
+export function getClipUri(song, clipPath: string, crossSec: number, playId: string) {
   const fields = [
     `title="${escAnnotate(song.title)}"`,
     `artist="${escAnnotate(song.artist)}"`,
     `album="${escAnnotate(song.album)}"`,
     `subsonic_id="${escAnnotate(song.id)}"`,
+    `subwave_play_id="${escAnnotate(playId)}"`,
     'subwave_clip="1"',
     `liq_cross_duration="${escAnnotate(crossSec)}"`,
   ];

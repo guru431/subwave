@@ -41,6 +41,7 @@ JWT_LIFETIME_SEC = 12 * 3600   # RFC 8292: не больше суток
 PUSH_HOSTS = ("fcm.googleapis.com", "android.googleapis.com",
               "push.services.mozilla.com", "push.apple.com", "notify.windows.com")
 ENDPOINT_MAX = 1024
+CHAT_TAG = "subwave-chat"
 
 
 def b64u(data: bytes) -> str:
@@ -184,17 +185,19 @@ def send(subscription: dict, payload: dict, vapid: Vapid, subject: str,
     """
     body = encrypt(json.dumps(payload, ensure_ascii=False).encode("utf-8"),
                    subscription["p256dh"], subscription["auth"])
-    req = urllib.request.Request(subscription["endpoint"], data=body, method="POST", headers={
+    headers = {
         "Content-Type": "application/octet-stream",
         "Content-Encoding": "aes128gcm",
         "TTL": str(TTL_SEC),
         "Urgency": "normal",
-        # Непрочитанное одного чата схлопывается и у push-сервиса: телефон,
-        # вернувшийся в сеть, получит последнее, а не пачку.
-        "Topic": "subwave-chat",
         "Authorization": vapid.authorization(subscription["endpoint"], subject,
                                              time.time() if now is None else now),
-    })
+    }
+    # Push-сервис заменяет ожидающие сообщения только внутри чата. Номера
+    # квитанций остаются внутри шифрованной нагрузки.
+    if payload.get("tag") == CHAT_TAG:
+        headers["Topic"] = CHAT_TAG
+    req = urllib.request.Request(subscription["endpoint"], data=body, method="POST", headers=headers)
     try:
         with opener(req, timeout=TIMEOUT_SEC) as r:
             return r.status

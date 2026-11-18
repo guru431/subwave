@@ -176,6 +176,7 @@ export interface RequestTrack {
 
 /** Result of a listener request. */
 export interface RequestResult {
+  phase?: 'accepted' | 'searching' | 'queued' | 'aired' | 'declined' | 'failed' | 'removed' | 'answered';
   success: boolean;
   pending?: boolean;
   ack?: string;

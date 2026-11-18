@@ -2,6 +2,7 @@
 """Сторож эфира: оповещение владельцу, когда ведущая молчит или эфир сломан.
 
     python station/tools/watch.py
+    python station/tools/watch.py --audio  # короткий замер публичного MP3 через FFmpeg
 
 О молчащем голосе, аварийной петле или упавшей комнате владелец узнавал на слух,
 от слушателей или из баннера в плеере. Данные для проверки станция уже отдаёт по
@@ -34,8 +35,10 @@ stdout, и при сбое код выхода 1.
 Только стандартная библиотека: задача идёт в session 0 планировщика.
 """
 import argparse
+from array import array
 import http.client
 import json
+import math
 import os
 import shlex
 import subprocess
@@ -43,7 +46,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -65,6 +68,11 @@ LABELS = {"bridge": "мостик TTS (ведущая молчит)", "air": "э
 # по возрасту начала.
 STALE_MARGIN = 5 * 60
 STALE_NO_DURATION = 20 * 60
+AUDIO_SECONDS = 10
+AUDIO_TIMEOUT = 25
+AUDIO_RATE = 48_000
+AUDIO_CHANNELS = 2
+SILENCE_DBFS = -50
 
 
 def _unquote(value: str) -> str:
@@ -76,7 +84,8 @@ def _unquote(value: str) -> str:
     return value
 
 
-def load_config(environ=os.environ, env_file: Path = ENV_FILE) -> dict[str, str]:
+def load_config(environ=os.environ, env_file: Path = ENV_FILE,
+                required: tuple[str, ...] = REQUIRED) -> dict[str, str]:
     """Значения — из окружения, недостающие — из `station/.env`."""
     values = {}
     if env_file.is_file():
@@ -86,7 +95,7 @@ def load_config(environ=os.environ, env_file: Path = ENV_FILE) -> dict[str, str]
                 key, value = line.split("=", 1)
                 values[key.strip()] = _unquote(value.strip())
     values.update({k: environ[k] for k in KEYS if environ.get(k)})
-    missing = [k for k in REQUIRED if not values.get(k)]
+    missing = [k for k in required if not values.get(k)]
     if missing:
         raise SystemExit(f"не заданы {', '.join(missing)}: окружение или {env_file} "
                          f"(шаблон — station/.env.example)")
@@ -115,6 +124,74 @@ def fetch(url: str, timeout: float = TIMEOUT) -> tuple[int | None, object, str]:
         return code, json.loads(raw.decode("utf-8", "replace")), ""
     except ValueError:
         return code, None, ""
+
+
+def _dbfs(amplitude: float) -> float:
+    return 20 * math.log10(amplitude / 32768) if amplitude else -math.inf
+
+
+def _audio_levels(pcm: bytes) -> tuple[float, float, float, list[tuple[float, float]]] | None:
+    frame_bytes = 2 * AUDIO_CHANNELS
+    samples = array("h")
+    samples.frombytes(pcm[:len(pcm) - len(pcm) % frame_bytes])
+    if not samples:
+        return None
+    if sys.byteorder != "little":
+        samples.byteswap()
+    rate = AUDIO_RATE * AUDIO_CHANNELS
+    window = rate // 4
+    cutoff = 32768 * 10 ** (SILENCE_DBFS / 20)
+    peak = 0
+    silent = []
+    for start in range(0, len(samples), window):
+        end = min(start + window, len(samples))
+        window_peak = max(map(abs, samples[start:end]))
+        peak = max(peak, window_peak)
+        if window_peak <= cutoff:
+            if silent and silent[-1][1] == start:
+                silent[-1] = (silent[-1][0], end)
+            else:
+                silent.append((start, end))
+    rms = math.sqrt(sum(sample * sample for sample in samples) / len(samples))
+    return (len(samples) / rate, _dbfs(peak), _dbfs(rms),
+            [(start / rate, end / rate) for start, end in silent])
+
+
+def measure_audio(station: str, now, get) -> int:
+    station = station.rstrip("/")
+    code, state, error = get(station + "/api/state")
+    idle = state.get("streamIdle") if code == 200 and not error and isinstance(state, dict) else None
+    mode = "да" if idle is True else "нет" if idle is False else "неизвестно"
+    measured_at = datetime.fromtimestamp(now(), timezone.utc).isoformat(timespec="seconds")
+    print(f"Начало замера: {measured_at}. Штатное ожидание перед подключением: {mode}.")
+    command = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
+               "-rw_timeout", "8000000", "-f", "mp3", "-i", station + "/stream.mp3",
+               "-map", "0:a:0", "-t", str(AUDIO_SECONDS), "-ac", str(AUDIO_CHANNELS),
+               "-ar", str(AUDIO_RATE), "-c:a", "pcm_s16le", "-f", "s16le", "pipe:1"]
+    problem = ""
+    try:
+        result = subprocess.run(command, capture_output=True, timeout=AUDIO_TIMEOUT)
+        pcm = result.stdout
+        if result.returncode:
+            problem = f"код FFmpeg {result.returncode}"
+    except subprocess.TimeoutExpired as exc:
+        pcm, problem = exc.stdout or b"", "истекло время замера"
+    except OSError:
+        pcm, problem = b"", "не удалось запустить FFmpeg"
+
+    levels = _audio_levels(pcm)
+    if levels is None:
+        detail = f" ({problem})" if problem else ""
+        print(f"Нет декодируемых аудиокадров{detail}. Длительность 0 с.")
+        return 1
+    duration, peak, rms, silent = levels
+    signal = "Тишина" if peak <= SILENCE_DBFS else "Есть сигнал"
+    intervals = ", ".join(f"{start:.2f}–{end:.2f} с" for start, end in silent) or "нет"
+    print(f"{signal}. Длительность {duration:.2f} с. Пик {peak:.1f} dBFS, RMS {rms:.1f} dBFS.")
+    print(f"Интервалы тишины (пик ≤ {SILENCE_DBFS} dBFS): {intervals}.")
+    if problem:
+        print(f"Замер прерван ({problem}).")
+    return 0
 
 
 def _http_problem(code, body) -> str:
@@ -312,13 +389,19 @@ def save_state(path: Path, state: dict) -> None:
 
 def main(argv=None, now=time.time, get=fetch, environ=os.environ,
          env_file: Path = ENV_FILE) -> int:
-    argparse.ArgumentParser(description="сторож эфира станции").parse_args(argv)
+    parser = argparse.ArgumentParser(description="сторож эфира станции")
+    parser.add_argument("--audio", action="store_true",
+                        help=f"замерить до {AUDIO_SECONDS} секунд публичного MP3-потока через FFmpeg")
+    args = parser.parse_args(argv)
     try:
         # консоль задачи планировщика — не UTF-8: кириллица иначе роняет печать
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     except (AttributeError, OSError):
         pass
+    if args.audio:
+        cfg = load_config(environ, env_file, required=("WATCH_STATION_URL",))
+        return measure_audio(cfg["WATCH_STATION_URL"], now, get)
     cfg = load_config(environ, env_file)
     state_path = Path(cfg["WATCH_STATE_FILE"])
     old = load_state(state_path)

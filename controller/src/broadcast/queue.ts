@@ -16,7 +16,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { basename } from 'node:path';
 import { config } from '../config.js';
-import { saveReceipt } from './request-receipts.js';
+import { receiptPreventsResend, saveReceipt } from './request-receipts.js';
 import { writeFileAtomic } from '../util/atomic-file.js';
 import * as subsonic from '../music/subsonic.js';
 import * as mix from '../music/mix.js';
@@ -405,6 +405,8 @@ class Queue {
   history: QueueItem[] = [];   // finished tracks, newest first
   djLog: DjLogEntry[] = [];    // controller-level events for the web UI
   lastSeenKey: string | null = null;   // for change detection in the watcher
+  private _legacyRecoveryCurrent: QueueItem | null = null;
+  private readonly _resolvingRequestIds = new Set<string>();
   _nowPlaying: NowPlaying | null = null;   // last parse of now-playing.json, refreshed by the watcher
   _nowPlayingFresh = false;            // true once the watcher's first tick has landed
   senderBusy = false;          // drain-to-Liquidsoap mutex
@@ -600,22 +602,20 @@ class Queue {
   }
 
   // Boot recovery — reload the persisted queue so requests/picks already sent
-  // to Liquidsoap stay tracked across a controller restart. `lastSeenKey` is
-  // primed from the restored `current` so the watcher doesn't re-fire for the
-  // track that's still on air; if the track changed during the downtime the
-  // key differs and the watcher reconciles normally (see onTrackStarted, which
-  // drops any upcoming items Liquidsoap consumed while the controller was down).
+  // to Liquidsoap stay tracked across a controller restart. Restore the last
+  // applied marker so the same airing does not fire again at the first poll.
   recover() {
     let storedLinkCount: unknown;
     if (existsSync(config.queue.file)) try {
       const stored = JSON.parse(readFileSync(config.queue.file, 'utf8'));
       storedLinkCount = stored.tracksUntilLink;
-      // Drop anything queued long enough ago that Liquidsoap has certainly
-      // played past it — guards against a stale snapshot from a long downtime
-      // resurrecting tracks as permanent "Up next" zombies.
+      // Age alone can retire an undelivered automatic pick. A manual tail may
+      // genuinely wait hours behind a block, and sent items require mixer evidence.
       const cutoff = Date.now() - 2 * 60 * 60 * 1000;
       this.upcoming = (Array.isArray(stored.upcoming) ? stored.upcoming : [])
-        .filter((i: QueueItem) => i?.track?.title && new Date(i.queuedAt || 0).getTime() > cutoff);
+        .filter((i: QueueItem) => i?.track?.title
+          && (!i.aiPicked || i.sent || Date.parse(i.queuedAt || '') > cutoff)
+          && (!i.requestId || !receiptPreventsResend(i.requestId)));
       this.current = stored.current || null;
       this.history = Array.isArray(stored.history) ? stored.history : [];
       // Restore the rotate's count (#1619). Repaired, not trusted: this file is
@@ -625,10 +625,8 @@ class Queue {
       const since = Number(stored.tracksSinceJingle);
       this._tracksSinceJingle = Number.isFinite(since) && since >= 0 ? Math.floor(since) : 0;
       this._lastRotateJingle = typeof stored.lastRotateJingle === 'string' ? stored.lastRotateJingle : null;
-      if (this.current?.track) {
-        const t = this.current.track;
-        this.lastSeenKey = `${t.id || ''}|${t.title}|${t.artist || ''}`;
-      }
+      this.lastSeenKey = this.current?.playMarkerKey ?? null;
+      this._legacyRecoveryCurrent = this.lastSeenKey ? null : this.current;
       this.log('scheduler',
         `Queue recovered: ${this.upcoming.length} upcoming, ${this.history.length} played`);
       this.recoverPendingHandoff(stored.pendingHandoff);
@@ -643,7 +641,8 @@ class Queue {
       // Reconcile sent:true items against the live dj_queue after a short
       // delay so Liquidsoap has time to accept telnet connections on boot.
       if (this.upcoming.some(i => i.sent)) {
-        setTimeout(() => { void this.reconcileWithDjQueue(); }, 3000);
+        const staleSent = new Set(this.upcoming.filter(i => i.sent && !(Date.parse(i.queuedAt || '') > cutoff)));
+        setTimeout(() => { void this.reconcileWithDjQueue(staleSent); }, 3000);
       }
     } catch (err) {
       console.error('[queue] recover failed:', (err as Error).message);
@@ -994,6 +993,7 @@ class Queue {
     }
     const item = {
       track, requestId, requestedBy, operator, intent, introScript, introLabelChecked: true, introKind, introPersona, introHostSpeech,
+      playId: randomBytes(12).toString('hex'),
       // Links are editorially scoped to the session that wrote them. Preserve
       // the key alongside the persona: persona alone cannot distinguish two
       // adjacent shows hosted by the same DJ.
@@ -1038,6 +1038,7 @@ class Queue {
     // ("you're number N"), and after an insert the tail is somebody else.
     const position = insertAt >= 0 ? insertAt + 1 : this.upcoming.length;
     if (requestId) {
+      this.releaseListenerRequest(requestId);
       try { saveReceipt(requestId, { phase: 'queued', track }); }
       catch (err) { this.log('error', `Request receipt save failed: ${(err as Error).message}`); }
     }
@@ -2215,6 +2216,7 @@ class Queue {
           cueOutSec: cueOutCandidates.length ? Math.min(...cueOutCandidates) : null,
           cueInSec: item.cueInSec ?? null,
           resolveProbeId: item.resolveProbeId,
+          playId: item.playId ??= randomBytes(12).toString('hex'),
         });
         if (trim.cueInSec != null || trim.cueOutSec != null) {
           this.log('mix', `silence trimmed on "${item.track.title}"${trim.cueInSec != null ? ` head ${trim.cueInSec}s` : ''}${trim.cueOutSec != null ? ` tail from ${trim.cueOutSec}s` : ''}`);
@@ -2232,7 +2234,10 @@ class Queue {
           // whatever item slid into the slot (the clip would air carrying an
           // unrelated track's identity).
           if (successor && this.upcoming.includes(successor)) {
-            const clipUri = subsonic.getClipUri(successor.track, item.stemBlend.clipPath, stemBlend.CLIP_SEAM_CROSS_SEC);
+            const clipUri = subsonic.getClipUri(
+              successor.track, item.stemBlend.clipPath, stemBlend.CLIP_SEAM_CROSS_SEC,
+              successor.playId ??= randomBytes(12).toString('hex'),
+            );
             await writeHandoff(config.liquidsoap.queueFile, clipUri, { maxWaitMs: 5000 });
           } else {
             // Successor cancelled between the render and the clip write: skip
@@ -2818,23 +2823,25 @@ class Queue {
     this.log('scheduler', `Pause-and-talk break disarmed for ${p.kind} — ${reason}; falling back to ducked boundary speech`);
   }
 
-  // Index in `upcoming` of the item Liquidsoap is reporting, or -1. subsonic_id
-  // first (reliable), title+artist for items predating the id annotation.
+  // Index in `upcoming` of the occurrence Liquidsoap is reporting, or -1.
   // Extracted from onTrackStarted so
   // airPendingVoice can look at the SAME incoming item that tick is about to
   // consume, without a second matcher drifting out of step with this one.
   matchUpcomingIndex(np: NowPlaying | null): number {
     if (!np) return -1;
-    let idx = -1;
+    if (np.subwave_play_id) {
+      return this.upcoming.findIndex(u => u.playId === np.subwave_play_id
+        && (u.sent || (np.subwave_clip !== '1' && u === this._drainingItem)));
+    }
+    // Older mixers omit the occurrence ID. Their catalogue ID still outranks
+    // the display labels, and neither form proves an unsent track reached air.
     if (np.subsonic_id) {
-      idx = this.upcoming.findIndex(u => u.track.id && u.track.id === np.subsonic_id);
+      const exact = this.upcoming.findIndex(u => u.sent && u.track.id === np.subsonic_id);
+      if (exact >= 0) return exact;
     }
-    if (idx < 0) {
-      idx = this.upcoming.findIndex(
-        u => u.track.title === np.title && (u.track.artist || '') === (np.artist || '')
-      );
-    }
-    return idx;
+    const candidates = this.upcoming.filter(u => u.sent && (!np.subsonic_id || !u.track.id)
+      && u.track.title === np.title && (u.track.artist || '') === (np.artist || ''));
+    return candidates.length === 1 ? this.upcoming.indexOf(candidates[0]) : -1;
   }
 
   // Air the boundary-deferred segment, if one is pending. Called from
@@ -3316,20 +3323,38 @@ class Queue {
   // Called by the now-playing watcher when Liquidsoap reports a new track.
   onTrackStarted(np: NowPlaying | null) {
     if (!np || !np.title) return;
-    const key = `${np.subsonic_id || ''}|${np.title}|${np.artist || ''}`;
+    const now = Date.now();
+    const seconds = np.timestamp;
+    const markerTime = typeof seconds === 'number' && Number.isFinite(seconds)
+      && seconds > 0 && seconds <= now / 1000 ? Math.round(seconds * 1000) : null;
+    const key = np.subwave_play_id ? `play:${np.subwave_play_id}`
+      : JSON.stringify([np.subsonic_id || '', np.title, np.artist || '', markerTime]);
     if (key === this.lastSeenKey) return;
 
-    // Stem-blend safety guard: metadata matching a NOT-YET-SENT upcoming item
-    // means a rendered clip annotated as that track is airing while the track
-    // itself never reached Liquidsoap (a restart between the pair drain and the
-    // clip, or a missed deadline). Consuming it as "played" would orphan it —
-    // the clip ends, Liquidsoap falls to auto.m3u, and the track the clip just
-    // introduced never airs. Force-drain NOW (bypassing the pair hold) and leave
-    // this fire unprocessed: lastSeenKey stays unset, so the track's REAL fire
-    // re-enters and the normal consume path takes over.
-    const unsentFired = np.subsonic_id
-      ? this.upcoming.find(u => !u.sent && u.track.id === np.subsonic_id)
-      : undefined;
+    const cur = this.current;
+    const isClip = np.subwave_clip === '1' || (!!np.filename && np.filename === cur?.stemBlend?.clipPath);
+    const sameTrack = cur?.track && (cur.track.id && np.subsonic_id
+      ? cur.track.id === np.subsonic_id
+      : cur.track.title === np.title && (cur.track.artist || '') === (np.artist || ''));
+    // Older snapshots recorded the poll time. The first marker for that same
+    // airing predates it. An older mixer also omits the token joining the
+    // transition clip to the track that continues it.
+    if (cur && sameTrack && ((!np.subwave_play_id && cur.playMarkerClip && !isClip)
+      || (cur === this._legacyRecoveryCurrent && (markerTime == null || markerTime <= Date.parse(cur.startedAt || ''))))) {
+      this._legacyRecoveryCurrent = null;
+      this.lastSeenKey = cur.playMarkerKey = key;
+      cur.playMarkerClip = isClip;
+      this.persist();
+      return;
+    }
+    this._legacyRecoveryCurrent = null;
+
+    // A rendered clip can reach the mixer before the actual track behind it.
+    // Force the real track out and wait for a confirmed handoff before consuming
+    // it. A normal auto-playlist marker cannot force a pending request out.
+    const idx = this.matchUpcomingIndex(np);
+    const unsentFired = isClip && idx < 0 ? this.upcoming.find(u => !u.sent && (np.subwave_play_id
+      ? u.playId === np.subwave_play_id : !!np.subsonic_id && u.track.id === np.subsonic_id)) : undefined;
     if (unsentFired) {
       this.log('scheduler', `"${np.title}" fired while its queue item was still unsent — force-draining it (clip-as-track guard)`);
       // Fork: force exactly that item (and anything unsent ahead of it), not
@@ -3338,6 +3363,7 @@ class Queue {
       return;
     }
     this.lastSeenKey = key;
+    const startedAt = new Date(markerTime ?? now).toISOString();
     // The rotate's own clock (#1619). Only real MUSIC boundaries reach here —
     // a bed branches before now-playing.json's title gate and a jingle is
     // captured outside music_meta entirely — so this counts the same thing
@@ -3387,11 +3413,6 @@ class Queue {
       }
     }
 
-    // Match upcoming by subsonic_id first (reliable), fall back to title+artist
-    // for older items that pre-date the id annotation. Same matcher
-    // airPendingVoice used above, so the two always agree on the incoming item.
-    const idx = this.matchUpcomingIndex(np);
-
     if (idx >= 0) {
       // Drop everything ahead of the match too: the queue is strictly FIFO, so
       // `idx > 0` means Liquidsoap already consumed those items — only possible
@@ -3412,7 +3433,7 @@ class Queue {
           `Dropped ${played} queue item(s) Liquidsoap played during the downtime`);
       }
       const source = item.aiPicked ? 'ai' : 'request';
-      this.current = { ...item, startedAt: new Date().toISOString(), source };
+      this.current = { ...item, startedAt, source, playMarkerKey: key, playMarkerClip: isClip };
       if (item.requestId) {
         try { saveReceipt(item.requestId, { phase: 'aired', airedAt: this.current.startedAt! }); }
         catch (err) { this.log('error', `Request air receipt failed: ${(err as Error).message}`); }
@@ -3460,7 +3481,9 @@ class Queue {
           album: np.album,
         },
         requestedBy: null,
-        startedAt: new Date().toISOString(),
+        startedAt,
+        playMarkerKey: key,
+        playMarkerClip: isClip,
         source: 'auto',
       };
       this.log('playing', `${np.title} — ${np.artist}`, { source: 'auto' });
@@ -3912,6 +3935,14 @@ class Queue {
   onPushResolveFailed(item: QueueItem) {
     const idx = this.upcoming.indexOf(item);
     if (idx < 0) return;  // raced with a cancel/air between verdict and action
+    if (item.requestId) {
+      try {
+        saveReceipt(item.requestId, {
+          phase: 'failed', failureReason: 'audio-unavailable',
+          message: 'Не удалось загрузить аудио заказанного трека. Попробуйте другую запись.',
+        });
+      } catch (err) { this.log('error', `Request failure receipt save failed: ${(err as Error).message}`); }
+    }
     this.upcoming.splice(idx, 1);
     this._resolveFailStreak++;
     this.persist();
@@ -3952,9 +3983,9 @@ class Queue {
   // grace period) are kept so a just-sent pick isn't dropped before Liquidsoap's
   // next poll (up to 1s after writeHandoff). An empty dj_queue is handled
   // separately — see the consecutive-empty-reads guard below.
-  async reconcileWithDjQueue() {
-    const sentItems = this.upcoming.filter(i => i.sent);
-    if (sentItems.length === 0) {
+  async reconcileWithDjQueue(staleRecovered: ReadonlySet<QueueItem> = new Set()) {
+    const sentItems = new Set(this.upcoming.filter(i => i.sent));
+    if (sentItems.size === 0) {
       this._emptyDjQueueStreak = 0;
       return;
     }
@@ -3975,8 +4006,11 @@ class Queue {
       if (liveIds.size === 0) {
         this._emptyDjQueueStreak++;
         if (this._emptyDjQueueStreak >= EMPTY_DJ_QUEUE_CLEAR_THRESHOLD) {
-          const cleared = sentItems.length;
-          this.upcoming = this.upcoming.filter(i => !i.sent);
+          const nowPlaying = await this.readNowPlayingFromDisk();
+          const onAir = this.upcoming[this.matchUpcomingIndex(nowPlaying)];
+          const before = this.upcoming.length;
+          this.upcoming = this.upcoming.filter(i => i === onAir || !sentItems.has(i));
+          const cleared = before - this.upcoming.length;
           this._emptyDjQueueStreak = 0;
           this.log('scheduler',
             `Cleared ${cleared} stale queue item(s) — dj_queue reported empty for ${EMPTY_DJ_QUEUE_CLEAR_THRESHOLD} consecutive checks (Liquidsoap restarted or queue desynced)`);
@@ -3996,8 +4030,8 @@ class Queue {
       const onAir = this.upcoming[this.matchUpcomingIndex(nowPlaying)];
 
       // Pass 1: confirm items that ARE currently in dj_queue.
-      for (const item of this.upcoming) {
-        if (item.sent && item.track?.id && liveIds.has(item.track.id)) {
+      for (const item of sentItems) {
+        if (item.track?.id && liveIds.has(item.track.id)) {
           item.confirmedInLiquidsoap = true;
         }
       }
@@ -4006,8 +4040,8 @@ class Queue {
       const beforeCount = this.upcoming.length;
       this.upcoming = this.upcoming.filter(item => {
         if (item === onAir) return true;
-        if (!item.sent) return true;
-        if (!item.confirmedInLiquidsoap) return true;  // grace period — keep
+        if (!sentItems.has(item)) return true;
+        if (!item.confirmedInLiquidsoap && !staleRecovered.has(item)) return true;  // grace period — keep
         const id = item.track?.id;
         if (!id) return true;  // no id to match against — keep
         return liveIds.has(id);
@@ -4119,6 +4153,23 @@ class Queue {
     this.log('scheduler', `operator removed from queue: ${item.track.title} — ${item.track.artist}`);
     this.persist();
     return { ok: true };
+  }
+
+  canCancelListenerRequest(item: QueueItem): boolean {
+    return !!item.requestId && !item.operator && !this.handedOver(item)
+      && !item.confirmedInLiquidsoap && !item.bedded && !item.stemSeam;
+  }
+
+  cancelListenerRequest(id: string): boolean {
+    const idx = this.upcoming.findIndex(i => i.requestId === id);
+    if (idx < 0 || !this.canCancelListenerRequest(this.upcoming[idx])) return false;
+    // The durable receipt precedes the queue mutation, so a restart cannot
+    // restore this occurrence out of an earlier snapshot.
+    saveReceipt(id, { phase: 'removed', cancelledByListener: true, message: 'Заказ отозван.' });
+    const [item] = this.upcoming.splice(idx, 1);
+    this._introRenders.invalidate(item);
+    this.persist();
+    return true;
   }
 
   // Cancel what remains of an operator block (#1622 FR 4) — the inverse of the
@@ -4321,7 +4372,17 @@ class Queue {
   // The on-air track is deliberately NOT counted: `maxPending` bounds what is
   // still waiting, and a request that is playing has been served.
   pendingListenerRequests(): number {
-    return this.upcoming.filter(i => i.requestedBy && !i.operator).length;
+    return this._resolvingRequestIds.size + this.upcoming.filter(i => i.requestedBy && !i.operator).length;
+  }
+
+  reserveListenerRequest(id: string, maxPending: number): boolean {
+    if (this.pendingListenerRequests() >= maxPending) return false;
+    this._resolvingRequestIds.add(id);
+    return true;
+  }
+
+  releaseListenerRequest(id: string): void {
+    this._resolvingRequestIds.delete(id);
   }
 
   // Honest acknowledgement for a listener request whose resolved track is
@@ -4732,7 +4793,11 @@ class Queue {
     const np = this._nowPlayingFresh
       ? this._nowPlaying
       : await this.readNowPlayingFromDisk();
-    return np ? { ...np } : null;
+    if (!np) return null;
+    const publicMetadata = { ...np };
+    delete publicMetadata.subwave_play_id;
+    delete publicMetadata.subwave_clip;
+    return publicMetadata;
   }
 
   // Read the now-playing JSON Liquidsoap writes

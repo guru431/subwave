@@ -381,11 +381,12 @@ def build_handler(store: Store, config: Config):
                         ttl = 60 if library_cache["status"] == 200 else 5
                         library_cache["until"] = time.monotonic() + ttl
                     status, body = library_cache["status"], library_cache["body"]
-                self._send(status, body, headers={"Cache-Control": "no-store"})
+                self._send(status, body, headers={"Cache-Control": "no-store", "Access-Control-Allow-Origin": "*"})
             elif path == "/resolve":
+                public_headers = {"Access-Control-Allow-Origin": "*"}
                 q = (query.get("q", [""])[0] or "").strip()
                 if not q:
-                    self._send(400, {"error": "нужен параметр q"})
+                    self._send(400, {"error": "нужен параметр q"}, headers=public_headers)
                     return
                 page = {}
                 if "offset" in query:
@@ -394,25 +395,25 @@ def build_handler(store: Store, config: Config):
                     if (not re.fullmatch(r"[0-9]{1,10}", raw_offset)
                             or int(raw_offset) > 2_147_483_647
                             or (int(raw_offset) > 0 and not search_query)):
-                        self._send(400, {"error": "неверная страница поиска"})
+                        self._send(400, {"error": "неверная страница поиска"}, headers=public_headers)
                         return
                     page = {"offset": int(raw_offset), "search_query": search_query or None}
                 if not resolves.take(time.monotonic()):
                     # Плеер на отказ просто не показывает подсказку — заказ
                     # всё равно уходит текстом, и каскад станции его разберёт
                     self._send(429, {"error": f"не больше {config.resolve_max} сверок "
-                                              f"за {config.rate_seconds} с"})
+                                              f"за {config.rate_seconds} с"}, headers=public_headers)
                     return
                 base, user, password = config.navidrome
                 try:
-                    self._send(200, subsonic.resolve(q, base, user, password, **page))
+                    self._send(200, subsonic.resolve(q, base, user, password, **page), headers=public_headers)
                 except Exception as e:                       # noqa: BLE001
                     # Плееру важно отличить «в коллекции нет» от «сверка не
                     # состоялась»: первое — ответ, второе — повод не скрывать
                     # ошибку за пустым списком. Текст исключения — только в
                     # лог: в нём бывает URL запроса с токеном и солью Subsonic.
                     print(f"room: /resolve: {type(e).__name__}", file=sys.stderr, flush=True)
-                    self._send(502, {"error": "сверка не удалась"})
+                    self._send(502, {"error": "сверка не удалась"}, headers=public_headers)
             elif path == "/download":
                 self._download(query)
             elif path == "/push/key":

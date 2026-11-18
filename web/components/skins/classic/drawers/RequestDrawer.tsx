@@ -7,6 +7,7 @@ import { cn } from '@/lib/cn';
 import type { NowPlayingTrack, RequestResult, StationContext } from '@/lib/types';
 import { REQUEST_NAME_MAX } from '@/lib/schemas.generated';
 import { bindExact, bindPick, pickedSongId, type RequestPick } from '@/lib/requestPick';
+import { useStationOrigin } from '@/lib/stationOrigin';
 import { RequestReceipts } from '../RequestReceipts';
 
 const SUCCESS_HOLD_MS = 2800;
@@ -94,9 +95,9 @@ function buildSuggestions(
 interface ResolveCandidate {
   id: string;
   title: string;
-  artist: string;
+  artist: string | null;
   album: string | null;
-  year: number | null;
+  year: number | string | null;
   duration: number | null;
 }
 
@@ -105,6 +106,20 @@ interface ResolveResult {
   alternatives: ResolveCandidate[];
   searchQuery?: string;
   nextOffset?: number | null;
+}
+
+async function readResolve(response: Response): Promise<ResolveResult> {
+  if (!response.ok) throw new Error('resolve unavailable');
+  const body = await response.json() as ResolveResult | null;
+  const validCandidate = (candidate: ResolveCandidate) => candidate && typeof candidate.id === 'string'
+    && typeof candidate.title === 'string' && (candidate.artist == null || typeof candidate.artist === 'string')
+    && (candidate.album == null || typeof candidate.album === 'string')
+    && (candidate.year == null || typeof candidate.year === 'number' || typeof candidate.year === 'string');
+  if (!body || !Array.isArray(body.alternatives) || !body.alternatives.every(validCandidate)
+    || (body.exact != null && !validCandidate(body.exact))) {
+    throw new Error('invalid library reply');
+  }
+  return body;
 }
 
 type Resolution = { query: string; status: 'loading' | 'error' }
@@ -137,6 +152,7 @@ export default function RequestDrawer({
   isSubmitting, onSubmit, onPoll, onClose,
   nowPlaying, context,
 }: RequestDrawerProps) {
+  const { roomUrl } = useStationOrigin();
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   // Null while idle. On accept it holds a `pending` success card with the
   // templated ack; polling fills in the real track + on-air ack.
@@ -168,10 +184,9 @@ export default function RequestDrawer({
     setResolution({ query, status: 'loading' });
     const timer = setTimeout(async () => {
       try {
-        const r = await fetch(`/room/resolve?q=${encodeURIComponent(query)}&offset=0`, { signal: abort.signal });
+        const r = await fetch(`${roomUrl}/resolve?q=${encodeURIComponent(query)}&offset=0`, { signal: abort.signal });
         if (cancelled) return;
-        if (!r.ok) throw new Error('resolve unavailable');
-        let body = (await r.json()) as ResolveResult;
+        let body = await readResolve(r);
         if (cancelled) return;
         if (expectedSongId && body.exact && body.exact.id !== expectedSongId) {
           body = { ...body, exact: null, alternatives: [body.exact, ...body.alternatives] };
@@ -186,7 +201,7 @@ export default function RequestDrawer({
       }
     }, RESOLVE_DEBOUNCE_MS);
     return () => { cancelled = true; abort.abort(); pageAbortRef.current?.abort(); clearTimeout(timer); };
-  }, [requestText, expectedSongId]);
+  }, [requestText, expectedSongId, roomUrl]);
 
   const loadMore = async () => {
     if (resolved?.nextOffset == null || !resolved.searchQuery || pageAbortRef.current) return;
@@ -196,9 +211,8 @@ export default function RequestDrawer({
     setMore({ query, status: 'loading' });
     try {
       const params = new URLSearchParams({ q: query, offset: String(resolved.nextOffset), searchQuery: resolved.searchQuery });
-      const response = await fetch(`/room/resolve?${params}`, { signal: abort.signal });
-      if (!response.ok) throw new Error('page unavailable');
-      const body = await response.json() as ResolveResult;
+      const response = await fetch(`${roomUrl}/resolve?${params}`, { signal: abort.signal });
+      const body = await readResolve(response);
       if (abort.signal.aborted) return;
       setResolution(previous => {
         if (previous?.query !== query || previous.status !== 'ready') return previous;
@@ -246,13 +260,11 @@ export default function RequestDrawer({
       const data = await onPoll?.(requestId);
       if (pollStopRef.current) return;
       if (data?.status === 'resolved') {
-        setResult(prev => ({
-          success: true,
-          ack: data.ack || prev?.ack,
-          track: data.track,
-          queuePosition: data.queuePosition,
-        }));
-        scheduleClose();
+        const success = data.phase
+          ? ['queued', 'aired', 'answered'].includes(data.phase)
+          : data.success !== false;
+        setResult(prev => ({ ...data, success, pending: false, ack: data.ack || prev?.ack }));
+        if (success) scheduleClose();
         return;
       }
       if (data?.status === 'failed') {
@@ -397,7 +409,7 @@ export default function RequestDrawer({
                       key={c.id}
                       type="button"
                       onClick={() => {
-                        const text = `${c.artist} — ${c.title}`;
+                        const text = c.artist ? `${c.artist} — ${c.title}` : c.title;
                         setPick(bindPick(c.id, text));
                         setRequestText(text);
                         taRef.current?.focus();
@@ -448,7 +460,7 @@ export default function RequestDrawer({
 
             {result && !result.success && (
               <div className="mt-3 border border-[#c0392b] bg-[rgba(192,57,43,0.06)] px-3 py-2.5 text-xs leading-normal text-[#7a2218]">
-                {result.message || 'Ничего не нашлось — попробуйте другие слова.'}
+                {result.message || result.ack || 'Ничего не нашлось — попробуйте другие слова.'}
               </div>
             )}
 
@@ -486,7 +498,8 @@ interface SuccessCardProps {
 }
 
 function SuccessCard({ result }: SuccessCardProps) {
-  const { ack, track, queuePosition, pending, requestText } = result;
+  const { ack, track, queuePosition, pending, requestText, phase } = result;
+  const queued = phase === 'queued' || (!phase && (queuePosition ?? 0) > 0);
   return (
     <div className="py-2">
       <div className="mb-[14px] flex items-center gap-2 text-[9px] tracking-[0.4em] text-vermilion uppercase">
@@ -496,7 +509,7 @@ function SuccessCard({ result }: SuccessCardProps) {
           )}
           <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-vermilion" />
         </span>
-        {pending ? 'На линии' : track ? 'В очереди' : 'Отвечено'}
+        {pending ? 'На линии' : phase === 'aired' ? 'Прозвучало' : queued ? 'В очереди' : 'Отвечено'}
       </div>
 
       {ack && (
@@ -547,7 +560,7 @@ function SuccessCard({ result }: SuccessCardProps) {
         </m.div>
       )}
 
-      {!pending && typeof queuePosition === 'number' && queuePosition > 0 && (
+      {!pending && queued && typeof queuePosition === 'number' && queuePosition > 0 && (
         <div className="v3-tab-num mt-[14px] text-[11px] tracking-[0.15em] text-muted uppercase">
           В очереди: №{queuePosition}
         </div>

@@ -79,6 +79,7 @@ export interface StationClient {
   submitRequest(text: string, name: string, songId?: string): Promise<RequestResult>;
   /** 404 → status 'unknown'; network error → null so drawers keep polling. */
   requestStatus(requestId: string): Promise<RequestResult | null>;
+  cancelRequest(requestId: string): Promise<RequestResult | null>;
   /** `songId` is what the client believes is on air; the controller rejects a
    *  stale tap. null on network error. */
   likeCurrent(songId: string): Promise<LikeResult | null>;
@@ -93,6 +94,16 @@ export interface StationClient {
 export function createStationClient(origin: StationOrigin): StationClient {
   const api = origin.apiUrl;
   const json = <T>(res: Response): Promise<T> => res.json() as Promise<T>;
+  const readReceipt = async (requestId: string, method: 'GET' | 'DELETE') => {
+    try {
+      const r = await fetch(`${api}/request/${encodeURIComponent(requestId)}`, { method, redirect: 'error' });
+      if (r.status === 404) return { success: false, status: 'unknown' } satisfies RequestResult;
+      if (!r.ok && r.status !== 409) return null;
+      return await json<RequestResult>(r);
+    } catch {
+      return null;
+    }
+  };
   return {
     origin,
     resolve: path => (path ? `${api}${path}` : ''),
@@ -122,15 +133,8 @@ export function createStationClient(origin: StationOrigin): StationClient {
       });
       return json<RequestResult>(r);
     },
-    requestStatus: async requestId => {
-      try {
-        const r = await fetch(`${api}/request/${requestId}`);
-        if (r.status === 404) return { success: false, status: 'unknown' };
-        return await json<RequestResult>(r);
-      } catch {
-        return null;
-      }
-    },
+    requestStatus: requestId => readReceipt(requestId, 'GET'),
+    cancelRequest: requestId => readReceipt(requestId, 'DELETE'),
     likeCurrent: async songId => {
       try {
         const r = await fetch(`${api}/like`, {
@@ -184,10 +188,11 @@ export const defaultStationClient: StationClient =
 export function useStationClient(): StationClient {
   const {
     apiUrl,
+    roomUrl,
     streams: { mp3, opus },
   } = useStationOrigin();
   return useMemo(
-    () => createStationClient({ apiUrl, streams: { mp3, opus } }),
-    [apiUrl, mp3, opus],
+    () => createStationClient({ apiUrl, roomUrl, streams: { mp3, opus } }),
+    [apiUrl, roomUrl, mp3, opus],
   );
 }

@@ -175,6 +175,8 @@ export interface RequestTrack {
 
 export interface RequestResult {
   phase?: 'accepted' | 'searching' | 'queued' | 'aired' | 'declined' | 'failed' | 'removed' | 'answered';
+  canCancel?: boolean;
+  cancelledByListener?: boolean;
   airedAt?: string;
   estimatedWaitSec?: number | null;
   waitReason?: string | null;

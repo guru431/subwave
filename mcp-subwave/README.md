@@ -19,7 +19,7 @@ for the full architecture write-up.
 
 | Tool | Auth | What it does |
 |---|---|---|
-| `subwave_health` | none | Liveness — controller reachable, stream on-air. |
+| `subwave_health` | none | Controller reachability and Icecast source status (`true`, `false`, or `null` for unavailable). |
 | `subwave_now_playing` | none | Current track, station context, listener counts. |
 | `subwave_station_state` | none | Upcoming queue, recent history, DJ booth log. |
 | `subwave_schedule` | none | Personas, shows, weekly schedule grid. |

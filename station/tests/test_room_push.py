@@ -227,6 +227,39 @@ def test_every_message_wakes_everyone_but_its_author(store):
     assert [who for who, _ in sent] == ["petya"]
 
 
+def test_push_service_keeps_receipts_when_chat_updates_for_the_same_endpoint(store, monkeypatch):
+    sub, _ = push.check_subscription(_subscription())
+    store.subscribe(sub, "listener", "Слушатель")
+    now = datetime(2026, 11, 18, tzinfo=timezone.utc)
+    for request_id in ("first", "second"):
+        assert store.watch_request(request_id, sub, "listener", 10, 10, now=now)
+    pending = store.pending_request_push
+    monkeypatch.setattr(store, "pending_request_push", lambda: pending(now=now))
+    delivered = []
+    offline_queue = {}
+
+    def opener(req, timeout=None):
+        assert req.full_url == FCM
+        topic = req.get_header("Topic")
+        key = topic if topic else object()
+        offline_queue[key] = req.data
+        delivered.append(topic)
+        return _Accepted()
+
+    def sender(sub, payload, vapid, subject):
+        return push.send(sub, payload, vapid, subject, now=now.timestamp(), opener=opener)
+
+    n = notify.Notifier(store, vapid=push.Vapid(ec.generate_private_key(ec.SECP256R1())),
+                        subject="https://fm.example.org", wake=Inline(), sender=sender)
+    watcher = server_mod.receipt_push.RequestWatch(store, n, lambda _: {"phase": "declined"})
+    assert watcher.tick() == 2
+    assert n.on_dj_reply("Первое сообщение") == 1
+    assert n.on_dj_reply("Второе сообщение") == 1
+    assert delivered == [None, None, "subwave-chat", "subwave-chat"]
+    assert len(offline_queue) == 3
+    assert pending(now=now) == []
+
+
 class _Accepted:
     status = 201
 

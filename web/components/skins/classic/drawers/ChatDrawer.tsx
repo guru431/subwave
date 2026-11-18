@@ -30,6 +30,8 @@ export default function ChatDrawer({ items, send, sending }: ChatDrawerProps) {
   const [name, setName] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
   const [notifyOn, setNotifyOn] = useState(false);
+  const [changingNotify, setChangingNotify] = useState(false);
+  const [notifyProblem, setNotifyProblem] = useState(false);
   const [state, setState] = useState<NotifyState>('ask');
   // Подписку снял браузер (WebKit — за «тихие» push), а переподписка без жеста
   // не удалась: галочка стоит, push мёртв. Молчать нельзя — нужно нажатие.
@@ -64,10 +66,17 @@ export default function ChatDrawer({ items, send, sending }: ChatDrawerProps) {
   }, []);
 
   const toggleNotify = useCallback(async () => {
+    setChangingNotify(true);
+    setNotifyProblem(false);
     if (notifyOn) {
-      setNotifyOn(false);
       setNotifyEnabled(false);
-      void disablePush();
+      if (await disablePush()) {
+        setNotifyOn(false);
+      } else {
+        setNotifyEnabled(true);
+        setNotifyProblem(true);
+      }
+      setChangingNotify(false);
       return;
     }
     const next = await askPermission();
@@ -77,7 +86,8 @@ export default function ChatDrawer({ items, send, sending }: ChatDrawerProps) {
     setNotifyEnabled(on);
     // Второй способ доставки — для закрытой вкладки. Не вышло (браузер без
     // push, комната без ключа) — остаются уведомления страницы, как раньше.
-    if (on) void enablePush();
+    if (on) await enablePush();
+    setChangingNotify(false);
   }, [notifyOn]);
 
   const submit = useCallback(async () => {
@@ -158,7 +168,7 @@ export default function ChatDrawer({ items, send, sending }: ChatDrawerProps) {
         <div className="flex items-center justify-between gap-2">
           {state === 'ask' || state === 'ready' ? (
             <label className="flex cursor-pointer items-center gap-2 text-[11px] text-muted">
-              <input type="checkbox" checked={notifyOn} onChange={() => void toggleNotify()} />
+              <input type="checkbox" checked={notifyOn} disabled={changingNotify} onChange={() => void toggleNotify()} />
               Уведомлять о важном
             </label>
           ) : (
@@ -183,8 +193,9 @@ export default function ChatDrawer({ items, send, sending }: ChatDrawerProps) {
           >
             Уведомления отключены — включите заново
           </button>
-        )}
+          )}
       </div>
+        {notifyProblem && <p role="alert" className="mt-1 text-[11px] text-muted">Не удалось отключить уведомления чата. Повторите попытку.</p>}
     </div>
   );
 }

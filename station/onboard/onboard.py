@@ -511,17 +511,20 @@ def patch_persona(e: dict[str, str], persona_id: str, changes: dict,
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="первичная настройка subwave")
-    p.add_argument("--export", metavar="FILE",
-                   help="снять текущие настройки станции в файл и выйти")
-    p.add_argument("--patch", metavar="FILE",
-                   help="применить патч настроек из файла и выйти")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--export", metavar="FILE",
+                      help="снять текущие настройки станции в файл и выйти")
+    mode.add_argument("--patch", metavar="FILE",
+                      help="применить патч настроек из файла и выйти")
     p.add_argument("--dry-run", action="store_true",
-                   help="с --patch и --persona: показать и ничего не отправлять")
-    p.add_argument("--persona", metavar="ID",
-                   help="правка одной персоны; поля — из --from")
+                   help="с --patch или --persona: показать изменения без сохранения")
+    mode.add_argument("--persona", metavar="ID",
+                      help="правка одной персоны; поля — из --from")
     p.add_argument("--from", dest="changes", metavar="FILE",
                    help="с --persona: JSON с изменяемыми полями")
     args = p.parse_args(argv)
+    if args.dry_run and args.patch is None and args.persona is None:
+        p.error("--dry-run требует --patch FILE или --persona ID")
     if args.export:
         return export_settings(env(SUBWAVE_REQUIRED), args.export)
     if args.patch:

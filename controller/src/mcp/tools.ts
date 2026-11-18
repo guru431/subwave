@@ -57,6 +57,8 @@ export interface RegisterToolsOptions {
 const REQUEST_OUTPUT = {
   requestId: z.string(),
   status: z.string().describe("'pending' | 'resolved' | 'failed' | 'unknown'"),
+  phase: z.string().optional().describe("Receipt phase: accepted, searching, queued, aired, declined, failed, removed, or answered."),
+  airedAt: z.string().nullable().optional(),
   success: z.boolean().optional(),
   ack: z.string().nullable().optional(),
   track: z.object({ title: z.string(), artist: z.string().nullable() }).nullable().optional(),
@@ -65,16 +67,21 @@ const REQUEST_OUTPUT = {
 };
 
 function summarizeRequest(requestId: string, status: RequestStatus): string {
+  const ack = status.ack ? ` DJ says: ${status.ack}` : "";
+  const track = status.track ? ` "${status.track.title}"${status.track.artist ? ` by ${status.track.artist}` : ""}` : "";
+  if (status.phase === "aired") {
+    return `The requested track${track} aired${status.airedAt ? ` at ${status.airedAt}` : ""}.${ack}`;
+  }
+  if (status.phase === "queued") {
+    return `Queued${track}${status.queuePosition == null ? "" : ` at position ${status.queuePosition}`}.${ack}`;
+  }
+  if (status.phase === "answered") return `The DJ answered.${ack}`;
+  if (status.phase === "declined" || status.phase === "removed" || status.phase === "failed") {
+    return `Request ${status.phase}: ${status.message ?? status.ack ?? "no further details."}`;
+  }
   if (status.status === "resolved") {
-    // A chat answer or a declined pick (cooldown, already queued) also lands
-    // here, with no track and/or no queue position: nothing was queued.
-    if (!status.track || status.queuePosition == null) {
-      return `Nothing was queued. DJ says: ${status.ack ?? "(no ack)"}`;
-    }
-    return (
-      `Queued "${status.track?.title}" by ${status.track?.artist} at position ` +
-      `${status.queuePosition}. DJ says: ${status.ack ?? "(no ack)"}`
-    );
+    if (status.success === false) return `Request declined: ${status.message ?? status.ack ?? "no further details."}`;
+    return status.queuePosition == null ? `The DJ answered.${ack}` : `Queued${track} at position ${status.queuePosition}.${ack}`;
   }
   if (status.status === "failed") {
     return `Request not fulfilled: ${status.message ?? "no match in the library."}`;
@@ -104,19 +111,20 @@ export function registerSubwaveTools(
     {
       title: "SUB/WAVE liveness",
       description:
-        "Check that the SUB/WAVE controller is reachable and the station reports on-air. " +
+        "Check controller reachability and whether Icecast reports a live source. " +
         "Call this first when other tools fail — it separates 'stack is down' from " +
         "'endpoint-specific problem'.",
-      inputSchema: {},
-      outputSchema: { onAir: z.boolean() },
+      outputSchema: { reachable: z.boolean(), onAir: z.boolean().nullable() },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
     () =>
       run(async () => {
-        const onAir = await client.health();
+        const health = await client.health();
+        const source = health.onAir === null ? "Icecast source status is unavailable."
+          : health.onAir ? "Icecast has a live source." : "Icecast reports no live source.";
         return {
-          content: [text(onAir ? "SUB/WAVE is on-air." : "Controller reachable, but not reporting on-air.")],
-          structuredContent: { onAir },
+          content: [text(`Controller reachable. ${source}`)],
+          structuredContent: health,
         };
       }),
   );

@@ -121,7 +121,7 @@ test('a clip-as-track target that meets a busy sender is reached after release',
 
 test('the clip-as-track guard drains the item that fired, and nothing behind it', async () => {
   reset([item('a', true), item('b'), item('c')]);
-  queue.onTrackStarted({ subsonic_id: 'b', title: 'Title b', artist: 'Artist b' } as any);
+  queue.onTrackStarted({ subsonic_id: 'b', title: 'Title b', artist: 'Artist b', subwave_clip: '1' });
   for (let i = 0; i < 200 && !queue.upcoming[1].sent; i++) await new Promise(r => setTimeout(r, 10));
   await settled();
   assert.deepEqual(sentIds(), ['a', 'b'], 'b is handed over past DRAIN_AHEAD; c is not');

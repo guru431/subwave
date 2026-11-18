@@ -90,6 +90,15 @@ def test_health_is_ok(room):
     assert call(base, "/health") == (200, {"ok": True})
 
 
+def test_showcase_can_read_only_public_catalog_cross_origin(room, monkeypatch):
+    base, _, _ = room
+    monkeypatch.setattr(server_mod.navidrome, "library_summary", lambda *a: {"total": 1, "scanning": False})
+    for path in ("/library", "/resolve?q=Artist", "/messages"):
+        req = urllib.request.Request(base + path, headers={"Origin": "https://showcase.test"})
+        with urllib.request.urlopen(req, timeout=3) as response:
+            assert response.headers.get("Access-Control-Allow-Origin") == (None if path == "/messages" else "*")
+
+
 def test_resolve_forwards_page_and_pinned_query(room, monkeypatch):
     base, _, _ = room
     seen = []

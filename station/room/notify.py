@@ -98,7 +98,7 @@ class Notifier:
     def _enqueue(self, targets: list[dict], payload: dict) -> None:
         # тег один на весь чат — тот же, что у уведомления страницы: живая
         # вкладка и push-сервис не выстроят в шторке двух карточек об одном
-        payload = {**payload, "tag": "subwave-chat", "url": "/?chat=1"}
+        payload = {**payload, "tag": push.CHAT_TAG, "url": "/?chat=1"}
         with self.lock:
             for sub in targets:
                 self.pending[sub["endpoint"]] = (sub, payload)

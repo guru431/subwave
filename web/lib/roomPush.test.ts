@@ -135,6 +135,43 @@ async function lostCases() {
   console.log('pushLost');
   fakeBrowser();
 
+  await testAsync('отписка от чата сохраняет адрес доставки квитанции', async () => {
+    const id = '00000000-0000-0000-0000-000000000002';
+    assert.equal(await watchRequestPush(id), true);
+    const endpoint = env.sub;
+    assert.ok(endpoint);
+    env.fetches = [];
+    assert.equal(await disablePush(), true);
+    assert.deepEqual(env.fetches, ['/room/push/unsubscribe']);
+    assert.equal(env.sub, endpoint);
+  });
+
+  await testAsync('отписка от чата применяется после уже отправленной регистрации', async () => {
+    const fetch = globalThis.fetch;
+    let reportStarted!: () => void;
+    const started = new Promise<void>(resolve => { reportStarted = resolve; });
+    let release!: () => void;
+    const released = new Promise<void>(resolve => { release = resolve; });
+    globalThis.fetch = async (url, init) => {
+      if (String(url).endsWith('/push/subscribe')) {
+        reportStarted();
+        await released;
+      }
+      return fetch(url, init);
+    };
+    env.fetches = [];
+    try {
+      const enabling = enablePush();
+      assert.equal(await Promise.race([started.then(() => true), enabling.then(() => false)]), true);
+      const disabling = disablePush();
+      release();
+      assert.deepEqual(await Promise.all([enabling, disabling]), [true, true]);
+      assert.deepEqual(env.fetches, ['/room/push/key', '/room/push/subscribe', '/room/push/unsubscribe']);
+    } finally {
+      release();
+      globalThis.fetch = fetch;
+    }
+  });
   await testAsync('квитанция после ротации VAPID переподписывается на новый ключ', async () => {
     let removed = false;
     env.sub = {

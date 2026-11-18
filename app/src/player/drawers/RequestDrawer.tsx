@@ -109,13 +109,12 @@ export default function RequestDrawer({ api, nowPlaying, context, onClose }: Req
       }
       if (pollStop.current) return;
       if (data?.status === 'resolved') {
-        setResult((prev) => ({
-          success: true,
-          ack: data!.ack || prev?.ack,
-          track: data!.track,
-          queuePosition: data!.queuePosition,
-        }));
-        scheduleClose();
+        const resolved = data;
+        const success = resolved.phase
+          ? ['queued', 'aired', 'answered'].includes(resolved.phase)
+          : resolved.success !== false;
+        setResult((prev) => ({ ...resolved, success, pending: false, ack: resolved.ack || prev?.ack }));
+        if (success) scheduleClose();
         return;
       }
       if (data?.status === 'failed') {
@@ -238,7 +237,7 @@ export default function RequestDrawer({ api, nowPlaying, context, onClose }: Req
 
       {result && !result.success ? (
         <View style={{ marginTop: 12, borderWidth: 1, borderColor: '#c0392b', backgroundColor: 'rgba(192,57,43,0.06)', paddingHorizontal: 12, paddingVertical: 10 }}>
-          <Text style={{ color: '#c0392b', fontSize: 12 }}>{result.message || 'No match — try different words.'}</Text>
+          <Text style={{ color: '#c0392b', fontSize: 12 }}>{result.message || result.ack || 'No match — try different words.'}</Text>
         </View>
       ) : null}
 
@@ -268,13 +267,14 @@ export default function RequestDrawer({ api, nowPlaying, context, onClose }: Req
 
 function SuccessCard({ result }: { result: RequestResult }) {
   const { colors } = useTheme();
-  const { ack, track, queuePosition, pending, requestText } = result;
+  const { ack, track, queuePosition, pending, requestText, phase } = result;
+  const queued = phase === 'queued' || (!phase && (queuePosition ?? 0) > 0);
   return (
     <View style={{ paddingVertical: 8 }}>
       <View className="flex-row items-center" style={{ gap: 8, marginBottom: 14 }}>
         <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent }} />
         <Text className="font-mono text-accent" style={{ fontSize: 9, letterSpacing: 4 }}>
-          {pending ? 'ON THE WIRE' : 'QUEUED'}
+          {pending ? 'ON THE WIRE' : phase === 'aired' ? 'AIRED' : queued ? 'QUEUED' : 'ANSWERED'}
         </Text>
       </View>
 
@@ -296,7 +296,7 @@ function SuccessCard({ result }: { result: RequestResult }) {
         </Text>
       ) : null}
 
-      <View style={{ borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.softBorder, paddingVertical: 16 }}>
+      {(pending || track) ? <View style={{ borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.softBorder, paddingVertical: 16 }}>
         <Text className="font-mono text-muted" style={{ fontSize: 9, letterSpacing: 3, marginBottom: 6 }}>
           {pending ? 'THE DJ IS DIGGING' : 'NOW IN THE BOOTH'}
         </Text>
@@ -315,9 +315,9 @@ function SuccessCard({ result }: { result: RequestResult }) {
             <Text className="font-body text-muted mt-0.5" style={{ fontSize: 13 }}>{track?.artist}</Text>
           </>
         )}
-      </View>
+      </View> : null}
 
-      {!pending && typeof queuePosition === 'number' && queuePosition > 0 ? (
+      {!pending && queued && typeof queuePosition === 'number' && queuePosition > 0 ? (
         <Text className="font-mono text-muted mt-4" style={{ fontSize: 11, letterSpacing: 1 }}>
           POSITION #{queuePosition} IN QUEUE
         </Text>

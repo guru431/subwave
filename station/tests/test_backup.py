@@ -15,9 +15,12 @@ import subprocess
 import sys
 import tarfile
 import time
+from contextlib import closing
 from pathlib import Path
 
 import pytest
+
+from test_room_store import T0, dis, rotations, store_mod
 
 SCRIPT = Path(__file__).resolve().parent.parent / "tools" / "backup.sh"
 
@@ -138,6 +141,86 @@ def test_backup_archives_the_station_and_rotates_only_its_own(stack, tmp_path):
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("pending", [True, False])
+def test_restored_room_retains_votes_and_decisions_across_rotation(stack, tmp_path, pending):
+    root, dest = stack
+    batch = '{"version":1,"trackMap":{"old":"new"}}'
+    cards = root / "state" / "room-rotations"
+    cards.mkdir()
+    (cards / "rotation.json").write_text(batch, encoding="utf-8")
+    (cards / "incomplete.tmp").write_text("{", encoding="utf-8")
+    room = store_mod.Store(str(root / "room" / "room.db"))
+    try:
+        room.set_dislike(dis(target="old", song_id="old"), cap=20, now=T0)
+        room.decide("track", "old", "keep", now=T0)
+        if not pending:
+            rotations.sync(room, str(cards))
+    finally:
+        room.close()
+
+    result = _run([str(SCRIPT)], _env(root, dest))
+    assert result.returncode == 0, result.stdout + result.stderr
+    restore = tmp_path / "restored"
+    with tarfile.open(_new_archives(dest)[0]) as archive:
+        assert ("./state/room-rotations/rotation.json" in archive.getnames()) is pending
+        assert "./state/room-rotations/incomplete.tmp" not in archive.getnames()
+        archive.extractall(restore, filter="data")
+
+    restored_cards = restore / "state" / "room-rotations"
+    room = store_mod.Store(str(restore / "room" / "room.db"))
+    try:
+        rotations.sync(room, str(restored_cards))
+        if pending:
+            # Обрыв после commit комнаты, но до удаления карты.
+            (restored_cards / "rotation.json").write_text(batch, encoding="utf-8")
+            rotations.sync(room, str(restored_cards))
+        assert [(r["target"], r["song_id"]) for r in room.all_dislikes()] == [("new", "new")]
+        assert tuple(room.db.execute("SELECT target, action FROM dislike_decisions").fetchone()) == ("new", "keep")
+    finally:
+        room.close()
+
+
+@pytest.mark.integration
+def test_backup_retries_after_library_commit_during_snapshot(stack, tmp_path):
+    root, dest = stack
+    # Add a commit from a second connection after the first snapshot has been
+    # taken, so the retry path is exercised without a filesystem timing race.
+    (tmp_path / "sitecustomize.py").write_text('''
+import os
+import sqlite3
+from contextlib import closing
+
+connect = sqlite3.connect
+
+class RotatingLibrary(sqlite3.Connection):
+    changed = False
+
+    def backup(self, dst):
+        super().backup(dst)
+        if not self.changed:
+            self.changed = True
+            with closing(connect(os.environ["TEST_LIBRARY"])) as writer:
+                writer.execute("INSERT INTO t VALUES ('new ID')")
+                writer.commit()
+
+def mock_connect(path, *args, **kwargs):
+    if kwargs.get("uri") and str(path).endswith("/state/library.db?mode=rw"):
+        kwargs["factory"] = RotatingLibrary
+    return connect(path, *args, **kwargs)
+
+sqlite3.connect = mock_connect
+''', encoding="utf-8")
+    result = _run([str(SCRIPT)], _env(root, dest, PYTHONPATH=str(tmp_path),
+                                     TEST_LIBRARY=str(root / "state" / "library.db")))
+    assert result.returncode == 0, result.stdout + result.stderr
+    restored = tmp_path / "restored"
+    with tarfile.open(_new_archives(dest)[0]) as archive:
+        archive.extract("./state/library.db", restored, filter="data")
+    with closing(sqlite3.connect(restored / "state" / "library.db")) as db:
+        assert db.execute("SELECT v FROM t WHERE v = 'new ID'").fetchone() == ("new ID",)
+
+
+@pytest.mark.integration
 def test_temporary_copies_stay_off_tmp(stack, tmp_path):
     # /tmp на хосте станции — tmpfs: снимки баз там едят ОЗУ. Временный каталог
     # — в каталоге стека (тот же диск, что базы), и после прогона его нет
@@ -210,8 +293,12 @@ def test_remote_mode_runs_the_script_on_the_station_host(stack, tmp_path):
         f.chmod(0o755)
     log = tmp_path / "ssh-args.txt"
     env = {k: v for k, v in os.environ.items() if not k.startswith("BACKUP_")}
-    env.update(PATH=str(fakebin) + os.pathsep + os.environ["PATH"], FAKE_SSH_LOG=str(log))
-    r = _run([str(station / "tools" / "backup.sh"), "--remote"], env)
+    env.update(FAKE_BIN=str(fakebin), FAKE_SSH_LOG=str(log))
+    # Git Bash на Windows может поставить /usr/bin перед унаследованным PATH.
+    # Добавляем подставные команды после входа в bash, до первого ssh.
+    r = _run(["-c", 'fake=$(cd "$FAKE_BIN" && pwd) || exit; '
+              'export PATH="$fake:$PATH"; exec "$BASH" "$@"',
+              "backup-fixture", str(station / "tools" / "backup.sh"), "--remote"], env)
     assert r.returncode == 0, r.stdout + r.stderr
     assert len(_new_archives(dest)) == 1
     args = log.read_text(encoding="utf-8").splitlines()

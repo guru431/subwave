@@ -9,7 +9,7 @@
 // "online" forever. node:assert-via-tsx style, matching llm-pure.test.ts.
 
 import assert from 'node:assert/strict';
-import { gatedCount, singleFlight, statusAfterFailure, type StreamStatus } from '../src/broadcast/listeners.js';
+import { gatedCount, getSourceOnline, probeListenerCount, singleFlight, statusAfterFailure, type StreamStatus } from '../src/broadcast/listeners.js';
 
 let failures = 0;
 function test(name: string, fn: () => void | Promise<void>) {
@@ -29,6 +29,27 @@ const online: StreamStatus = {
 };
 
 async function main() {
+  await test('Icecast source status distinguishes an empty station from an unavailable reading', async () => {
+    assert.equal(getSourceOnline(), null);
+    const fetch = globalThis.fetch;
+    const readings = [
+      Response.json({}, { status: 502 }),
+      Response.json({}),
+      Response.json({ icestats: { source: { listenurl: 'http://fixture.test/stream.mp3', listeners: 0 } } }),
+      Response.json({ icestats: {} }),
+      Response.json({ icestats: {} }, { status: 503 }),
+    ];
+    globalThis.fetch = async () => readings.shift()!;
+    try {
+      for (const expected of [null, null, true, false, null]) {
+        await probeListenerCount();
+        assert.equal(getSourceOnline(), expected);
+      }
+    } finally {
+      globalThis.fetch = fetch;
+    }
+  });
+
   console.log('statusAfterFailure (transient vs sustained outage):');
 
   await test('1st transient failure holds the last known online status', () => {

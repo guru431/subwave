@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { pollWhileVisible } from '@/lib/poll';
 import { ruPlural } from '@/lib/ru';
+import { useStationOrigin } from '@/lib/stationOrigin';
 
 interface Summary {
   total: number;
@@ -10,6 +11,7 @@ interface Summary {
 }
 
 export default function LibrarySummary({ onOpen }: { onOpen: () => void }) {
+  const { roomUrl } = useStationOrigin();
   const [summary, setSummary] = useState<Summary | null>(null);
 
   useEffect(() => {
@@ -20,7 +22,7 @@ export default function LibrarySummary({ onOpen }: { onOpen: () => void }) {
       pending = true;
       void (async () => {
         try {
-          const response = await fetch('/room/library', { signal: abort.signal });
+          const response = await fetch(`${roomUrl}/library`, { signal: abort.signal });
           if (!response.ok) throw new Error('library unavailable');
           const body = await response.json();
           if (!Number.isSafeInteger(body.total) || body.total < 0) throw new Error('invalid total');
@@ -33,7 +35,7 @@ export default function LibrarySummary({ onOpen }: { onOpen: () => void }) {
       })();
     }, 60_000);
     return () => { stop(); abort.abort(); };
-  }, []);
+  }, [roomUrl]);
 
   return (
     <button

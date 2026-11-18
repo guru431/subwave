@@ -24,7 +24,7 @@ import { validatePublicBody } from '../middleware/validate.js';
 import { listenerRequestSchema } from '../schemas/request.js';
 import { shuffle } from '../util/shuffle.js';
 import { requestWaitClause } from '../broadcast/queue/pure.js';
-import { readReceipt, saveReceipt } from '../broadcast/request-receipts.js';
+import { readReceipt, saveReceipt, type Receipt } from '../broadcast/request-receipts.js';
 
 export const router = express.Router();
 
@@ -59,7 +59,7 @@ function pruneRequests() {
   const cutoff = Date.now() - REQUEST_TTL_MS;
   const queuedIds = queue.queuedIds();
   for (const [id, entry] of requests) {
-    if (entry.createdAt < cutoff) requests.delete(id);
+    if (entry.status !== 'pending' && entry.createdAt < cutoff) requests.delete(id);
   }
   for (const [ip, entry] of lastByIp) {
     if (entry.createdAt < cutoff && !stillInFlight(entry, queuedIds)) lastByIp.delete(ip);
@@ -844,11 +844,10 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
       retryAfter,
     });
   }
-  // LISTENER requests only — an operator's own studio push carries
-  // `requestedBy: 'studio'` for the air-path exemptions and must not consume a
-  // slot in the listener queue. See queue.pendingListenerRequests().
-  const pendingCount = queue.pendingListenerRequests();
-  if (pendingCount >= (Number(cfg.maxPending) || 6)) {
+  // Reserve while the accepted request is resolving. Queue.push transfers the
+  // reservation to the queued occurrence in the same synchronous insertion.
+  const id = randomUUID();
+  if (!queue.reserveListenerRequest(id, Number(cfg.maxPending) || 6)) {
     res.setHeader('Retry-After', String(retryAfter));
     return res.status(429).json({
       success: false,
@@ -857,7 +856,6 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
     });
   }
 
-  const id = randomUUID();
   const entry: any = {
     id, status: 'pending', requester, text,
     rawText: sanitizeRequestText(rawText),
@@ -870,6 +868,7 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
   };
   try { saveReceipt(id, { phase: 'accepted' }); }
   catch {
+    queue.releaseListenerRequest(id);
     return res.status(503).json({ success: false, message: 'Не удалось сохранить заказ — попробуйте позже.' });
   }
   // Only a durably accepted request spends the hourly budgets. Queue-state
@@ -885,7 +884,7 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
   // Hand back a receipt and let go of the connection.
   res.status(202).json({ success: true, requestId: id, status: 'pending' });
 
-  resolveRequest(entry).catch(err => {
+  resolveRequest(entry).finally(() => queue.releaseListenerRequest(id)).catch(err => {
     queue.log('error', `Request resolution crashed: ${err.message}`);
     entry.status = 'failed';
     entry.message = 'В студии что-то пошло не так — попробуйте ещё раз.';
@@ -893,34 +892,53 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
   });
 });
 
-// Poll for the outcome of a submitted request.
-router.get('/request/:id', (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  const entry = requests.get(req.params.id);
-  let receipt = readReceipt(req.params.id);
-  if (!receipt) {
-    // Never existed, or pruned / lost to a restart; the UI stops polling.
-    return res.status(404).json({ status: 'unknown' });
-  }
-  const item = queue.upcoming.find(i => i.requestId === receipt!.id);
-  const aired = [queue.current, ...queue.history].find(i => i?.requestId === receipt!.id);
+function requestStatus(initial: Receipt) {
+  const id = initial.id;
+  const item = queue.upcoming.find(i => i.requestId === id);
+  const aired = [queue.current, ...queue.history].find(i => i?.requestId === id);
   if (aired?.startedAt) {
-    saveReceipt(receipt.id, { phase: 'aired', airedAt: aired.startedAt });
+    saveReceipt(id, { phase: 'aired', airedAt: aired.startedAt });
   } else if (item) {
-    saveReceipt(receipt.id, { phase: 'queued', track: item.track });
-  } else if (receipt.phase === 'queued') {
-    saveReceipt(receipt.id, { phase: 'removed', message: 'Заказ снят или прошёл во время перезапуска; подтверждения начала эфира нет.' });
-  } else if (!entry && (receipt.phase === 'accepted' || receipt.phase === 'searching')) {
-    saveReceipt(receipt.id, { phase: 'failed', message: 'Поиск прерван перезапуском. Можно отправить заказ снова.' });
+    saveReceipt(id, { phase: 'queued', track: item.track });
+  } else if (initial.phase === 'queued') {
+    saveReceipt(id, { phase: 'removed', message: 'Заказ снят или прошёл во время перезапуска; подтверждения начала эфира нет.' });
+  } else if (!requests.has(id) && (initial.phase === 'accepted' || initial.phase === 'searching')) {
+    saveReceipt(id, { phase: 'failed', message: 'Поиск прерван перезапуском. Можно отправить заказ снова.' });
   }
-  receipt = readReceipt(receipt.id)!;
+  const receipt = readReceipt(id) ?? initial;
   const pending = receipt.phase === 'accepted' || receipt.phase === 'searching';
-  res.json({ ...receipt, requestId: receipt.id,
+  return { ...receipt, requestId: id,
     status: pending ? 'pending' : ['failed', 'removed'].includes(receipt.phase) ? 'failed' : 'resolved',
     success: !pending && !['failed', 'removed', 'declined'].includes(receipt.phase),
+    canCancel: receipt.phase === 'queued' && !!item && queue.canCancelListenerRequest(item),
     queuePosition: item ? queue.upcoming.indexOf(item) + 1 : null,
     estimatedWaitSec: item ? queue.airForecastSec(item) : null,
     waitReason: item ? (queue.upcoming.slice(0, queue.upcoming.indexOf(item)).some(i => i.block)
       ? 'Перед заказом играет блок треков.' : 'Ожидает своей очереди и уже переданных микшеру треков.') : null,
-  });
+  };
+}
+
+router.get('/request/:id', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const receipt = readReceipt(req.params.id);
+  if (!receipt) return res.status(404).json({ status: 'unknown' });
+  return res.json(requestStatus(receipt));
+});
+
+router.delete('/request/:id', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const receipt = readReceipt(req.params.id);
+  if (!receipt) return res.status(404).json({ status: 'unknown' });
+  let cancelled = receipt.cancelledByListener === true;
+  try {
+    if (!cancelled && receipt.phase === 'queued' && queue.cancelListenerRequest(receipt.id)) {
+      cancelled = true;
+      const entry = requests.get(receipt.id);
+      if (entry) entry.status = 'cancelled';
+    }
+  } catch (err) {
+    queue.log('error', `Request withdrawal failed: ${(err as Error).message}`);
+    return res.status(503).json({ message: 'Не удалось отозвать заказ. Попробуйте ещё раз.' });
+  }
+  return res.status(cancelled ? 200 : 409).json(requestStatus(readReceipt(receipt.id) ?? receipt));
 });

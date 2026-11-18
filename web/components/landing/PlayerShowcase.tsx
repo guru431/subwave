@@ -153,7 +153,7 @@ export default function PlayerShowcase({ stations = [] }: PlayerShowcaseProps) {
 
       <div className="bs-frame-screen">
         <StationOriginProvider value={origin}>
-          <PlayerApp key={active?.slug ?? 'local'} contained />
+          <PlayerApp key={`${active?.slug ?? 'local'}:${origin.apiUrl}`} contained />
         </StationOriginProvider>
       </div>
     </div>

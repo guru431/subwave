@@ -88,6 +88,8 @@ function refused(err: unknown): boolean {
 // Потеря ставится только после отказа subscribe(), а до него ключ уже получен, —
 // поэтому к показу плашки он здесь всегда, и renewPush не ждёт сети.
 let primed: { reg: ServiceWorkerRegistration; key: string } | null = null;
+let chatGeneration = 0;
+let chatWrite = Promise.resolve(true);
 
 /** Подписаться — или обновить подписку: комната ловит упоминание по имени,
  *  и имя, сменённое после подписки, должно до неё доехать. Потеря — только
@@ -95,6 +97,7 @@ let primed: { reg: ServiceWorkerRegistration; key: string } | null = null;
  *  без push потерь не знает: у него остаются уведомления страницы. */
 export async function enablePush(): Promise<boolean> {
   if (!pushSupported() || Notification.permission !== 'granted') return false;
+  const generation = chatGeneration;
   try {
     const reg = await navigator.serviceWorker.ready;
     const res = await fetch(`${ROOM}/push/key`);
@@ -115,12 +118,12 @@ export async function enablePush(): Promise<boolean> {
           applicationServerKey: keyBytes(key),
         });
       } catch (err) {
-        if (refused(err)) setLost(true);
+        if (generation === chatGeneration && refused(err)) setLost(true);
         return false;
       }
     }
-    setLost(false);
-    return await save(sub);
+    if (generation === chatGeneration) setLost(false);
+    return await save(sub, generation);
   } catch {
     return false;
   }
@@ -133,6 +136,7 @@ export async function enablePush(): Promise<boolean> {
  *  уходит уже после. Без них — обычный путь. */
 export async function renewPush(): Promise<boolean> {
   if (!primed || !pushSupported()) return enablePush();
+  const generation = chatGeneration;
   let sub: PushSubscription;
   try {
     sub = await primed.reg.pushManager.subscribe({
@@ -140,43 +144,47 @@ export async function renewPush(): Promise<boolean> {
       applicationServerKey: keyBytes(primed.key),
     });
   } catch (err) {
-    if (refused(err)) setLost(true);
+    if (generation === chatGeneration && refused(err)) setLost(true);
     return false;
   }
-  setLost(false);
-  try {
-    return await save(sub);
-  } catch {
-    return false;
-  }
+  if (generation === chatGeneration) setLost(false);
+  return save(sub, generation);
 }
 
-async function save(sub: PushSubscription): Promise<boolean> {
-  const saved = await fetch(`${ROOM}/push/subscribe`, {
-    method: 'POST',
-    headers: headers(),
-    body: JSON.stringify({ subscription: sub.toJSON() }),
+function writeChatSubscription(write: () => Promise<boolean>): Promise<boolean> {
+  chatWrite = chatWrite.then(write).catch(() => false);
+  return chatWrite;
+}
+
+function save(sub: PushSubscription, generation: number): Promise<boolean> {
+  return writeChatSubscription(async () => {
+    if (generation !== chatGeneration) return false;
+    const saved = await fetch(`${ROOM}/push/subscribe`, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({ subscription: sub.toJSON() }),
+    });
+    return saved.ok;
   });
-  return saved.ok;
 }
 
-export async function disablePush(): Promise<void> {
+export function disablePush(): Promise<boolean> {
+  chatGeneration++;
   setLost(false);
-  if (!pushSupported()) return;
-  try {
+  return writeChatSubscription(async () => {
+    if (!pushSupported()) return true;
     const reg = await navigator.serviceWorker.getRegistration();
     const sub = await reg?.pushManager.getSubscription();
-    if (!sub) return;
+    if (!sub) return true;
     const { endpoint } = sub;
-    await sub.unsubscribe();
-    await fetch(`${ROOM}/push/unsubscribe`, {
+    // One browser endpoint can also carry separately authorized request receipts.
+    const response = await fetch(`${ROOM}/push/unsubscribe`, {
       method: 'POST',
       headers: headers(),
       body: JSON.stringify({ endpoint }),
     });
-  } catch {
-    /* комната забудет подписку сама — по первому 410 от push-сервиса */
-  }
+    return response.ok;
+  });
 }
 
 /** Separate, explicit consent for one receipt. Does not subscribe to chat. */

@@ -14,6 +14,8 @@ export interface Receipt {
   ack?: string | null;
   message?: string | null;
   airedAt?: string;
+  cancelledByListener?: boolean;
+  failureReason?: 'audio-unavailable';
 }
 const RETENTION_MS = 7 * 24 * 3600_000;
 let loadedPath = '';
@@ -54,9 +56,17 @@ export function readReceipt(id: string, now = Date.now()): Receipt | null {
   return row && row.createdAt >= now - RETENTION_MS ? { ...row } : null;
 }
 
+// Recovery must respect a durable withdrawal or mixer failure even if the
+// controller stopped before the debounced queue snapshot removed the item.
+export function receiptPreventsResend(id: string): boolean {
+  load();
+  return rows[id]?.cancelledByListener === true || rows[id]?.failureReason === 'audio-unavailable';
+}
+
 export function saveReceipt(id: string, patch: Partial<Omit<Receipt, 'id'>>, now = Date.now()): void {
   const file = load();
   const prev = rows[id];
+  if (prev?.cancelledByListener || prev?.failureReason === 'audio-unavailable') return;
   // Slow intro/ack completion must never turn an aired receipt back into queued.
   const phase = patch.phase === 'aired' ? 'aired'
     : prev && terminal.has(prev.phase) ? prev.phase : (patch.phase ?? prev?.phase ?? 'accepted');

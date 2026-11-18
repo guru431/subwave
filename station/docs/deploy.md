@@ -86,8 +86,6 @@ cd <stack-dir>
 cp <репозиторий>/docker-compose.yml .                               # версия апстрима под форком
 cp <репозиторий>/station/deploy/docker-compose.override.yml .      # наши образы, голоса Piper, комната, корни УЦ
 cp <репозиторий>/station/deploy/caddy/Caddyfile caddy/              # маршрут /room/*
-cp <репозиторий>/station/deploy/.env.example .env && chmod 600 .env
-# заполнить .env: ADMIN_PASS, PUSH_SUBJECT, NAVIDROME_* и прочее — из менеджера секретов
 
 # голоса Piper: английский — из собранного образа контроллера (контейнера ещё нет,
 # поэтому create + cp, а не exec), русский — с HuggingFace; имя — то, что в PIPER_VOICE
@@ -95,14 +93,28 @@ cid=$(sudo docker create subwave-controller:<версия>-ru)
 sudo docker cp "$cid":/opt/piper/voices/. piper-voices/ && sudo docker rm "$cid"
 B=https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU/irina/medium
 (cd piper-voices && curl -fsSL -O "$B/ru_RU-irina-medium.onnx" -O "$B/ru_RU-irina-medium.onnx.json")
-
-sudo docker compose up -d
 ```
 
-**Восстановление, а не новая установка:** до `up -d` вернуть из резервной копии `state/`
-(настройки, `library.db`, сессия) и `room/` — в нём `vapid.pem`, и новый ключ обесценил
-бы подписки Web Push у всех слушателей разом. Пустые каталоги на их месте дают станцию,
-которая играет, но всё забыла.
+**Новая установка.** В каталоге стека создать ссылку на защищённый файл с секретами.
+
+```bash
+(
+set -e
+test ! -e .env && test ! -L .env || exit 1
+sudo install -d -o root -g root -m 0700 /etc/subwave
+sudo test ! -e /etc/subwave/subwave.env && sudo test ! -L /etc/subwave/subwave.env || exit 1
+sudo install -o root -g root -m 0600 <репозиторий>/station/deploy/.env.example /etc/subwave/subwave.env
+sudoedit /etc/subwave/subwave.env     # ADMIN_PASS, PUSH_SUBJECT, NAVIDROME_* — из менеджера секретов
+sudo ln -sT /etc/subwave/subwave.env .env
+test "$(readlink .env)" = /etc/subwave/subwave.env
+test "$(sudo stat -c '%u:%g:%a' /etc/subwave/subwave.env)" = 0:0:600
+sudo docker compose up -d
+)
+```
+
+**Восстановление:** подготовить каталоги, compose и голоса. Установить секреты, `state/`
+и `room/` из архива по [шагам восстановления](#бэкап-и-восстановление). В `room/`
+хранится прежний `vapid.pem`, от которого зависят подписки Web Push.
 
 **`docker-compose.yml` берётся из форка, а не из `main` апстрима**, и образы апстрима
 закрепляются тегом (`SUBWAVE_VERSION` в `.env`): иначе следующий `docker compose pull`
@@ -118,9 +130,9 @@ sudo docker inspect --format '{{.Config.Image}} {{.Image}}' \
 `ADMIN_USER`/`ADMIN_PASS`), либо воспроизводимо, скриптом:
 
 ```bash
-# переменные — из .env (см. .env.example, блок onboard.py)
-set -a && . ./.env && set +a
-python3 <репозиторий>/station/onboard/onboard.py
+# переменные — из защищённого файла (см. .env.example, блок onboard.py)
+sudo bash -c 'set -a; . /etc/subwave/subwave.env && exec python3 "$1"' \
+  bash <репозиторий>/station/onboard/onboard.py
 ```
 
 Скрипт делает пробы Navidrome и LLM, и **сохраняет настройки только если обе прошли**:
@@ -667,9 +679,10 @@ Navidrome из подсети стека (`docker network inspect <сеть ст
 
 | В архиве | Как снято |
 |---|---|
-| `.env` стека | копией, с владельцем и правами |
+| `.env` | содержимое защищённого файла `/etc/subwave/subwave.env`, режим `0600` |
 | `state/library.db`, `room/room.db` | снимком SQLite (backup API): базы живые и в WAL, копия файла посреди записи — битая база |
 | `state/*.json`, `state/*.env` | копией; маркеры эфира (`*-playing.json`, `pause-talk-*.json`, `music-starved.json`) — нет, восстановленные они выдали бы вчерашний трек за текущий |
+| `state/room-rotations/*.json` | ожидающие карты переноса ID, снятые между снимками `library.db` и `room.db`. Если библиотека изменилась за это время, снимок повторяется. Уже применённую карту можно повторить |
 | `room/vapid.pem` | копией |
 
 Не входят: голоса Piper (`piper-voices/` — скачиваются заново), джинглы и голоса в
@@ -709,29 +722,53 @@ sudo mkdir -p <share>/radio/backup && sudo chmod 700 <share>/radio/backup
 bash station/tools/backup.sh --remote
 ```
 
-**Восстановление.** На живом хосте — по шагам ниже; на новом — сперва раздел «Установка
-и восстановление с нуля» до `docker compose up -d`, причём `.env` берётся из архива, а
-не из шаблона.
+**Восстановление.** На новом хосте сначала подготовить каталоги, compose и голоса по
+разделу «Установка и восстановление с нуля». Защищённый файл берётся из архива. На
+живом хосте шаг `docker compose down` останавливает стек перед заменой баз.
 
 ```bash
+(
+set -e
 cd <stack-dir>
 A=<share>/radio/backup/station-backup-YYYYMMDD-HHMMSS.tar.gz
-tar -tzf "$A"                          # архив читается целиком
-sudo docker compose down               # базы не должны быть открыты
+sudo tar -tzf "$A"                     # архив читается целиком
+# sudo docker compose down             # выполнить на хосте с работающим стеком
+sudo bash -se -- "$A" <<'RESTORE_ENV'
+install -d -o root -g root -m 0700 /etc/subwave
+tmp=$(mktemp /etc/subwave/subwave.env.XXXXXX)
+trap 'rm -f -- "$tmp"' EXIT
+tar -xOzf "$1" ./.env > "$tmp"
+chown root:root "$tmp"
+chmod 0600 "$tmp"
+mv -fT -- "$tmp" /etc/subwave/subwave.env
+RESTORE_ENV
+sudo ln -sfnT /etc/subwave/subwave.env .env
 # журналы WAL прежних баз — удалить: применённые к восстановленной базе, они её испортят
 sudo rm -f state/library.db-wal state/library.db-shm room/room.db-wal room/room.db-shm
-sudo tar -xzf "$A" -C .                # владельцы и права — как были
+# Старый набор карт относится к прежней базе. Сохранить его для отката.
+if [ -d state/room-rotations ]; then
+  sudo mv -T state/room-rotations "state/room-rotations.pre-restore-$(date +%Y%m%d-%H%M%S)"
+fi
+sudo mkdir -p state/room-rotations
+sudo tar --exclude='./.env' -xzf "$A" -C .  # владельцы и права данных — как были
 sudo python3 -c 'import sqlite3, sys
+from pathlib import Path
 for p in sys.argv[1:]:
-    print(p, sqlite3.connect(p).execute("PRAGMA integrity_check").fetchone()[0])' \
-  state/library.db room/room.db         # обе — ok
+    with sqlite3.connect(Path(p).resolve().as_uri() + "?mode=ro", uri=True) as conn:
+        if conn.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
+            raise SystemExit(f"{p}: integrity_check failed")
+    print(p, "ok")' state/library.db room/room.db
+test "$(readlink .env)" = /etc/subwave/subwave.env
+test "$(sudo stat -c '%u:%g:%a' /etc/subwave/subwave.env)" = 0:0:600
 sudo docker compose up -d
-curl -fsS http://127.0.0.1:7700/api/health && curl -fsS http://127.0.0.1:7700/room/health
+curl -fsS http://127.0.0.1:7700/api/health
+curl -fsS http://127.0.0.1:7700/room/health
+)
 ```
 
 Мастер `/onboarding` после этого не нужен: `settings.json` и `setup-config.json`
-восстановлены. **Проверка без восстановления** — та же распаковка во временный каталог
-(`T=$(mktemp -d); tar -xzf "$A" -C "$T"`) и `integrity_check` по `$T/state/library.db` и
+восстановлены. **Проверка без восстановления** — распаковка баз во временный каталог
+(`T=$(mktemp -d); tar -xzf "$A" -C "$T" ./state/library.db ./room/room.db`) и `integrity_check` по `$T/state/library.db` и
 `$T/room/room.db`; скрипт делает её сам при каждом прогоне.
 
 ## Сторож эфира
@@ -761,9 +798,9 @@ curl -fsS http://127.0.0.1:7700/api/health && curl -fsS http://127.0.0.1:7700/ro
 **Почему поток — отдельная проверка.** Упавший микшер (`broadcast`) не виден ни в одной
 другой: `music-starved.json` перестаёт обновляться, и через 60 с контроллер отвечает
 «не голодает» (`music-starve-pure.ts` считает устаревший маркер ложной тревогой),
-`/api/health` — константа `on-air`, комната жива. Тишину выдаёт только сам эфир:
-Icecast без источника и `nowPlaying.timestamp` (radio.liq пишет его в начале каждого
-трека), который давно перерос длину трека. Запас 5 минут — на стык, джингл и паузу
+`/api/health` — константа `on-air`, комната жива. Сторож проверяет источник Icecast
+и возраст `nowPlaying.timestamp` (radio.liq пишет его в начале каждого трека).
+Запас 5 минут — на стык, джингл и паузу
 ведущей между песнями: они идут без нового `now-playing`. Остановленный оператором
 поток (`stream_down`) — тоже «эфир стоит», и это верно: слушатели его не слышат.
 
@@ -781,3 +818,12 @@ Icecast без источника и `nowPlaying.timestamp` (radio.liq пише�
 
 Ручная проверка: `python station/tools/watch.py` — по строке на проверку (`bridge: ok`,
 `air: музыка на аварийной петле с 03:10 (сбой 5 мин)` …).
+
+Замер слышимого эфира по запросу оператора: `python station/tools/watch.py --audio`.
+Нужны `WATCH_STATION_URL` и FFmpeg в `PATH`. Команда замеряет до 10 секунд на
+публичном `/stream.mp3`, показывает время замера (UTC), полученную длительность,
+пиковый и RMS-уровни в dBFS и интервалы тишины с шагом 0,25 с (пик ≤ −50 dBFS).
+Рядом выводится `streamIdle` перед открытием потока. Код `1` означает, что декодируемых
+аудиокадров нет. Если получен сигнал или тишина, результат выводится с кодом `0`,
+включая частичный замер при таймауте. Команда читает звук в памяти и не меняет
+состояние сторожа.

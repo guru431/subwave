@@ -4,6 +4,7 @@
 минуту» — вопрос к тем же сообщениям.
 """
 import importlib.util
+import json
 import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
@@ -16,6 +17,9 @@ _spec = importlib.util.spec_from_file_location("room_store", STORE)
 store_mod = importlib.util.module_from_spec(_spec)
 sys.modules["room_store"] = store_mod
 _spec.loader.exec_module(store_mod)
+_rotation_spec = importlib.util.spec_from_file_location("room_rotations", STORE.parent / "rotations.py")
+rotations = importlib.util.module_from_spec(_rotation_spec)
+_rotation_spec.loader.exec_module(rotations)
 
 T0 = datetime(2026, 9, 22, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -46,16 +50,12 @@ def test_rotation_merges_votes_and_keeps_newer_keep_decision(store):
 
 
 def test_rotation_outbox_combines_batches_before_commit(store, tmp_path):
-    import json
-    spec = importlib.util.spec_from_file_location("room_rotations", ROOT_ROTATIONS)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
     store.set_dislike(dis(target="old", song_id="old"), cap=20, now=T0)
     directory = tmp_path / "rotations"
     directory.mkdir()
     for name, mapping in [("a", {"mid": "new"}), ("z", {"old": "mid"})]:
         (directory / f"{name}.json").write_text(json.dumps({"version": 1, "trackMap": mapping}), encoding="utf-8")
-    mod.sync(store, str(directory))
+    rotations.sync(store, str(directory))
     assert store.all_dislikes()[0]["target"] == "new"
     assert list(directory.iterdir()) == []
 
@@ -71,40 +71,40 @@ def test_failed_rotation_rolls_back_votes_and_decisions(store):
     assert store.all_dislikes() == before and store.decisions() == decisions
 
 
-ROOT_ROTATIONS = STORE.parent / "rotations.py"
-
-
-def test_corrupt_rotation_is_quarantined_without_blocking_valid_batch(store, tmp_path, caplog):
-    import json
-    spec = importlib.util.spec_from_file_location("room_rotations_corrupt", ROOT_ROTATIONS)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+@pytest.mark.parametrize("payload", [b'{"version":', b'null', b'[]', b'{"version":1,"trackMap":{"old":null}}'])
+def test_corrupt_rotation_is_quarantined_without_blocking_valid_batch(store, tmp_path, caplog, payload):
     store.set_dislike(dis(target="old", song_id="old"), cap=20, now=T0)
     bad = tmp_path / "a.json"
-    bad.write_bytes(b'{"version":')
+    bad.write_bytes(payload)
     good = tmp_path / "z.json"
     good.write_text(json.dumps({"version": 1, "trackMap": {"old": "new"}}), encoding="utf-8")
-    mod.sync(store, str(tmp_path))
+    rotations.sync(store, str(tmp_path))
     assert store.all_dislikes()[0]["target"] == "new"
     assert not bad.exists() and not good.exists()
     rejected = list(tmp_path.glob("a.json.*.invalid"))
-    assert len(rejected) == 1 and rejected[0].read_bytes() == b'{"version":'
+    assert len(rejected) == 1 and rejected[0].read_bytes() == payload
     assert "a.json" in caplog.text
-    mod.sync(store, str(tmp_path))
+    rotations.sync(store, str(tmp_path))
     assert store.all_dislikes()[0]["target"] == "new"
 
 
-@pytest.mark.parametrize("payload", [[], "text", 12, None])
-def test_rotation_rejects_non_objects_without_consuming_them(store, tmp_path, payload):
-    import json
-    spec = importlib.util.spec_from_file_location("room_rotations_invalid", ROOT_ROTATIONS)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+def test_rotation_keeps_unknown_version_for_a_compatible_room(store, tmp_path):
     path = tmp_path / "batch.json"
-    path.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(ValueError, match="неверная карта"):
-        mod.sync(store, str(tmp_path))
+    path.write_text(json.dumps({"version": 2, "trackMap": {"old": "new"}}), encoding="utf-8")
+    with pytest.raises(ValueError, match="версия"):
+        rotations.sync(store, str(tmp_path))
     assert path.exists()
+
+
+def test_empty_rotation_skips_sql_and_still_consumes_empty_batch(store, tmp_path):
+    requests = []
+    store.db.set_trace_callback(requests.append)
+    rotations.sync(store, str(tmp_path))
+    path = tmp_path / "empty.json"
+    path.write_text('{"version":1,"trackMap":{}}', encoding="utf-8")
+    rotations.sync(store, str(tmp_path))
+    assert requests == []
+    assert not path.exists()
 
 
 def test_added_message_comes_back(store):

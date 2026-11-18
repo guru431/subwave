@@ -1605,7 +1605,7 @@ def on_meta(m) =
     pause_talk_on_air := false
     jingle_now_on_air := false
     log("on_meta: title=#{title} | artist=#{artist} | album=#{album} | id=#{subsonic_id}")
-    ts = int_of_float(time())
+    ts = time()
     # json.stringify, not interpolation: titles with embedded quotes or
     # backslashes produce invalid JSON.
     payload = json.stringify(compact=true, {
@@ -1613,6 +1613,8 @@ def on_meta(m) =
       artist = artist,
       album = album,
       subsonic_id = subsonic_id,
+      subwave_play_id = m["subwave_play_id"],
+      subwave_clip = m["subwave_clip"],
       filename = filename,
       timestamp = ts
     })

@@ -96,7 +96,7 @@ export default function BackupPanel() {
   const [importErr, setImportErr] = useState<string | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
 
-  const [restarting, setRestarting] = useState(false);
+  const [restart, setRestart] = useState<{ state: 'pending' | 'accepted' } | { state: 'failed'; message: string } | null>(null);
 
   // Seeded from the stored value, re-seeded only when that value MOVES: the
   // query keeps polling, so re-seeding per poll would clobber half-typed input.
@@ -277,6 +277,7 @@ export default function BackupPanel() {
         await queryClient.invalidateQueries({ refetchType: 'active' });
       }
       setResult(j);
+      setRestart(null);
     } catch (e) {
       // 413 = a proxy rejected the upload; point at the disk path instead.
       if (p.kind === 'upload' && e instanceof AdminResponseError && e.status === 413) {
@@ -295,13 +296,12 @@ export default function BackupPanel() {
   };
 
   const restartMixer = async () => {
-    setRestarting(true);
+    setRestart({ state: 'pending' });
     try {
       await adminResponse(adminFetch, '/restart-mixer', { method: 'POST' });
-    } catch {
-      /* surfaced elsewhere; best-effort */
-    } finally {
-      setRestarting(false);
+      setRestart({ state: 'accepted' });
+    } catch (error) {
+      setRestart({ state: 'failed', message: error instanceof Error ? error.message : 'Mixer restart failed.' });
     }
   };
 
@@ -450,10 +450,15 @@ export default function BackupPanel() {
             {result.restored?.length ? result.restored.join(', ') : '(nothing)'}
             {result.requiresRestart && (
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <span className="text-muted">Mixer settings changed. Restart to apply.</span>
-                <Btn sm tone="danger" onClick={restartMixer} disabled={restarting}>
-                  {restarting ? 'Restarting…' : 'Restart mixer'}
-                </Btn>
+                {restart?.state === 'accepted' ? (
+                  <span role="status">Mixer restart accepted.</span>
+                ) : <>
+                  <span className="text-muted">Mixer settings changed. Restart to apply.</span>
+                  <Btn sm tone="danger" onClick={restartMixer} disabled={importing || restart?.state === 'pending'}>
+                    {restart?.state === 'pending' ? 'Restarting…' : 'Restart mixer'}
+                  </Btn>
+                  {restart?.state === 'failed' && <span role="alert">{restart.message}</span>}
+                </>}
               </div>
             )}
           </div>
@@ -469,7 +474,7 @@ export default function BackupPanel() {
         <Btn
           tone="solid"
           onClick={() => fileRef.current?.click()}
-          disabled={importing}
+          disabled={importing || restart?.state === 'pending'}
         >
           {importing && pending?.kind === 'upload' ? 'Restoring…' : 'Choose backup zip…'}
         </Btn>
@@ -538,7 +543,7 @@ export default function BackupPanel() {
                     sm
                     tone="solid"
                     onClick={() => pickDisk(f.name)}
-                    disabled={importing}
+                    disabled={importing || restart?.state === 'pending'}
                   >
                     {importing && pending?.kind === 'disk' && pending.name === f.name
                       ? 'Restoring…'

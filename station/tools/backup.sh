@@ -76,18 +76,63 @@ STACK=$(cd "$STACK" && pwd)
 # копия файла посреди записи — битая база. Владелец и права — как у исходника:
 # снимок пишет root, а распакованная база должна открываться службой.
 PY_SNAPSHOT='
-import os, sqlite3, sys
+import os, shutil, sqlite3, sys
+from contextlib import closing
 from pathlib import Path
-src_path, dst_path = sys.argv[1], sys.argv[2]
-src = sqlite3.connect(Path(src_path).resolve().as_uri() + "?mode=rw", uri=True, timeout=30)
-dst = sqlite3.connect(dst_path)
-src.backup(dst)
-dst.close()
-src.close()
-st = os.stat(src_path)
-os.chmod(dst_path, st.st_mode & 0o7777)
-if hasattr(os, "chown") and os.geteuid() == 0:
-    os.chown(dst_path, st.st_uid, st.st_gid)
+
+stack, snap = map(Path, sys.argv[1:])
+library = Path("state/library.db")
+room = Path("room/room.db")
+cards = Path("state/room-rotations")
+(snap / cards).mkdir()
+
+def connect(path):
+    return sqlite3.connect(path.resolve().as_uri() + "?mode=rw", uri=True, timeout=30)
+
+def set_metadata(target, metadata):
+    os.chmod(target, metadata.st_mode & 0o7777)
+    if hasattr(os, "chown") and os.geteuid() == 0:
+        os.chown(target, metadata.st_uid, metadata.st_gid)
+
+def snapshot(source, relative):
+    with closing(sqlite3.connect(snap / relative)) as target:
+        source.backup(target)
+    set_metadata(snap / relative, (stack / relative).stat())
+
+def capture_cards():
+    try:
+        pending = list((stack / cards).iterdir())
+    except FileNotFoundError:
+        return
+    for card in pending:
+        if card.suffix != ".json":
+            continue
+        try:
+            source = card.open("rb")
+        except FileNotFoundError:
+            continue  # The consumer removed a committed card before we opened it.
+        with source:
+            target = snap / cards / card.name
+            with target.open("wb") as out:
+                shutil.copyfileobj(source, out)
+            set_metadata(target, os.fstat(source.fileno()))
+
+# A consumed card either gets copied here or is already in the later room
+# snapshot. Retry when the library changes during that window, so the room
+# cannot contain IDs newer than the library snapshot.
+with closing(connect(stack / library)) as source:
+    for attempt in range(3):
+        version = source.execute("PRAGMA data_version").fetchone()[0]
+        snapshot(source, library)
+        capture_cards()
+        with closing(connect(stack / room)) as room_source:
+            snapshot(room_source, room)
+        if source.execute("PRAGMA data_version").fetchone()[0] == version:
+            break
+        for card in (snap / cards).glob("*.json"):
+            card.unlink()
+    else:
+        sys.exit("library.db менялась во время снимка комнаты; повторите архивирование")
 '
 PY_CHECK='
 import sqlite3, sys
@@ -137,9 +182,11 @@ WORK=$(mktemp -d "$STACK/.station-backup-work.XXXXXX")
 
 SNAP="$WORK/snap"
 mkdir -p "$SNAP/state" "$SNAP/room"
-"$PY" -c "$PY_SNAPSHOT" "$STACK/state/library.db" "$SNAP/state/library.db"
-"$PY" -c "$PY_SNAPSHOT" "$STACK/room/room.db" "$SNAP/room/room.db"
+"$PY" -c "$PY_SNAPSHOT" "$STACK" "$SNAP"
+# Сохраняем содержимое канонического файла, чтобы архив можно было
+# восстановить на другом хосте, где цель ссылки ещё не создана.
 cp -p "$STACK/.env" "$SNAP/.env"
+chmod 600 "$SNAP/.env"
 cp -p "$STACK/room/vapid.pem" "$SNAP/room/vapid.pem"
 # в архив — только файлы: запись каталога унесла бы режим временного каталога
 # (700, root), и распаковка поверх стека переписала бы права state/ и самого стека
@@ -157,13 +204,20 @@ for f in "$STACK"/state/*.json "$STACK"/state/*.env; do
   n=$((n + 1))
 done
 
+# Карта может быть и в снимке, и уже применена в room.db: повтор безопасен.
+for f in "$SNAP"/state/room-rotations/*.json; do
+  [ -f "$f" ] || continue
+  FILES+=("./state/room-rotations/${f##*/}")
+  n=$((n + 1))
+done
+
 # --force-local: путь вида C:\… GNU tar иначе принимает за host:path
 tar --force-local -czf "$PART" -C "$SNAP" --no-recursion "${FILES[@]}"
 
 # проверка распаковки: список читается целиком (битый gzip падает здесь), базы
 # распаковываются отдельно и проходят integrity_check на копии
 LIST=$(tar --force-local -tzf "$PART")
-for m in "${REQUIRED[@]}"; do
+for m in "${FILES[@]}"; do
   case "
 $LIST
 " in

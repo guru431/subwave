@@ -7,6 +7,9 @@
 import importlib.util
 import io
 import json
+import shutil
+import struct
+import subprocess
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -98,9 +101,10 @@ class _Station(BaseHTTPRequestHandler):
 
     def do_GET(self):
         code, body = self.routes.get(self.path, (404, {"error": "not found"}))
-        raw = json.dumps(body).encode()
+        raw, content_type = ((body, "audio/mpeg") if isinstance(body, bytes)
+                             else (json.dumps(body).encode(), "application/json"))
         self.send_response(code)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
@@ -243,6 +247,57 @@ def test_unreachable_station_is_a_failure(monkeypatch):
 
 
 # ── main: канал, код выхода, состояние между запусками ───────────────────────
+
+@pytest.mark.parametrize("status,idle", [("no_audio", None), ("silence", True), ("signal", False)])
+def test_audio_checks_decoded_frames_and_idle_without_touching_watch_state(
+        status, idle, tmp_path, monkeypatch, capsys):
+    station_url = "http://station.example.org"
+    state_path = tmp_path / "watch.json"
+    state_path.write_bytes(b"keep")
+    quiet = struct.pack("<hh", 0, 0) * (watch.AUDIO_RATE // 4)
+    signal = struct.pack("<hh", -16384, 16384) * (watch.AUDIO_RATE // 4)
+
+    def read(url):
+        assert url == station_url + "/api/state"
+        return (200, {"streamIdle": idle}, "") if idle is not None else (502, None, "bad gateway")
+
+    def decode(cmd, *, capture_output, timeout):
+        assert cmd[cmd.index("-i") + 1] == station_url + "/stream.mp3"
+        assert capture_output and timeout == watch.AUDIO_TIMEOUT
+        if status == "no_audio":
+            return subprocess.CompletedProcess(cmd, 1, b"", b"HTTP 404")
+        if status == "silence":
+            return subprocess.CompletedProcess(cmd, 0, quiet, b"")
+        raise subprocess.TimeoutExpired(cmd, timeout, output=quiet + signal + b"\x00")
+
+    monkeypatch.setattr(watch.subprocess, "run", decode)
+    result = watch.main(["--audio"], now=lambda: T0, get=read,
+                        environ={"WATCH_STATION_URL": station_url + "/", "WATCH_STATE_FILE": str(state_path)},
+                        env_file=tmp_path / "absent")
+    out = capsys.readouterr().out
+    assert "+00:00" in out
+    assert state_path.read_bytes() == b"keep"
+    if status == "no_audio":
+        assert result == 1 and "Нет декодируемых аудиокадров" in out and "неизвестно" in out
+    elif status == "silence":
+        assert result == 0 and "Тишина" in out and "подключением: да" in out and "0.00–0.25 с" in out
+    else:
+        assert result == 0 and "Есть сигнал" in out and "подключением: нет" in out
+        assert "0.50 с. Пик -6.0 dBFS, RMS -9.0 dBFS" in out and "0.00–0.25 с" in out
+        assert "истекло время замера" in out
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="замер аудио требует FFmpeg")
+def test_audio_decodes_real_mp3_from_public_http_endpoint(station, tmp_path, capsys):
+    cfg, routes = station
+    mp3 = subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i",
+                          "sine=frequency=440:duration=0.75", "-c:a", "libmp3lame", "-f", "mp3", "pipe:1"],
+                         capture_output=True, check=True, timeout=10).stdout
+    routes["/stream.mp3"] = (200, mp3)
+    assert watch.main(["--audio"], now=lambda: T0, environ=cfg, env_file=tmp_path / "absent") == 0
+    assert "Есть сигнал" in capsys.readouterr().out
+
 
 def _env(cfg: dict, tmp_path: Path, notify: str = "") -> dict:
     return {**cfg, "WATCH_NOTIFY_CMD": notify,

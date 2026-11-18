@@ -72,6 +72,20 @@ def test_secrets_with_quotes_survive_as_values(api):
     assert calls[1]["payload"]["apiKey"] == "key\nwith\nnewlines"
 
 
+@pytest.mark.parametrize("export", [False, True])
+def test_unsupported_dry_run_stops_before_contacting_station(export, api, monkeypatch, tmp_path):
+    calls, _ = api
+    for key, value in ENV.items():
+        monkeypatch.setenv(key, value)
+    args = ["--dry-run"]
+    if export:
+        args.extend(["--export", str(tmp_path / "copy.json")])
+    with pytest.raises(SystemExit) as caught:
+        onboard.main(args)
+    assert caught.value.code == 2
+    assert calls == []
+
+
 def test_http_error_on_probe_stops_before_saving(api):
     calls, answers = api
     answers["/onboarding/test-navidrome"] = (401, {"error": "unauthorized"})

@@ -121,8 +121,10 @@ async function pollCount(persistHistory: boolean) {
   let channels: number | null = null;
   let rawCount = 0; // un-deduped status sum — the fallback when admin is unreachable
   try {
-    const r = await fetchWithTimeout(config.icecast.statusUrl, { timeoutMs: STATUS_TIMEOUT_MS });
+    const r = await fetchWithTimeout(config.icecast.statusUrl, { timeoutMs: STATUS_TIMEOUT_MS, bodyDeadline: true });
+    if (!r.ok) throw new Error('Icecast status unavailable');
     const ic = ((await r.json()) as any)?.icestats;
+    if (!ic || typeof ic !== 'object' || Array.isArray(ic)) throw new Error('Invalid Icecast status');
     const sources = Array.isArray(ic?.source) ? ic.source : ic?.source ? [ic.source] : [];
     // Only our two broadcast mounts count. Anything else (e.g. an /admin
     // source) is ignored so stray test mounts don't inflate the numbers.
@@ -206,6 +208,11 @@ export function presentListeners(): number | null {
 // Offline + 0/0 until the first successful poll.
 export function getStreamStatus(): StreamStatus {
   return lastStatus;
+}
+
+/** Whether Icecast has a source, with no reading represented separately. */
+export function getSourceOnline(): boolean | null {
+  return lastCount === null ? null : lastStatus.online;
 }
 
 // Force an immediate poll. Used by the request route so a listener who just

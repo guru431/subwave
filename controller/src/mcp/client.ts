@@ -80,6 +80,8 @@ export interface RequestSubmission {
 export interface RequestStatus {
   /** 'pending' | 'resolved' | 'failed' | 'unknown' (pruned or lost to a restart). */
   status: string;
+  phase?: string;
+  airedAt?: string | null;
   success?: boolean;
   /** DJ's spoken acknowledgement of the request, when matched. */
   ack?: string | null;
@@ -275,10 +277,10 @@ export class SubwaveClient {
 
   // -------------------------------------------------------------- public --
 
-  /** GET /health — liveness probe; resolves to true when the stream is on-air. */
-  async health(): Promise<boolean> {
-    const body = await this.call<{ status?: string }>("/health");
-    return body.status === "on-air";
+  /** GET /health — a successful response confirms controller liveness. */
+  async health(): Promise<{ reachable: true; onAir: boolean | null }> {
+    const body = await this.call<{ streamOnline?: unknown }>("/health");
+    return { reachable: true, onAir: typeof body?.streamOnline === "boolean" ? body.streamOnline : null };
   }
 
   /** GET /now-playing — current track, station context, listener counts. */

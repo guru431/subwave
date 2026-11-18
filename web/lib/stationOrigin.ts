@@ -25,6 +25,7 @@ export interface StationStreams {
 export interface StationOrigin {
   /** e.g. `/api`, or `https://radio.example.com/api`. */
   apiUrl: string;
+  roomUrl: string;
   streams: StationStreams;
 }
 
@@ -39,6 +40,7 @@ function defaultStreams(): StationStreams {
 
 export const DEFAULT_STATION_ORIGIN: StationOrigin = {
   apiUrl: API_URL,
+  roomUrl: '/room',
   streams: defaultStreams(),
 };
 
@@ -50,6 +52,7 @@ export function originForStation(siteUrl: string): StationOrigin {
   const base = siteUrl.replace(/\/+$/, '');
   return {
     apiUrl: `${base}/api`,
+    roomUrl: `${base}/room`,
     streams: { mp3: `${base}${MP3_PATH}`, opus: `${base}${OPUS_PATH}` },
   };
 }
